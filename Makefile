@@ -2,7 +2,7 @@ APP_NAME = FreeFlow
 BUNDLE_ID = com.hackclub.freeflow
 BUILD_DIR = build
 APP_BUNDLE = $(BUILD_DIR)/$(APP_NAME).app
-CODESIGN_IDENTITY ?= -
+CODESIGN_IDENTITY ?= VoiceToText Dev
 CONTENTS = $(APP_BUNDLE)/Contents
 MACOS_DIR = $(CONTENTS)/MacOS
 

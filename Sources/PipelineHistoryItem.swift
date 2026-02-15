@@ -7,6 +7,7 @@ struct PipelineHistoryItem: Identifiable, Codable {
     let postProcessedTranscript: String
     let postProcessingPrompt: String?
     let contextSummary: String
+    let contextPrompt: String?
     let contextScreenshotDataURL: String?
     let contextScreenshotStatus: String
     let postProcessingStatus: String
@@ -20,6 +21,7 @@ struct PipelineHistoryItem: Identifiable, Codable {
         postProcessedTranscript: String,
         postProcessingPrompt: String?,
         contextSummary: String,
+        contextPrompt: String?,
         contextScreenshotDataURL: String?,
         contextScreenshotStatus: String,
         postProcessingStatus: String,
@@ -33,6 +35,7 @@ struct PipelineHistoryItem: Identifiable, Codable {
         self.postProcessedTranscript = postProcessedTranscript
         self.postProcessingPrompt = postProcessingPrompt
         self.contextSummary = contextSummary
+        self.contextPrompt = contextPrompt
         self.contextScreenshotDataURL = contextScreenshotDataURL
         self.contextScreenshotStatus = contextScreenshotStatus
         self.postProcessingStatus = postProcessingStatus

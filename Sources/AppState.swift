@@ -541,6 +541,7 @@ class AppState: ObservableObject {
             postProcessedTranscript: postProcessedTranscript,
             postProcessingPrompt: postProcessingPrompt,
             contextSummary: context.contextSummary,
+            contextPrompt: context.contextPrompt,
             contextScreenshotDataURL: context.screenshotDataURL,
             contextScreenshotStatus: context.screenshotError
                 ?? "available (\(context.screenshotMimeType ?? "image"))",
@@ -595,6 +596,7 @@ class AppState: ObservableObject {
             windowTitle: frontmostApp?.localizedName,
             selectedText: nil,
             currentActivity: "Could not refresh app context at stop time; using text-only post-processing.",
+            contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,
             screenshotError: "No app context captured before stop"

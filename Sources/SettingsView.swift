@@ -313,6 +313,7 @@ struct RunLogEntryView: View {
     let item: PipelineHistoryItem
     @EnvironmentObject var appState: AppState
     @State private var isExpanded = false
+    @State private var showContextPrompt = false
     @State private var showPostProcessingPrompt = false
 
     private var isError: Bool {
@@ -426,6 +427,32 @@ struct RunLogEntryView: View {
                                             .frame(maxHeight: 120)
                                             .cornerRadius(4)
                                     }
+
+                                    if let prompt = item.contextPrompt, !prompt.isEmpty {
+                                        Button {
+                                            showContextPrompt.toggle()
+                                        } label: {
+                                            HStack(spacing: 4) {
+                                                Text(showContextPrompt ? "Hide Prompt" : "Show Prompt")
+                                                    .font(.caption)
+                                                Image(systemName: showContextPrompt ? "chevron.up" : "chevron.down")
+                                                    .font(.caption2)
+                                            }
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundStyle(Color.accentColor)
+
+                                        if showContextPrompt {
+                                            Text(prompt)
+                                                .font(.system(.caption2, design: .monospaced))
+                                                .textSelection(.enabled)
+                                                .padding(8)
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .background(Color(nsColor: .controlBackgroundColor))
+                                                .cornerRadius(4)
+                                        }
+                                    }
+
                                     if !item.contextSummary.isEmpty {
                                         Text(item.contextSummary)
                                             .font(.caption)

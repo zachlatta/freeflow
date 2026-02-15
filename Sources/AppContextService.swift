@@ -8,6 +8,7 @@ struct AppContext {
     let windowTitle: String?
     let selectedText: String?
     let currentActivity: String
+    let contextPrompt: String?
     let screenshotDataURL: String?
     let screenshotMimeType: String?
     let screenshotError: String?
@@ -58,6 +59,7 @@ final class AppContextService {
                 windowTitle: nil,
                 selectedText: nil,
                 currentActivity: "You are dictating in an unrecognized context.",
+                contextPrompt: nil,
                 screenshotDataURL: nil,
                 screenshotMimeType: nil,
                 screenshotError: "No frontmost application"
@@ -76,20 +78,27 @@ final class AppContextService {
             focusedWindowTitle: windowTitle
         )
         let currentActivity: String
+        let contextPrompt: String?
         if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            currentActivity = await inferActivityWithLLM(
+            if let result = await inferActivityWithLLM(
                 appName: appName,
                 bundleIdentifier: bundleIdentifier,
                 windowTitle: windowTitle,
                 selectedText: selectedText,
                 screenshotDataURL: screenshot.dataURL
-            ) ?? fallbackCurrentActivity(
-                appName: appName,
-                bundleIdentifier: bundleIdentifier,
-                selectedText: selectedText,
-                windowTitle: windowTitle,
-                screenshotAvailable: screenshot.dataURL != nil
-            )
+            ) {
+                currentActivity = result.activity
+                contextPrompt = result.prompt
+            } else {
+                currentActivity = fallbackCurrentActivity(
+                    appName: appName,
+                    bundleIdentifier: bundleIdentifier,
+                    selectedText: selectedText,
+                    windowTitle: windowTitle,
+                    screenshotAvailable: screenshot.dataURL != nil
+                )
+                contextPrompt = nil
+            }
         } else {
             currentActivity = fallbackCurrentActivity(
                 appName: appName,
@@ -98,6 +107,7 @@ final class AppContextService {
                 windowTitle: windowTitle,
                 screenshotAvailable: screenshot.dataURL != nil
             )
+            contextPrompt = nil
         }
 
         return AppContext(
@@ -106,6 +116,7 @@ final class AppContextService {
             windowTitle: windowTitle,
             selectedText: selectedText,
             currentActivity: currentActivity,
+            contextPrompt: contextPrompt,
             screenshotDataURL: screenshot.dataURL,
             screenshotMimeType: screenshot.mimeType,
             screenshotError: screenshot.error
@@ -118,7 +129,7 @@ final class AppContextService {
         windowTitle: String?,
         selectedText: String?,
         screenshotDataURL: String?
-    ) async -> String? {
+    ) async -> (activity: String, prompt: String)? {
         let modelsToTry = [
             screenshotDataURL != nil ? visionModel : fallbackTextModel,
             fallbackTextModel
@@ -148,7 +159,7 @@ final class AppContextService {
         selectedText: String?,
         screenshotDataURL: String?,
         model: String
-    ) async -> String? {
+    ) async -> (activity: String, prompt: String)? {
         do {
             var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
             request.httpMethod = "POST"
@@ -171,9 +182,11 @@ Return only two sentences, no labels, no markdown, no extra commentary.
 """
 
             let textOnlyPrompt = "Analyze the context and infer the user's current activity in exactly two sentences.\n\n\(metadata)"
+            var userMessageDescription: String
             var userMessage: Any = textOnlyPrompt
 
             if let screenshotDataURL {
+                userMessageDescription = "[screenshot attached]\nAnalyze the screenshot plus metadata to infer current activity.\n\(metadata)"
                 userMessage = [
                     [
                         "type": "text",
@@ -188,7 +201,11 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                         "image_url": ["url": screenshotDataURL]
                     ]
                 ]
+            } else {
+                userMessageDescription = textOnlyPrompt
             }
+
+            let fullPrompt = "Model: \(model)\n\n[System]\n\(systemPrompt)\n[User]\n\(userMessageDescription)"
 
             let payload: [String: Any] = [
                 "model": model,
@@ -216,7 +233,8 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             }
 
             let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            return cleaned.isEmpty ? nil : normalizedActivitySummary(cleaned)
+            guard !cleaned.isEmpty else { return nil }
+            return (activity: normalizedActivitySummary(cleaned), prompt: fullPrompt)
         } catch {
             return nil
         }

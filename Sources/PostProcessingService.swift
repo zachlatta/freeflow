@@ -94,10 +94,12 @@ Context (for spelling reference only):
 """
 
         let promptForDisplay = """
-SYSTEM:
+Model: \(model)
+
+[System]
 \(systemPrompt)
 
-USER:
+[User]
 \(userMessage)
 """
 
