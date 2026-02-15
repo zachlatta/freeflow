@@ -33,10 +33,7 @@ final class PostProcessingService {
         context: AppContext,
         customVocabulary: String
     ) async throws -> PostProcessingResult {
-        let vocabularyTerms = mergedVocabularyTerms(
-            rawVocabulary: customVocabulary,
-            contextSummary: context.contextSummary
-        )
+        let vocabularyTerms = mergedVocabularyTerms(rawVocabulary: customVocabulary)
         return try await process(
             transcript: transcript,
             contextSummary: context.contextSummary,
@@ -68,39 +65,20 @@ Use these spellings exactly in the output when relevant:
         }
 
         var systemPrompt = """
-You are a context-aware dictation post-processor.
-Your job is to rewrite the transcription into a polished, accurate final message.
+You are a dictation post-processor. You receive raw speech-to-text output and return clean text ready to be typed into an application.
 
-Rules:
-- Preserve the user's intent and tone.
-- Use the provided context as your primary source for names, email participants, subject cues, project names, and other proper nouns.
-- Correct obvious spelling and punctuation issues, especially for names and entities mentioned in context.
-- The custom vocabulary list is authoritative for proper noun spellings. If a spoken token is a close misspelling of a vocabulary item, rewrite it using that exact vocabulary spelling.
-- Remove spoken filler (for example: "um", "uh", "you know", "like") unless they are meaningful.
-- If there is uncertainty about a proper noun, keep the original wording rather than inventing a correction.
-- Keep the response in the user's original voice and pacing.
-- Do not add entities, filenames, sections, or claims not present in the transcription unless directly required by explicit context.
-- Convert rough list-like text into properly formatted Markdown bullet points when the content contains:
-  - lines that begin with dashes, numbers, asterisks, or repeated phrases like "first/second/third";
-  - sentence fragments intended as separate list items.
-- If the context indicates email, output a sendable email structure only when the transcription already contains email-specific structure.
-- Do not invent a Subject line, greeting, closing, placeholders, or sections unless they are explicitly present in the transcription or explicit context.
-- If no edits are needed for a token, phrase, or sentence, preserve it exactly as dictated.
-- Do not change the meaning by inserting invented names, closures, clauses, or next steps.
-- Keep the original intent and content scope; do not add, remove, summarize, or continue beyond what was spoken.
-- Do not infer missing clauses, placeholders, or closing lines if they were not dictated.
-- If the transcription is incomplete, return the rewritten partial content only.
-- Return only the rewritten transcript text.
-- Do not include status text about whether changes were made, such as "no changes were necessary", "no changes needed", or similar.
-- Do not wrap the entire response in quotation marks.
-- Do not return the final output wrapped in quotes.
-- Do not emit each sentence wrapped in quotes.
-- If the raw model output is fully wrapped in quotation marks, treat that as invalid and return only the unwrapped transcript text.
-- Never output explanatory preambles, scaffolding, disclaimers, assumptions, or analysis.
-- Never include bracketed status notes (for example, "[No further text provided ...]") or templates like "possible complete email".
-- Correct transcribed names and entities using the custom vocabulary whenever they are close variants of listed terms.
-- Use context for names/terms only when the transcript references people/entities directly.
-- Return only the rewritten transcript text.
+Your job:
+- Remove filler words (um, uh, you know, like) unless they carry meaning.
+- Fix spelling, grammar, and punctuation errors.
+- Use the provided context (app name, window title, selected text) to correctly spell proper nouns, names, and technical terms.
+- If custom vocabulary is provided, use those exact spellings when the transcript contains close variants.
+- Preserve the speaker's intent, tone, and meaning exactly.
+
+Output rules:
+- Return ONLY the cleaned transcript text, nothing else.
+- If the transcription is empty or contains no meaningful speech, return exactly: [EMPTY]
+- Do not add, remove, or change the meaning of what was said.
+- Do not invent content not present in the original transcription.
 """
         if !vocabularyPrompt.isEmpty {
             systemPrompt += "\n\n" + vocabularyPrompt
@@ -166,237 +144,32 @@ USER:
     }
 
     private func sanitizePostProcessedTranscript(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return trimmed }
+        var result = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !result.isEmpty else { return "" }
 
-        let normalized = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return normalized }
-
-        var dequoted = normalized
-        if dequoted.hasPrefix("\"") && dequoted.hasSuffix("\"") && dequoted.count > 1 {
-            dequoted.removeFirst()
-            dequoted.removeLast()
-        }
-        dequoted = dequoted.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !dequoted.isEmpty else { return dequoted }
-
-        let bannedPrefixes = [
-            "here is",
-            "here's",
-            "here is the rewritten",
-            "here is rewritten",
-            "below is",
-            "following is",
-            "based on the context",
-            "based on context",
-            "assuming",
-            "however, based on the context",
-            "possible complete email",
-            "i will",
-            "if you'd like",
-            "this is the rewritten",
-            "rewritten transcription",
-            "no changes were necessary",
-            "no changes were needed",
-            "no changes needed",
-            "no edits were required",
-            "no edits needed",
-            "no edits were necessary",
-            "nothing changed",
-            "if no edits were necessary",
-            "if an email structure were required",
-            "however, if an email structure were required",
-            "here's one example",
-            "here's an example",
-            "here is one example",
-            "here is an example",
-            "as an example",
-            "a possible complete email",
-            "possible complete email for this"
-        ]
-
-        var outputLines: [String] = []
-        for rawLine in dequoted.components(separatedBy: .newlines) {
-            var mutableLine = rawLine
-            let line = mutableLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.isEmpty {
-                outputLines.append("")
-                continue
-            }
-
-            let lower = line.lowercased()
-            let isBracketedNote = line.hasPrefix("[") && line.hasSuffix("]")
-            let isBanned = bannedPrefixes.contains { prefix in
-                lower.hasPrefix(prefix)
-            }
-
-            if isBracketedNote || isBanned {
-                continue
-            }
-
-            outputLines.append(rawLine)
+        // Strip outer quotes if the LLM wrapped the entire response
+        if result.hasPrefix("\"") && result.hasSuffix("\"") && result.count > 1 {
+            result.removeFirst()
+            result.removeLast()
+            result = result.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        // Collapse leading/trailing blank lines and ensure no excessive vertical spacing.
-        while outputLines.first?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-            outputLines.removeFirst()
-        }
-        while outputLines.last?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
-            outputLines.removeLast()
+        // Treat the sentinel value as empty
+        if result == "[EMPTY]" {
+            return ""
         }
 
-        var compressed: [String] = []
-        var previousWasEmpty = false
-        for line in outputLines {
-            let isEmptyLine = line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if isEmptyLine {
-                if previousWasEmpty {
-                    continue
-                }
-                previousWasEmpty = true
-                compressed.append("")
-            } else {
-                previousWasEmpty = false
-                compressed.append(line)
-            }
-        }
-
-        return compressed.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func correctedTranscript(_ value: String, vocabulary: [String]) -> String {
-        var result = value
-        let punctuationCharacters = CharacterSet.punctuationCharacters
-            .union(.symbols)
-            .union(.controlCharacters)
-
-        for entry in vocabulary {
-            let cleanEntry = entry.trimmingCharacters(in: .whitespacesAndNewlines)
-            if cleanEntry.contains(" ") {
-                result = correctPhraseResult(result, phrase: cleanEntry)
-            }
-        }
-
-        let tokenPattern = "\\p{L}+"
-        guard let tokenRegex = try? NSRegularExpression(pattern: tokenPattern, options: []) else {
-            return result
-        }
-
-        let mutableResult = NSMutableString(string: result)
-        let nsValue = result as NSString
-        let matches = tokenRegex.matches(in: result, range: NSRange(location: 0, length: nsValue.length))
-
-        let singleWordVocabulary = vocabulary.filter { !$0.contains(" ") }
-        if !singleWordVocabulary.isEmpty {
-            for match in matches.reversed() {
-                let token = nsValue.substring(with: match.range)
-                let cleanedToken = token.trimmingCharacters(in: punctuationCharacters)
-                guard let replacement = replacement(for: cleanedToken, from: singleWordVocabulary) else { continue }
-
-                mutableResult.replaceCharacters(in: match.range, with: replacement)
-            }
-        }
-
-        result = mutableResult as String
         return result
     }
 
-    private func mergedVocabularyTerms(rawVocabulary: String, contextSummary: String) -> [String] {
-        let userTerms = normalizedVocabularyTerms(rawVocabulary)
-        let contextTerms = contextDerivedTerms(contextSummary)
-        let expanded = (userTerms + contextTerms).flatMap { term in
-            let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return [] as [String] }
-
-            var terms: [String] = [trimmed]
-            if trimmed.contains(" ") {
-                let parts = trimmed
-                    .split(separator: " ")
-                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { $0.count > 1 }
-                terms.append(contentsOf: parts)
-            }
-
-            return terms
-        }
+    private func mergedVocabularyTerms(rawVocabulary: String) -> [String] {
+        let terms = rawVocabulary
+            .split(whereSeparator: { $0 == "\n" || $0 == "," || $0 == ";" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
 
         var seen = Set<String>()
-        var deduped: [String] = []
-        for term in expanded {
-            let canonical = term.lowercased()
-            if seen.insert(canonical).inserted {
-                deduped.append(term)
-            }
-        }
-
-        return deduped
-            .sorted {
-                $0.count == $1.count ? $0.localizedCaseInsensitiveCompare($1) == .orderedAscending : $0.count > $1.count
-            }
-    }
-
-    private func correctPhraseResult(_ text: String, phrase: String) -> String {
-        let escaped = NSRegularExpression.escapedPattern(for: phrase)
-        let pattern = "(?i)\\b\(escaped)\\b"
-        guard let phraseRegex = try? NSRegularExpression(pattern: pattern, options: []) else {
-            return text
-        }
-
-        let range = NSRange(location: 0, length: text.utf16.count)
-        return phraseRegex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: phrase)
-    }
-
-    private func replacement(for token: String, from vocabulary: [String]) -> String? {
-        let lowered = token.lowercased()
-        guard lowered.count >= 2 else { return nil }
-        let firstLetter = lowered.first
-
-        for candidate in vocabulary {
-            let cleanCandidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            let loweredCandidate = cleanCandidate.lowercased()
-            if loweredCandidate == lowered { return nil }
-            guard let candidateFirstLetter = loweredCandidate.first,
-                  candidateFirstLetter == firstLetter,
-                  abs(loweredCandidate.count - lowered.count) <= 2 else { continue }
-
-            let distance = levenshtein(lowered, loweredCandidate)
-            if lowered.count <= 5 {
-                if distance <= 1 { return cleanCandidate }
-            } else if distance <= 2 {
-                return cleanCandidate
-            }
-        }
-
-        return nil
-    }
-
-    private func levenshtein(_ left: String, _ right: String) -> Int {
-        let lhs = Array(left)
-        let rhs = Array(right)
-        if lhs.isEmpty { return rhs.count }
-        if rhs.isEmpty { return lhs.count }
-
-        var previous = Array(0...rhs.count)
-        var current = Array(repeating: 0, count: rhs.count + 1)
-
-        for i in 1...lhs.count {
-            current[0] = i
-            for j in 1...rhs.count {
-                if lhs[i - 1] == rhs[j - 1] {
-                    current[j] = previous[j - 1]
-                } else {
-                    current[j] = min(
-                        previous[j] + 1,
-                        current[j - 1] + 1,
-                        previous[j - 1] + 1
-                    )
-                }
-            }
-            previous = current
-            current = Array(repeating: 0, count: rhs.count + 1)
-        }
-
-        return previous[rhs.count]
+        return terms.filter { seen.insert($0.lowercased()).inserted }
     }
 
     private func normalizedVocabularyText(_ vocabularyTerms: [String]) -> String {
@@ -406,85 +179,5 @@ USER:
 
         guard !terms.isEmpty else { return "" }
         return terms.joined(separator: ", ")
-    }
-
-    private func contextDerivedTerms(_ contextSummary: String) -> [String] {
-        guard let contextRegex = try? NSRegularExpression(
-            pattern: "(?i)\\b(?:addressing|recipient|recipients|to|cc|bcc)\\b\\s*[:\\-]?\\s*(.+)",
-            options: []
-        ) else {
-            return []
-        }
-
-        let nsContext = contextSummary as NSString
-        let contextRange = NSRange(location: 0, length: nsContext.length)
-        let contextMatches = contextRegex.matches(in: contextSummary, range: contextRange)
-        guard !contextMatches.isEmpty else { return [] }
-
-        var candidateTerms: [String] = []
-        for match in contextMatches {
-            guard match.numberOfRanges >= 2 else { continue }
-            let capture = nsContext.substring(with: match.range(at: 1))
-            if let end = capture.firstIndex(where: { $0 == "." || $0 == ";" }) {
-                let fragment = String(capture[..<end])
-                candidateTerms.append(contentsOf: parseNameList(fromContext: fragment))
-            } else {
-                candidateTerms.append(contentsOf: parseNameList(fromContext: capture))
-            }
-        }
-
-        var seen = Set<String>()
-        return candidateTerms
-            .compactMap { candidate in
-                let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty { return nil }
-                let key = trimmed.lowercased()
-                guard seen.insert(key).inserted else { return nil }
-                return trimmed
-            }
-    }
-
-    private func parseNameList(fromContext text: String) -> [String] {
-        let normalized = text
-            .replacingOccurrences(of: ";", with: ",")
-            .replacingOccurrences(of: " and ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " or ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " cc ", with: ",", options: .caseInsensitive)
-            .replacingOccurrences(of: " bcc ", with: ",", options: .caseInsensitive)
-
-        return normalized
-            .split(separator: ",")
-            .compactMap { piece in
-                var cleaned = String(piece)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: ".:"))
-                if cleaned.isEmpty { return nil }
-                if cleaned.range(of: ":") != nil {
-                    cleaned = cleaned.replacingOccurrences(of: ":", with: " ")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                return looksLikePersonName(cleaned) ? cleaned : nil
-            }
-    }
-
-    private func looksLikePersonName(_ value: String) -> Bool {
-        let normalized = value
-            .replacingOccurrences(of: " ", with: " ")
-            .split(separator: " ")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard !normalized.isEmpty && normalized.count <= 3 else { return false }
-        return normalized.allSatisfy { token in
-            guard let first = token.first else { return false }
-            return first.isUppercase
-        }
-    }
-
-    private func normalizedVocabularyTerms(_ rawVocabulary: String) -> [String] {
-        rawVocabulary
-            .split(whereSeparator: { $0 == "\n" || $0 == "," || $0 == ";" })
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
     }
 }

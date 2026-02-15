@@ -324,24 +324,30 @@ class AppState: ObservableObject {
                     self.transcribingIndicatorTask = nil
                     self.lastTranscript = trimmedFinalTranscript
                     self.isTranscribing = false
-                    self.statusText = "Copied to clipboard!"
                     self.debugStatusMessage = "Done"
-                    self.overlayManager.showDone()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+
+                    if trimmedFinalTranscript.isEmpty {
+                        self.statusText = "Nothing to transcribe"
                         self.overlayManager.dismiss()
-                    }
+                    } else {
+                        self.statusText = "Copied to clipboard!"
+                        self.overlayManager.showDone()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                            self.overlayManager.dismiss()
+                        }
 
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(trimmedFinalTranscript, forType: .string)
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(trimmedFinalTranscript, forType: .string)
 
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        self.pasteAtCursor()
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            self.pasteAtCursor()
+                        }
                     }
 
                     self.audioRecorder.cleanup()
 
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        if self.statusText == "Copied to clipboard!" {
+                        if self.statusText == "Copied to clipboard!" || self.statusText == "Nothing to transcribe" {
                             self.statusText = "Ready"
                         }
                     }
