@@ -7,6 +7,8 @@ class AudioRecorder: NSObject, ObservableObject {
     private var tempFileURL: URL?
 
     @Published var isRecording = false
+    @Published var audioLevel: Float = 0.0
+    private var smoothedLevel: Float = 0.0
 
     func startRecording() throws {
         let audioEngine = AVAudioEngine()
@@ -39,9 +41,10 @@ class AudioRecorder: NSObject, ObservableObject {
 
         let converter = AVAudioConverter(from: inputFormat, to: monoFormat)
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             if inputFormat.channelCount == 1 && inputFormat.commonFormat == .pcmFormatFloat32 {
                 try? audioFile.write(from: buffer)
+                self?.computeAudioLevel(from: buffer)
             } else if let converter = converter {
                 let frameCount = AVAudioFrameCount(
                     Double(buffer.frameLength) * monoFormat.sampleRate / inputFormat.sampleRate
@@ -56,6 +59,7 @@ class AudioRecorder: NSObject, ObservableObject {
 
                 if status != .error {
                     try? audioFile.write(from: convertedBuffer)
+                    self?.computeAudioLevel(from: convertedBuffer)
                 }
             }
         }
@@ -72,7 +76,33 @@ class AudioRecorder: NSObject, ObservableObject {
         audioEngine = nil
         audioFile = nil
         isRecording = false
+        smoothedLevel = 0.0
+        DispatchQueue.main.async { self.audioLevel = 0.0 }
         return tempFileURL
+    }
+
+    private func computeAudioLevel(from buffer: AVAudioPCMBuffer) {
+        guard let channelData = buffer.floatChannelData else { return }
+        let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return }
+
+        let samples = channelData[0]
+        var sumOfSquares: Float = 0.0
+        for i in 0..<frames {
+            let sample = samples[i]
+            sumOfSquares += sample * sample
+        }
+        let rms = sqrtf(sumOfSquares / Float(frames))
+
+        // Scale RMS (~0.01-0.1 for speech) to 0-1 range
+        let scaled = min(rms * 10.0, 1.0)
+
+        // Exponential moving average smoothing
+        smoothedLevel = smoothedLevel * 0.7 + scaled * 0.3
+
+        DispatchQueue.main.async {
+            self.audioLevel = self.smoothedLevel
+        }
     }
 
     func cleanup() {

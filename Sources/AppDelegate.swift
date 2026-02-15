@@ -5,11 +5,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var setupWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleShowSetup),
+            name: .showSetup,
+            object: nil
+        )
+
         if !appState.hasCompletedSetup {
             showSetupWindow()
         } else {
             appState.startHotkeyMonitoring()
+            appState.startAccessibilityPolling()
+
+            if !AXIsProcessTrusted() {
+                appState.showAccessibilityAlert()
+            }
         }
+
+    }
+
+    @objc func handleShowSetup() {
+        appState.hasCompletedSetup = false
+        appState.stopAccessibilityPolling()
+        showSetupWindow()
     }
 
     func showSetupWindow() {
@@ -44,5 +63,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupWindow = nil
         NSApp.setActivationPolicy(.accessory)
         appState.startHotkeyMonitoring()
+        appState.startAccessibilityPolling()
+
+        if !AXIsProcessTrusted() {
+            appState.showAccessibilityAlert()
+        }
     }
 }

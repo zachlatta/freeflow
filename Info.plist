@@ -24,5 +24,7 @@
     <string>Voice to Text needs microphone access to transcribe your speech.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Voice to Text needs speech recognition to convert your voice to text.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>Voice to Text needs accessibility access to detect the text cursor position and paste transcribed text.</string>
 </dict>
 </plist>

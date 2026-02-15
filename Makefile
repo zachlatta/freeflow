@@ -1,4 +1,5 @@
 APP_NAME = VoiceToText
+BUNDLE_ID = com.hackclub.voicetotext
 BUILD_DIR = build
 APP_BUNDLE = $(BUILD_DIR)/$(APP_NAME).app
 CONTENTS = $(APP_BUNDLE)/Contents
@@ -20,7 +21,7 @@ $(MACOS_DIR)/$(APP_NAME): $(SOURCES) Info.plist
 		-target $(ARCH)-apple-macosx13.0 \
 		$(SOURCES)
 	@cp Info.plist $(CONTENTS)/
-	@codesign --force --sign - --entitlements VoiceToText.entitlements $(APP_BUNDLE)
+	@codesign --force --sign "VoiceToText Dev" --entitlements VoiceToText.entitlements $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE)"
 
 clean:

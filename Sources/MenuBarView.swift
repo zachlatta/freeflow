@@ -5,6 +5,24 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(spacing: 4) {
+            // Accessibility warning
+            if !appState.hasAccessibility {
+                Button {
+                    appState.showAccessibilityAlert()
+                } label: {
+                    Label("Accessibility Required", systemImage: "exclamationmark.triangle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(Color.red)
+
+                Divider()
+            }
+
             // Status
             if appState.isRecording {
                 Label("Recording...", systemImage: "record.circle")
@@ -73,6 +91,14 @@ struct MenuBarView: View {
                 }
             }
 
+            Button("Re-run Setup...") {
+                NotificationCenter.default.post(name: .showSetup, object: nil)
+            }
+
+            Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
+                appState.toggleDebugOverlay()
+            }
+
             Divider()
 
             Button("Quit Voice to Text") {
@@ -82,4 +108,8 @@ struct MenuBarView: View {
         }
         .padding(4)
     }
+}
+
+extension Notification.Name {
+    static let showSetup = Notification.Name("showSetup")
 }
