@@ -578,6 +578,21 @@ struct SetupView: View {
 
     var testTranscriptionStep: some View {
         VStack(spacing: 20) {
+            // Microphone picker
+            VStack(spacing: 4) {
+                Picker("Microphone:", selection: $appState.selectedMicrophoneID) {
+                    Text("System Default").tag("default")
+                    ForEach(appState.availableMicrophones) { device in
+                        Text(device.name).tag(device.uid)
+                    }
+                }
+                .frame(maxWidth: 340)
+
+                Text("You can change this later in the menu bar or settings.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
             Spacer()
 
             Group {
@@ -610,11 +625,11 @@ struct SetupView: View {
                     VStack(spacing: 20) {
                         ZStack {
                             Circle()
-                                .fill(Color.blue.opacity(0.08))
+                                .fill(Color.blue.opacity(0.65))
                                 .frame(width: 100, height: 100)
 
                             Circle()
-                                .stroke(Color.blue.opacity(0.4), lineWidth: 3)
+                                .stroke(Color.blue.opacity(0.8), lineWidth: 3)
                                 .frame(width: 100, height: 100)
                                 .shadow(color: .blue.opacity(0.5), radius: 10)
 
@@ -653,16 +668,18 @@ struct SetupView: View {
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
 
-                            Button("Try Again") { resetTest() }
-                                .buttonStyle(.borderedProminent)
+                            Text("Hold **\(appState.selectedHotkey.displayName)** to try again")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
                         } else if testTranscript.isEmpty {
-                            Text("No speech detected — try again!")
+                            Text("No speech detected")
                                 .font(.title2)
                                 .fontWeight(.semibold)
                                 .foregroundStyle(.secondary)
 
-                            Button("Try Again") { resetTest() }
-                                .buttonStyle(.borderedProminent)
+                            Text("Hold **\(appState.selectedHotkey.displayName)** to try again")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
                         } else {
                             Text("Perfect — FreeFlow is ready to go.")
                                 .font(.title2)
@@ -675,6 +692,10 @@ struct SetupView: View {
                                 .background(Color(nsColor: .controlBackgroundColor))
                                 .cornerRadius(10)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
+
+                            Text("Hold **\(appState.selectedHotkey.displayName)** to try again")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -686,6 +707,7 @@ struct SetupView: View {
             stepIndicator
         }
         .onAppear {
+            appState.refreshAvailableMicrophones()
             testMicPulsing = true
             startTestHotkeyMonitoring()
         }
@@ -848,10 +870,13 @@ struct SetupView: View {
     private func startTestHotkeyMonitoring() {
         appState.hotkeyManager.onKeyDown = { [self] in
             DispatchQueue.main.async {
-                guard testPhase == .idle else { return }
+                guard testPhase == .idle || testPhase == .done else { return }
+                if testPhase == .done {
+                    resetTest()
+                }
                 do {
                     let recorder = AudioRecorder()
-                    try recorder.startRecording()
+                    try recorder.startRecording(deviceUID: appState.selectedMicrophoneID)
                     testAudioRecorder = recorder
                     testAudioLevelCancellable = recorder.$audioLevel
                         .receive(on: DispatchQueue.main)
