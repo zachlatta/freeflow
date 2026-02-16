@@ -1,4 +1,4 @@
-APP_NAME = FreeFlow
+APP_NAME ?= FreeFlow Dev
 BUNDLE_ID = com.zachlatta.freeflow
 BUILD_DIR = build
 APP_BUNDLE = $(BUILD_DIR)/$(APP_NAME).app
@@ -25,6 +25,9 @@ $(MACOS_DIR)/$(APP_NAME): $(SOURCES) Info.plist $(ICON_ICNS)
 		-target $(ARCH)-apple-macosx13.0 \
 		$(SOURCES)
 	@cp Info.plist $(CONTENTS)/
+	@plutil -replace CFBundleName -string "$(APP_NAME)" $(CONTENTS)/Info.plist
+	@plutil -replace CFBundleDisplayName -string "$(APP_NAME)" $(CONTENTS)/Info.plist
+	@plutil -replace CFBundleExecutable -string "$(APP_NAME)" $(CONTENTS)/Info.plist
 	@cp $(ICON_ICNS) $(RESOURCES)/
 	@codesign --force --sign "$(CODESIGN_IDENTITY)" --entitlements FreeFlow.entitlements $(APP_BUNDLE)
 	@echo "Built $(APP_BUNDLE)"
