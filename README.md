@@ -5,7 +5,7 @@
 <h1 align="center">FreeFlow</h1>
 
 <p align="center">
-  Free and open source alternative to <a href="https://wisprflow.ai">Wispr Flow</a>, <a href="https://superwhisper.com">SuperWhisper</a>, and <a href="https://monologue.to">Monologue</a>.
+  Free and open source alternative to <a href="https://wisprflow.ai">Wispr Flow</a>, <a href="https://superwhisper.com">Superwhisper</a>, and <a href="https://monologue.to">Monologue</a>.
 </p>
 
 <p align="center">
