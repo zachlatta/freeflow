@@ -10,7 +10,6 @@ import ScreenCaptureKit
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
     case runLog
-    case debug
 
     var id: String { rawValue }
 
@@ -18,7 +17,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "General"
         case .runLog: return "Run Log"
-        case .debug: return "Debug"
         }
     }
 
@@ -26,7 +24,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .general: return "gearshape"
         case .runLog: return "clock.arrow.circlepath"
-        case .debug: return "ant"
         }
     }
 }
@@ -812,7 +809,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     func toggleDebugPanel() {
-        selectedSettingsTab = .debug
+        selectedSettingsTab = .runLog
         NotificationCenter.default.post(name: .showSettings, object: nil)
     }
 

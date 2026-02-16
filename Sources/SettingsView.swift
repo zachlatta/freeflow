@@ -39,8 +39,6 @@ struct SettingsView: View {
                     GeneralSettingsView()
                 case .runLog:
                     RunLogView()
-                case .debug:
-                    DebugSettingsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -290,7 +288,7 @@ struct GeneralSettingsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.down.circle.fill")
                         .foregroundStyle(.blue)
-                    Text("FreeFlow v\(updateManager.latestVersion) is available!")
+                    Text("A new version of FreeFlow is available!")
                         .font(.caption.weight(.semibold))
                     Spacer()
                     Button("Download") {
@@ -1025,48 +1023,3 @@ struct FlowLayout: Layout {
     }
 }
 
-// MARK: - Debug
-
-struct DebugSettingsView: View {
-    @EnvironmentObject var appState: AppState
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text("Debug")
-                    .font(.headline)
-                Spacer()
-                Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Start Debug Overlay") {
-                    appState.toggleDebugOverlay()
-                }
-            }
-            .padding(.horizontal, 24)
-            .padding(.top, 20)
-            .padding(.bottom, 12)
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    PipelineDebugContentView(
-                        statusMessage: appState.debugStatusMessage,
-                        postProcessingStatus: appState.lastPostProcessingStatus,
-                        contextSummary: appState.lastContextSummary,
-                        contextScreenshotStatus: appState.lastContextScreenshotStatus,
-                        contextScreenshotDataURL: appState.lastContextScreenshotDataURL,
-                        rawTranscript: appState.lastRawTranscript,
-                        postProcessedTranscript: appState.lastPostProcessedTranscript,
-                        postProcessingPrompt: appState.lastPostProcessingPrompt
-                    )
-
-                    if appState.lastContextSummary.isEmpty && appState.lastRawTranscript.isEmpty {
-                        Text("Run a dictation pass to populate debug output.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(24)
-            }
-        }
-    }
-}

@@ -154,13 +154,8 @@ struct MenuBarView: View {
 
             Divider()
 
-            Menu("Debug") {
-                Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
-                    appState.toggleDebugOverlay()
-                }
-                Button("Pipeline Debug") {
-                    appState.toggleDebugPanel()
-                }
+            Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
+                appState.toggleDebugOverlay()
             }
 
             if updateManager.updateAvailable {
@@ -169,7 +164,7 @@ struct MenuBarView: View {
                 Button {
                     updateManager.showUpdateAlert()
                 } label: {
-                    Label("Update Available: v\(updateManager.latestVersion)", systemImage: "arrow.down.circle.fill")
+                    Label("Update Available", systemImage: "arrow.down.circle.fill")
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.white)

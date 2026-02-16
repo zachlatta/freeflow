@@ -31,31 +31,6 @@ struct GitHubReleaseAsset: Decodable {
     }
 }
 
-// MARK: - Semantic Version
-
-struct SemanticVersion: Comparable {
-    let major: Int
-    let minor: Int
-    let patch: Int
-
-    init?(_ string: String) {
-        let cleaned = string.hasPrefix("v") ? String(string.dropFirst()) : string
-        let parts = cleaned.split(separator: ".").compactMap { Int($0) }
-        guard parts.count >= 2 else { return nil }
-        self.major = parts[0]
-        self.minor = parts[1]
-        self.patch = parts.count >= 3 ? parts[2] : 0
-    }
-
-    static func < (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {
-        if lhs.major != rhs.major { return lhs.major < rhs.major }
-        if lhs.minor != rhs.minor { return lhs.minor < rhs.minor }
-        return lhs.patch < rhs.patch
-    }
-
-    var description: String { "\(major).\(minor).\(patch)" }
-}
-
 // MARK: - Update Manager
 
 @MainActor
@@ -64,7 +39,7 @@ final class UpdateManager: ObservableObject {
 
     @Published var updateAvailable = false
     @Published var latestRelease: GitHubRelease?
-    @Published var latestVersion: String = ""
+    @Published var latestReleaseDate: String = ""
     @Published var isChecking = false
     @Published var lastCheckDate: Date? {
         didSet {
@@ -86,7 +61,7 @@ final class UpdateManager: ObservableObject {
 
     private let releasesURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/releases/latest")!
     private let stabilityBufferDays: TimeInterval = 3
-    private let checkIntervalSeconds: TimeInterval = 3 * 24 * 60 * 60 // 3 days
+    private let checkIntervalSeconds: TimeInterval = 7 * 24 * 60 * 60 // 7 days
     private var periodicTimer: Timer?
 
     private init() {
@@ -127,6 +102,13 @@ final class UpdateManager: ObservableObject {
     // MARK: - Check for Updates
 
     func checkForUpdates(userInitiated: Bool) async {
+        let currentBuildTag = Bundle.main.infoDictionary?["FreeFlowBuildTag"] as? String
+
+        // Dev builds (no embedded tag): skip auto-checks, but allow manual checks
+        if !userInitiated && currentBuildTag == nil {
+            return
+        }
+
         isChecking = true
         defer { isChecking = false }
 
@@ -160,26 +142,7 @@ final class UpdateManager: ObservableObject {
             let release = try decoder.decode(GitHubRelease.self, from: data)
             lastCheckDate = Date()
 
-            guard let remoteVersion = SemanticVersion(release.tagName) else {
-                if userInitiated { showErrorAlert("Could not parse release version: \(release.tagName)") }
-                return
-            }
-
-            let currentVersionString = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
-            guard let currentVersion = SemanticVersion(currentVersionString) else {
-                if userInitiated { showErrorAlert("Could not parse current version.") }
-                return
-            }
-
-            // Check if remote is actually newer
-            guard remoteVersion > currentVersion else {
-                updateAvailable = false
-                latestRelease = nil
-                if userInitiated { showUpToDateAlert() }
-                return
-            }
-
-            // Check stability buffer (3 days since published)
+            // Parse the published date
             let iso8601 = ISO8601DateFormatter()
             iso8601.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
             let iso8601Basic = ISO8601DateFormatter()
@@ -191,6 +154,21 @@ final class UpdateManager: ObservableObject {
                 return
             }
 
+            // Format the release date for display
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateStyle = .medium
+            dateFormatter.timeStyle = .none
+            let releaseDateString = dateFormatter.string(from: publishedDate)
+
+            // If this is the same build we're running, no update available
+            if let currentTag = currentBuildTag, release.tagName == currentTag {
+                updateAvailable = false
+                latestRelease = nil
+                if userInitiated { showUpToDateAlert() }
+                return
+            }
+
+            // Check stability buffer (3 days since published)
             let daysSincePublished = Date().timeIntervalSince(publishedDate) / (24 * 60 * 60)
             guard daysSincePublished >= stabilityBufferDays else {
                 // Too new, don't offer yet
@@ -206,7 +184,7 @@ final class UpdateManager: ObservableObject {
             }
 
             latestRelease = release
-            latestVersion = remoteVersion.description
+            latestReleaseDate = releaseDateString
             updateAvailable = true
 
             if userInitiated {
@@ -226,7 +204,7 @@ final class UpdateManager: ObservableObject {
 
         let alert = NSAlert()
         alert.messageText = "A New Version is Available"
-        alert.informativeText = "FreeFlow v\(latestVersion) is available. You are currently running v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?").\n\nWould you like to download the update?"
+        alert.informativeText = "A new version of FreeFlow (released \(latestReleaseDate)) is available.\n\nWould you like to download the update?"
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "Download Update")
@@ -249,7 +227,7 @@ final class UpdateManager: ObservableObject {
     func showUpToDateAlert() {
         let alert = NSAlert()
         alert.messageText = "You're Up to Date"
-        alert.informativeText = "FreeFlow v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") is the latest version."
+        alert.informativeText = "You're running the latest version of FreeFlow."
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "OK")
@@ -287,7 +265,7 @@ final class UpdateManager: ObservableObject {
 
         let progressAlert = NSAlert()
         progressAlert.messageText = "Downloading Update..."
-        progressAlert.informativeText = "Downloading FreeFlow v\(latestVersion)"
+        progressAlert.informativeText = "Downloading FreeFlow update..."
         progressAlert.alertStyle = .informational
         progressAlert.icon = NSApp.applicationIconImage
         progressAlert.addButton(withTitle: "Cancel")

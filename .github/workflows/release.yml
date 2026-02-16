@@ -22,6 +22,9 @@ jobs:
           TAG="build-$(date -u +'%Y%m%d-%H%M%S')-${SHORT_SHA}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Embed build tag in Info.plist
+        run: plutil -insert FreeFlowBuildTag -string "${{ steps.version.outputs.tag }}" Info.plist
+
       - name: Install create-dmg
         run: brew install create-dmg
 
