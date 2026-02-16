@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
+    @ObservedObject private var updateManager = UpdateManager.shared
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
@@ -120,6 +121,29 @@ struct MenuBarView: View {
                 }
             }
 
+            Menu("Microphone") {
+                Button {
+                    appState.selectedMicrophoneID = "default"
+                } label: {
+                    if appState.selectedMicrophoneID == "default" || appState.selectedMicrophoneID.isEmpty {
+                        Text("✓ System Default")
+                    } else {
+                        Text("  System Default")
+                    }
+                }
+                ForEach(appState.availableMicrophones) { device in
+                    Button {
+                        appState.selectedMicrophoneID = device.uid
+                    } label: {
+                        if appState.selectedMicrophoneID == device.uid {
+                            Text("✓ \(device.name)")
+                        } else {
+                            Text("  \(device.name)")
+                        }
+                    }
+                }
+            }
+
             Button("Re-run Setup...") {
                 NotificationCenter.default.post(name: .showSetup, object: nil)
             }
@@ -137,6 +161,23 @@ struct MenuBarView: View {
                 Button("Pipeline Debug") {
                     appState.toggleDebugPanel()
                 }
+            }
+
+            if updateManager.updateAvailable {
+                Divider()
+
+                Button {
+                    updateManager.showUpdateAlert()
+                } label: {
+                    Label("Update Available: v\(updateManager.latestVersion)", systemImage: "arrow.down.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(Color.blue)
             }
 
             Divider()

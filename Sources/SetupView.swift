@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import Combine
 import Foundation
 import ServiceManagement
 
@@ -17,6 +18,7 @@ struct SetupView: View {
         case hotkey
         case vocabulary
         case launchAtLogin
+        case testTranscription
         case ready
     }
 
@@ -27,8 +29,22 @@ struct SetupView: View {
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
     @State private var accessibilityTimer: Timer?
+    @State private var screenRecordingTimer: Timer?
     @State private var customVocabularyInput: String = ""
     @StateObject private var githubCache = GitHubMetadataCache.shared
+
+    // Test transcription state
+    private enum TestPhase: Equatable {
+        case idle, recording, transcribing, done
+    }
+    @State private var testPhase: TestPhase = .idle
+    @State private var testAudioRecorder: AudioRecorder? = nil
+    @State private var testAudioLevel: Float = 0.0
+    @State private var testTranscript: String = ""
+    @State private var testError: String? = nil
+    @State private var testAudioLevelCancellable: AnyCancellable? = nil
+    @State private var testMicPulsing = false
+
     private let totalSteps: [SetupStep] = SetupStep.allCases
 
     var body: some View {
@@ -51,6 +67,8 @@ struct SetupView: View {
                     vocabularyStep
                 case .launchAtLogin:
                     launchAtLoginStep
+                case .testTranscription:
+                    testTranscriptionStep
                 case .ready:
                     readyStep
                 }
@@ -84,6 +102,24 @@ struct SetupView: View {
                             saveCustomVocabularyAndContinue()
                         }
                         .keyboardShortcut(.defaultAction)
+                    } else if currentStep == .testTranscription {
+                        Button("Skip") {
+                            stopTestHotkeyMonitoring()
+                            withAnimation {
+                                currentStep = nextStep(currentStep)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+
+                        Button("Continue") {
+                            stopTestHotkeyMonitoring()
+                            withAnimation {
+                                currentStep = nextStep(currentStep)
+                            }
+                        }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(testPhase != .done || testTranscript.isEmpty || testError != nil)
                     } else {
                         Button("Continue") {
                             withAnimation {
@@ -91,6 +127,7 @@ struct SetupView: View {
                             }
                         }
                         .keyboardShortcut(.defaultAction)
+                        .disabled(!canContinueFromCurrentStep)
                     }
                 } else {
                     Button("Get Started") {
@@ -113,6 +150,7 @@ struct SetupView: View {
         }
         .onDisappear {
             accessibilityTimer?.invalidate()
+            screenRecordingTimer?.invalidate()
         }
     }
 
@@ -392,9 +430,15 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("FreeFlow captures a screenshot for context-aware transcription, improving accuracy based on what's on screen.")
+            Text("FreeFlow intelligently adapts the transcription to the current app you're working in (ex. spelling names in an email correctly).")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("It needs this permission to see which app you're working in and any in-progress work. Nothing is stored on FreeFlow's servers (FreeFlow doesn't have servers).")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .font(.callout)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack {
@@ -419,6 +463,12 @@ struct SetupView: View {
             .cornerRadius(8)
 
             stepIndicator
+        }
+        .onAppear {
+            startScreenRecordingPolling()
+        }
+        .onDisappear {
+            screenRecordingTimer?.invalidate()
         }
     }
 
@@ -526,6 +576,124 @@ struct SetupView: View {
         }
     }
 
+    var testTranscriptionStep: some View {
+        VStack(spacing: 20) {
+            Spacer()
+
+            Group {
+                switch testPhase {
+                case .idle:
+                    VStack(spacing: 20) {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.blue)
+                            .scaleEffect(testMicPulsing ? 1.15 : 1.0)
+                            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: testMicPulsing)
+
+                        Text("Let's Try It Out!")
+                            .font(.title)
+                            .fontWeight(.bold)
+
+                        Text("Hold **\(appState.selectedHotkey.displayName)**")
+                            .font(.headline)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(10)
+
+                        Text("Say anything — a sentence or two is perfect.")
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+
+                case .recording:
+                    VStack(spacing: 20) {
+                        ZStack {
+                            Circle()
+                                .fill(Color.blue.opacity(0.08))
+                                .frame(width: 100, height: 100)
+
+                            Circle()
+                                .stroke(Color.blue.opacity(0.4), lineWidth: 3)
+                                .frame(width: 100, height: 100)
+                                .shadow(color: .blue.opacity(0.5), radius: 10)
+
+                            WaveformView(audioLevel: testAudioLevel)
+                        }
+
+                        Text("Listening...")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.blue)
+                    }
+
+                case .transcribing:
+                    VStack(spacing: 20) {
+                        InlineTranscribingDots()
+
+                        Text("Transcribing...")
+                            .font(.title2)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                    }
+
+                case .done:
+                    VStack(spacing: 16) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 60))
+                            .foregroundStyle(.green)
+
+                        if let error = testError {
+                            Text("Something went wrong")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+
+                            Text(error)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+
+                            Button("Try Again") { resetTest() }
+                                .buttonStyle(.borderedProminent)
+                        } else if testTranscript.isEmpty {
+                            Text("No speech detected — try again!")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(.secondary)
+
+                            Button("Try Again") { resetTest() }
+                                .buttonStyle(.borderedProminent)
+                        } else {
+                            Text("Perfect — FreeFlow is ready to go.")
+                                .font(.title2)
+                                .fontWeight(.semibold)
+
+                            Text(testTranscript)
+                                .font(.body)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color(nsColor: .controlBackgroundColor))
+                                .cornerRadius(10)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                }
+            }
+            .transition(.opacity)
+            .id(testPhase)
+
+            Spacer()
+            stepIndicator
+        }
+        .onAppear {
+            testMicPulsing = true
+            startTestHotkeyMonitoring()
+        }
+        .onDisappear {
+            stopTestHotkeyMonitoring()
+        }
+    }
+
     var readyStep: some View {
         VStack(spacing: 20) {
             Image(systemName: "checkmark.circle.fill")
@@ -560,6 +728,21 @@ struct SetupView: View {
             }
         }
         .padding(.top, 20)
+    }
+
+    private var canContinueFromCurrentStep: Bool {
+        switch currentStep {
+        case .micPermission:
+            return micPermissionGranted
+        case .accessibility:
+            return accessibilityGranted
+        case .screenRecording:
+            return appState.hasScreenRecordingPermission
+        case .testTranscription:
+            return testPhase == .done && !testTranscript.isEmpty && testError == nil
+        default:
+            return true
+        }
     }
 
     // MARK: - Helpers
@@ -651,6 +834,117 @@ struct SetupView: View {
         AXIsProcessTrustedWithOptions(options)
     }
 
+    func startScreenRecordingPolling() {
+        screenRecordingTimer?.invalidate()
+        screenRecordingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            DispatchQueue.main.async {
+                appState.hasScreenRecordingPermission = CGPreflightScreenCaptureAccess()
+            }
+        }
+    }
+
+    // MARK: - Test Transcription
+
+    private func startTestHotkeyMonitoring() {
+        appState.hotkeyManager.onKeyDown = { [self] in
+            DispatchQueue.main.async {
+                guard testPhase == .idle else { return }
+                do {
+                    let recorder = AudioRecorder()
+                    try recorder.startRecording()
+                    testAudioRecorder = recorder
+                    testAudioLevelCancellable = recorder.$audioLevel
+                        .receive(on: DispatchQueue.main)
+                        .sink { level in
+                            testAudioLevel = level
+                        }
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        testPhase = .recording
+                    }
+                } catch {
+                    testError = error.localizedDescription
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        testPhase = .done
+                    }
+                }
+            }
+        }
+
+        appState.hotkeyManager.onKeyUp = { [self] in
+            DispatchQueue.main.async {
+                guard testPhase == .recording, let recorder = testAudioRecorder else { return }
+                let fileURL = recorder.stopRecording()
+                testAudioLevelCancellable?.cancel()
+                testAudioLevelCancellable = nil
+                testAudioLevel = 0.0
+
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                    testPhase = .transcribing
+                }
+
+                guard let url = fileURL else {
+                    testError = "No audio file was created."
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                        testPhase = .done
+                    }
+                    return
+                }
+
+                Task {
+                    do {
+                        let service = TranscriptionService(apiKey: appState.apiKey)
+                        let transcript = try await service.transcribe(fileURL: url)
+                        await MainActor.run {
+                            testTranscript = transcript
+                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                testPhase = .done
+                            }
+                        }
+                    } catch {
+                        await MainActor.run {
+                            testError = error.localizedDescription
+                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                testPhase = .done
+                            }
+                        }
+                    }
+                    // Clean up temp file
+                    recorder.cleanup()
+                }
+            }
+        }
+
+        appState.hotkeyManager.start(option: appState.selectedHotkey)
+    }
+
+    private func stopTestHotkeyMonitoring() {
+        appState.hotkeyManager.stop()
+        appState.hotkeyManager.onKeyDown = nil
+        appState.hotkeyManager.onKeyUp = nil
+        testAudioLevelCancellable?.cancel()
+        testAudioLevelCancellable = nil
+        if let recorder = testAudioRecorder, recorder.isRecording {
+            _ = recorder.stopRecording()
+            recorder.cleanup()
+        }
+        testAudioRecorder = nil
+    }
+
+    private func resetTest() {
+        testPhase = .idle
+        testTranscript = ""
+        testError = nil
+        testAudioLevel = 0.0
+        testMicPulsing = true
+        if let recorder = testAudioRecorder {
+            if recorder.isRecording {
+                _ = recorder.stopRecording()
+            }
+            recorder.cleanup()
+            testAudioRecorder = nil
+        }
+    }
+
 }
 
 struct GitHubRepoInfo: Decodable {
@@ -728,6 +1022,26 @@ class GitHubMetadataCache: ObservableObject {
             lastFetchDate = Date()
         } catch {
             isLoading = false
+        }
+    }
+}
+
+private struct InlineTranscribingDots: View {
+    @State private var activeDot = 0
+    let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.blue.opacity(activeDot == index ? 1.0 : 0.3))
+                    .frame(width: 12, height: 12)
+                    .scaleEffect(activeDot == index ? 1.3 : 1.0)
+                    .animation(.easeInOut(duration: 0.3), value: activeDot)
+            }
+        }
+        .onReceive(timer) { _ in
+            activeDot = (activeDot + 1) % 3
         }
     }
 }

@@ -472,7 +472,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         maxDimension: CGFloat? = nil
     ) -> String? {
         guard let image = CGWindowListCreateImage(
-            .zero,
+            .null,
             .optionIncludingWindow,
             windowID,
             [.bestResolution]

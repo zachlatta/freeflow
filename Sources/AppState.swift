@@ -2,8 +2,10 @@ import Foundation
 import Combine
 import AppKit
 import AVFoundation
+import CoreAudio
 import ServiceManagement
 import ApplicationServices
+import ScreenCaptureKit
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
@@ -32,6 +34,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 final class AppState: ObservableObject, @unchecked Sendable {
     private let apiKeyStorageKey = "groq_api_key"
     private let customVocabularyStorageKey = "custom_vocabulary"
+    private let selectedMicrophoneStorageKey = "selected_microphone_id"
     private let transcribingIndicatorDelay: TimeInterval = 1.0
     private let maxPipelineHistoryCount = 20
 
@@ -83,6 +86,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
         didSet { setLaunchAtLogin(launchAtLogin) }
     }
 
+    @Published var selectedMicrophoneID: String {
+        didSet {
+            UserDefaults.standard.set(selectedMicrophoneID, forKey: selectedMicrophoneStorageKey)
+        }
+    }
+    @Published var availableMicrophones: [AudioDevice] = []
+
     let audioRecorder = AudioRecorder()
     let hotkeyManager = HotkeyManager()
     let overlayManager = RecordingOverlayManager()
@@ -94,6 +104,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var contextCaptureTask: Task<AppContext?, Never>?
     private var capturedContext: AppContext?
     private var hasShownScreenshotPermissionAlert = false
+    private var audioDeviceListenerBlock: AudioObjectPropertyListenerBlock?
     private let pipelineHistoryStore = PipelineHistoryStore()
 
     init() {
@@ -114,6 +125,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
         let savedHistory = pipelineHistoryStore.loadAllHistory()
 
+        let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
+
         self.contextService = AppContextService(apiKey: apiKey)
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
@@ -123,6 +136,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.hasAccessibility = initialAccessibility
         self.hasScreenRecordingPermission = initialScreenCapturePermission
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
+        self.selectedMicrophoneID = selectedMicrophoneID
+
+        refreshAvailableMicrophones()
+        installAudioDeviceListener()
     }
 
     private static func loadStoredAPIKey(account: String) -> String {
@@ -218,11 +235,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     func requestScreenCapturePermission() {
-        let granted = CGRequestScreenCaptureAccess()
-        hasScreenRecordingPermission = granted
-        if !granted {
-            openScreenCaptureSettings()
+        // ScreenCaptureKit triggers the "Screen & System Audio Recording"
+        // permission dialog on macOS Sequoia+, correctly identifying the
+        // running app (unlike the legacy CGWindowListCreateImage path).
+        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.hasScreenRecordingPermission = CGPreflightScreenCaptureAccess()
+            }
         }
+
+        hasScreenRecordingPermission = CGPreflightScreenCaptureAccess()
     }
 
     func openScreenCaptureSettings() {
@@ -253,6 +275,30 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if current != launchAtLogin {
             launchAtLogin = current
         }
+    }
+
+    func refreshAvailableMicrophones() {
+        availableMicrophones = AudioDevice.availableInputDevices()
+    }
+
+    private func installAudioDeviceListener() {
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
+            DispatchQueue.main.async {
+                self?.refreshAvailableMicrophones()
+            }
+        }
+        audioDeviceListenerBlock = block
+        AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            DispatchQueue.main,
+            block
+        )
     }
 
     func startHotkeyMonitoring() {
@@ -331,7 +377,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func beginRecording() {
         errorMessage = nil
         do {
-            try audioRecorder.startRecording()
+            try audioRecorder.startRecording(deviceUID: selectedMicrophoneID)
             isRecording = true
             statusText = "Recording..."
             hasShownScreenshotPermissionAlert = false

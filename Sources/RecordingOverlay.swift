@@ -77,6 +77,12 @@ class RecordingOverlayManager {
     private var transcribingPanel: NSPanel?
     private var overlayState = RecordingOverlayState()
 
+    /// Whether the main screen has a camera housing (notch).
+    private var screenHasNotch: Bool {
+        guard let screen = NSScreen.main else { return false }
+        return screen.safeAreaInsets.top > 0
+    }
+
     func showRecording() {
         DispatchQueue.main.async { self._showRecording() }
     }
@@ -108,12 +114,18 @@ class RecordingOverlayManager {
         let panelWidth: CGFloat = 120
         let panelHeight: CGFloat = 32
 
-        let notchInset: CGFloat = 4 // tuck flat top behind menu bar
+        let hasNotch = screenHasNotch
+        let notchInset: CGFloat = 4 // tuck flat top behind menu bar (notch screens only)
 
         if let panel = overlayWindow {
             guard let screen = NSScreen.main else { return }
             let x = panelX(screen, width: panelWidth)
-            let y = screen.visibleFrame.maxY - panelHeight + notchInset
+            let y: CGFloat
+            if hasNotch {
+                y = screen.visibleFrame.maxY - panelHeight + notchInset
+            } else {
+                y = screen.frame.maxY - panelHeight
+            }
             panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
             panel.alphaValue = 1
             panel.orderFrontRegardless()
@@ -133,9 +145,17 @@ class RecordingOverlayManager {
 
         if let screen = NSScreen.main {
             let x = panelX(screen, width: panelWidth)
-            // Start hidden behind menu bar
-            let hiddenY = screen.visibleFrame.maxY
-            let visibleY = screen.visibleFrame.maxY - panelHeight + notchInset
+            let hiddenY: CGFloat
+            let visibleY: CGFloat
+            if hasNotch {
+                // Start hidden behind menu bar, pop out from notch
+                hiddenY = screen.visibleFrame.maxY
+                visibleY = screen.visibleFrame.maxY - panelHeight + notchInset
+            } else {
+                // Start hidden above screen top, pop in from very top
+                hiddenY = screen.frame.maxY
+                visibleY = screen.frame.maxY - panelHeight
+            }
 
             panel.setFrame(NSRect(x: x, y: hiddenY, width: panelWidth, height: panelHeight), display: true)
             panel.alphaValue = 1
@@ -158,7 +178,7 @@ class RecordingOverlayManager {
             return
         }
 
-        let hiddenY = screen.visibleFrame.maxY
+        let hiddenY = screenHasNotch ? screen.visibleFrame.maxY : screen.frame.maxY
         let frame = panel.frame
 
         NSAnimationContext.runAnimationGroup({ context in
@@ -198,7 +218,12 @@ class RecordingOverlayManager {
 
         if let screen = NSScreen.main {
             let x = panelX(screen, width: panelWidth)
-            let y = screen.visibleFrame.maxY - panelHeight
+            let y: CGFloat
+            if screenHasNotch {
+                y = screen.visibleFrame.maxY - panelHeight
+            } else {
+                y = screen.frame.maxY - panelHeight
+            }
             panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
         }
 

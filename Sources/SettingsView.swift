@@ -60,6 +60,7 @@ struct GeneralSettingsView: View {
     @State private var customVocabularyInput: String = ""
     @State private var micPermissionGranted = false
     @StateObject private var githubCache = GitHubMetadataCache.shared
+    @ObservedObject private var updateManager = UpdateManager.shared
     private let freeflowRepoURL = URL(string: "https://github.com/zachlatta/freeflow")!
 
     var body: some View {
@@ -182,11 +183,17 @@ struct GeneralSettingsView: View {
                 settingsCard("Startup", icon: "power") {
                     startupSection
                 }
+                settingsCard("Updates", icon: "arrow.triangle.2.circlepath") {
+                    updatesSection
+                }
                 settingsCard("API Key", icon: "key.fill") {
                     apiKeySection
                 }
                 settingsCard("Push-to-Talk Key", icon: "keyboard.fill") {
                     hotkeySection
+                }
+                settingsCard("Microphone", icon: "mic.fill") {
+                    microphoneSection
                 }
                 settingsCard("Custom Vocabulary", icon: "text.book.closed.fill") {
                     vocabularySection
@@ -241,6 +248,59 @@ struct GeneralSettingsView: View {
                     }
                     .font(.caption)
                 }
+            }
+        }
+    }
+
+    // MARK: Updates
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Automatically check for updates", isOn: Binding(
+                get: { updateManager.autoCheckEnabled },
+                set: { updateManager.autoCheckEnabled = $0 }
+            ))
+
+            HStack(spacing: 10) {
+                Button {
+                    Task {
+                        await updateManager.checkForUpdates(userInitiated: true)
+                    }
+                } label: {
+                    if updateManager.isChecking {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Checking...")
+                        }
+                    } else {
+                        Text("Check for Updates Now")
+                    }
+                }
+                .disabled(updateManager.isChecking)
+
+                if let lastCheck = updateManager.lastCheckDate {
+                    Text("Last checked: \(lastCheck.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if updateManager.updateAvailable {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundStyle(.blue)
+                    Text("FreeFlow v\(updateManager.latestVersion) is available!")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button("Download") {
+                        updateManager.showUpdateAlert()
+                    }
+                    .font(.caption)
+                }
+                .padding(10)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(6)
             }
         }
     }
@@ -326,6 +386,34 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+        }
+    }
+
+    // MARK: Microphone
+
+    private var microphoneSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Select which microphone to use for recording.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 6) {
+                MicrophoneOptionRow(
+                    name: "System Default",
+                    isSelected: appState.selectedMicrophoneID == "default" || appState.selectedMicrophoneID.isEmpty,
+                    action: { appState.selectedMicrophoneID = "default" }
+                )
+                ForEach(appState.availableMicrophones) { device in
+                    MicrophoneOptionRow(
+                        name: device.name,
+                        isSelected: appState.selectedMicrophoneID == device.uid,
+                        action: { appState.selectedMicrophoneID = device.uid }
+                    )
+                }
+            }
+        }
+        .onAppear {
+            appState.refreshAvailableMicrophones()
         }
     }
 
@@ -420,6 +508,34 @@ struct GeneralSettingsView: View {
         micPermissionGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
     }
 
+}
+
+// MARK: - Microphone Option Row
+
+struct MicrophoneOptionRow: View {
+    let name: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? .blue : .secondary)
+                Text(name)
+                    .foregroundStyle(.primary)
+                Spacer()
+            }
+            .padding(12)
+            .background(isSelected ? Color.blue.opacity(0.1) : Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 // MARK: - Run Log
