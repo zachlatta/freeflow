@@ -1,4 +1,4 @@
-> **Work in progress.** FreeFlow is under active development and things may break or change.
+> **Work in progress.** FreeFlow is under active development and not ready for others to use yet.
 
 <p align="center">
   <img src="Resources/AppIcon-Source.png" width="128" height="128" alt="FreeFlow icon">
