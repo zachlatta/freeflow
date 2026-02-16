@@ -15,6 +15,15 @@
   Hold a key to record, release to transcribe. Works everywhere on your Mac.
 </p>
 
+<div align="center">
+
+| | Download | Mac Compatibility |
+|:-:|:-:|:-:|
+| **Apple Silicon** | [**⬇ FreeFlow-arm64.dmg**](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow-arm64.dmg) | M1, M2, M3, M4 |
+| **Universal** | [**⬇ FreeFlow-universal.dmg**](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow-universal.dmg) | Apple Silicon + Intel |
+
+</div>
+
 ---
 
 **Fast and accurate transcription** — powered by Groq's lightning-fast inference, your speech is transcribed in moments.
@@ -27,7 +36,7 @@
 
 ## Setup
 
-1. Download the latest build from [Releases](https://github.com/zachlatta/freeflow/releases) (or build from source)
+1. Download the latest build: [Apple Silicon](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow-arm64.dmg) · [Universal](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow-universal.dmg) (or [build from source](#building-from-source))
 2. Open the app and follow the setup wizard
 3. Get a free API key from [console.groq.com/keys](https://console.groq.com/keys)
 4. Grant the requested permissions (microphone, accessibility, screen recording)
