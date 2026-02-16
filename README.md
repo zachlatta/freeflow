@@ -19,7 +19,7 @@
   <img src="Resources/demo.gif" alt="FreeFlow demo" width="600">
 </p>
 
-I really like the concept of apps like [Wispr Flow](https://wisprflow.ai/), [Superwhisper](https://superwhisper.com/), and [Monologue](https://www.monologue.to/) that use AI to add really accurate and easy-to-use transcription to your computer, but they all charge fees of like $10/month when the underlying AI models are free to use or cost pennies at most.
+I like the concept of apps like [Wispr Flow](https://wisprflow.ai/), [Superwhisper](https://superwhisper.com/), and [Monologue](https://www.monologue.to/) that use AI to add accurate and easy-to-use transcription to your computer, but they all charge fees of ~$10/month when the underlying AI models are free to use or cost pennies.
 
 So over the weekend I vibe-coded my own free version!
 
