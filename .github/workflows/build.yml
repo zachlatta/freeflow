@@ -3,6 +3,8 @@ name: Build macOS App
 on:
   push:
     branches: [main]
+  # SECURITY: Do NOT change this to pull_request_target — that trigger runs with
+  # access to repository secrets, which would expose signing credentials to fork PRs.
   pull_request:
     branches: [main]
 
@@ -43,6 +45,7 @@ jobs:
             -t cert \
             -f pkcs12 \
             -k "$KEYCHAIN_PATH"
+          rm -f "$CERTIFICATE_PATH"
 
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -77,9 +80,11 @@ jobs:
           name: FreeFlow-${{ matrix.arch }}
           path: build/FreeFlow-${{ matrix.arch }}.dmg
 
-      - name: Cleanup keychain
-        if: always() && steps.codesign.outputs.signed == 'true'
+      - name: Cleanup signing artifacts
+        if: always()
         run: |
-          if [ -n "$KEYCHAIN_PATH" ] && [ -f "$KEYCHAIN_PATH" ]; then
-            security delete-keychain "$KEYCHAIN_PATH"
+          rm -f "$RUNNER_TEMP/developer_id.p12"
+          KPATH="${KEYCHAIN_PATH:-$RUNNER_TEMP/signing.keychain-db}"
+          if [ -f "$KPATH" ]; then
+            security delete-keychain "$KPATH"
           fi

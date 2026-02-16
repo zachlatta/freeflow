@@ -52,13 +52,14 @@ jobs:
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # Import certificate
+          # Import certificate and delete .p12 from disk immediately
           security import "$CERTIFICATE_PATH" \
             -P "$CERTIFICATE_PASSWORD" \
             -A \
             -t cert \
             -f pkcs12 \
             -k "$KEYCHAIN_PATH"
+          rm -f "$CERTIFICATE_PATH"
 
           # Allow codesign to access the keychain without UI prompt
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
@@ -132,7 +133,7 @@ jobs:
 
       # --- Release ---
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: FreeFlow ${{ steps.version.outputs.tag }}
@@ -150,9 +151,11 @@ jobs:
             FreeFlow-universal.dmg
 
       # --- Cleanup ---
-      - name: Cleanup keychain
+      - name: Cleanup signing artifacts
         if: always()
         run: |
-          if [ -n "$KEYCHAIN_PATH" ] && [ -f "$KEYCHAIN_PATH" ]; then
-            security delete-keychain "$KEYCHAIN_PATH"
+          rm -f "$RUNNER_TEMP/developer_id.p12"
+          KPATH="${KEYCHAIN_PATH:-$RUNNER_TEMP/signing.keychain-db}"
+          if [ -f "$KPATH" ]; then
+            security delete-keychain "$KPATH"
           fi
