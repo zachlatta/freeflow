@@ -11,9 +11,6 @@ on:
 jobs:
   build:
     runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [arm64, universal]
     steps:
       - uses: actions/checkout@v4
 
@@ -62,23 +59,20 @@ jobs:
         run: echo "CODESIGN_IDENTITY=-" >> "$GITHUB_ENV"
 
       - name: Build
-        run: make ARCH=${{ matrix.arch }} APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
+        run: make ARCH=universal APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
 
       - name: Create DMG
-        run: make dmg ARCH=${{ matrix.arch }} APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
+        run: make dmg ARCH=universal APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
 
       - name: Sign DMG
         if: steps.codesign.outputs.signed == 'true'
         run: codesign --force --sign "$CODESIGN_IDENTITY" build/FreeFlow.dmg
 
-      - name: Rename DMG
-        run: mv build/FreeFlow.dmg build/FreeFlow-${{ matrix.arch }}.dmg
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FreeFlow-${{ matrix.arch }}
-          path: build/FreeFlow-${{ matrix.arch }}.dmg
+          name: FreeFlow
+          path: build/FreeFlow.dmg
 
       - name: Cleanup signing artifacts
         if: always()

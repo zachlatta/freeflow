@@ -86,30 +86,6 @@ jobs:
             --password "$APPLE_APP_PASSWORD" \
             --keychain "$KEYCHAIN_PATH"
 
-      # --- Build arm64 ---
-      - name: Build arm64
-        run: make ARCH=arm64 APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
-
-      - name: Create arm64 DMG
-        run: make dmg ARCH=arm64 APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
-
-      - name: Sign arm64 DMG
-        run: codesign --force --sign "$CODESIGN_IDENTITY" build/FreeFlow.dmg
-
-      - name: Notarize arm64 DMG
-        run: |
-          xcrun notarytool submit build/FreeFlow.dmg \
-            --keychain-profile "notarytool-profile" \
-            --keychain "$KEYCHAIN_PATH" \
-            --wait
-          xcrun stapler staple build/FreeFlow.dmg
-
-      - name: Save arm64 DMG
-        run: mv build/FreeFlow.dmg FreeFlow-arm64.dmg
-
-      - name: Clean for next build
-        run: make clean
-
       # --- Build universal ---
       - name: Build universal
         run: make ARCH=universal APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
@@ -129,7 +105,7 @@ jobs:
           xcrun stapler staple build/FreeFlow.dmg
 
       - name: Save universal DMG
-        run: mv build/FreeFlow.dmg FreeFlow-universal.dmg
+        run: mv build/FreeFlow.dmg FreeFlow.dmg
 
       # --- Release ---
       - name: Create Release
@@ -140,15 +116,11 @@ jobs:
           body: |
             ## Download
 
-            | File | Who it's for |
-            |------|-------------|
-            | **FreeFlow-arm64.dmg** | Apple Silicon Macs (M1, M2, M3, M4, M5) — most Macs from 2020 onwards. **Download this one if you're not sure.** |
-            | **FreeFlow-universal.dmg** | Works on both Apple Silicon and Intel Macs. Use this if you have an older Intel Mac. |
+            **[FreeFlow.dmg](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg)** — Universal build for all Macs (Apple Silicon + Intel).
           generate_release_notes: true
           make_latest: true
           files: |
-            FreeFlow-arm64.dmg
-            FreeFlow-universal.dmg
+            FreeFlow.dmg
 
       # --- Cleanup ---
       - name: Cleanup signing artifacts

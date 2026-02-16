@@ -15,14 +15,10 @@
   Hold a key to record, release to transcribe. Works everywhere on your Mac.
 </p>
 
-<div align="center">
-
-| | Download | Mac Compatibility |
-|:-:|:-:|:-:|
-| **Apple Silicon** | [**⬇ FreeFlow-arm64.dmg**](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow-arm64.dmg) | M1, M2, M3, M4, M5 Chips |
-| **Universal** | [**⬇ FreeFlow-universal.dmg**](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow-universal.dmg) | Intel Macs |
-
-</div>
+<p align="center">
+  <a href="https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg"><b>⬇ Download FreeFlow.dmg</b></a><br>
+  <sub>Universal build — works on all Macs (Apple Silicon + Intel)</sub>
+</p>
 
 ---
 
@@ -36,7 +32,7 @@
 
 ## Setup
 
-1. Download the latest build: [Apple Silicon](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow-arm64.dmg) · [Universal](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow-universal.dmg) (or [build from source](#building-from-source))
+1. [Download FreeFlow.dmg](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg) (or [build from source](#building-from-source))
 2. Open the app and follow the setup wizard
 3. Get a free API key from [console.groq.com/keys](https://console.groq.com/keys)
 4. Grant the requested permissions (microphone, accessibility, screen recording)
