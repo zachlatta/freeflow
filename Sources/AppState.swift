@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import AppKit
 import AVFoundation
+import ServiceManagement
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
@@ -77,6 +78,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var lastContextScreenshotDataURL: String? = nil
     @Published var lastContextScreenshotStatus = "No screenshot"
     @Published var hasScreenRecordingPermission = false
+    @Published var launchAtLogin: Bool {
+        didSet { setLaunchAtLogin(launchAtLogin) }
+    }
 
     let audioRecorder = AudioRecorder()
     let hotkeyManager = HotkeyManager()
@@ -112,6 +116,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.pipelineHistory = savedHistory
         self.hasAccessibility = initialAccessibility
         self.hasScreenRecordingPermission = initialScreenCapturePermission
+        self.launchAtLogin = SMAppService.mainApp.status == .enabled
     }
 
     private static func loadStoredAPIKey(account: String) -> String {
@@ -132,7 +137,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     static func audioStorageDirectory() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let audioDir = appSupport.appendingPathComponent("VoiceToText/audio", isDirectory: true)
+        let audioDir = appSupport.appendingPathComponent("FreeFlow/audio", isDirectory: true)
         if !FileManager.default.fileExists(atPath: audioDir.path) {
             try? FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
         }
@@ -209,6 +214,29 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
         if let url = settingsURL {
             NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            // Revert the toggle on failure without re-triggering didSet
+            let current = SMAppService.mainApp.status == .enabled
+            if current != launchAtLogin {
+                launchAtLogin = current
+            }
+        }
+    }
+
+    func refreshLaunchAtLoginStatus() {
+        let current = SMAppService.mainApp.status == .enabled
+        if current != launchAtLogin {
+            launchAtLogin = current
         }
     }
 

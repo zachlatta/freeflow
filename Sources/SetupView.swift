@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import Foundation
+import ServiceManagement
 
 struct SetupView: View {
     var onComplete: () -> Void
@@ -17,6 +18,7 @@ struct SetupView: View {
         case screenRecording
         case hotkey
         case vocabulary
+        case launchAtLogin
         case ready
     }
 
@@ -28,9 +30,7 @@ struct SetupView: View {
     @State private var keyValidationError: String?
     @State private var accessibilityTimer: Timer?
     @State private var customVocabularyInput: String = ""
-    @State private var repositoryStarCount: Int?
-    @State private var isLoadingStarCount = true
-    @State private var recentStargazers: [GitHubStarRecord] = []
+    @StateObject private var githubCache = GitHubMetadataCache.shared
     private let totalSteps: [SetupStep] = SetupStep.allCases
 
     var body: some View {
@@ -51,6 +51,8 @@ struct SetupView: View {
                     hotkeyStep
                 case .vocabulary:
                     vocabularyStep
+                case .launchAtLogin:
+                    launchAtLoginStep
                 case .ready:
                     readyStep
                 }
@@ -120,24 +122,10 @@ struct SetupView: View {
 
     var welcomeStep: some View {
         VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.blue.opacity(0.25),
-                                Color.blue.opacity(0.07)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 90, height: 90)
-
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 38, weight: .bold, design: .rounded))
-                    .foregroundStyle(.blue)
-            }
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 128, height: 128)
 
             VStack(spacing: 6) {
                 Text("Welcome to FreeFlow")
@@ -177,9 +165,9 @@ struct SetupView: View {
                         Image(systemName: "star.fill")
                             .foregroundStyle(.yellow)
                             .font(.caption2)
-                        if isLoadingStarCount {
+                        if githubCache.isLoading {
                             ProgressView().scaleEffect(0.5)
-                        } else if let count = repositoryStarCount {
+                        } else if let count = githubCache.starCount {
                             Text("\(count.formatted()) \(count == 1 ? "star" : "stars")")
                                 .font(.caption2.weight(.semibold))
                                 .foregroundStyle(.secondary)
@@ -204,11 +192,11 @@ struct SetupView: View {
                     .buttonStyle(.plain)
                 }
 
-                if !recentStargazers.isEmpty {
+                if !githubCache.recentStargazers.isEmpty {
                     Divider()
                     HStack(spacing: 8) {
                         HStack(spacing: -6) {
-                            ForEach(recentStargazers) { star in
+                            ForEach(githubCache.recentStargazers) { star in
                                 Button {
                                     openURL(star.user.htmlUrl)
                                 } label: {
@@ -258,29 +246,46 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("FreeFlow uses Groq's `whisper-large-v3` model for high-accuracy transcription. Enter your API key below.")
+            Text("FreeFlow uses Groq for fast, high-accuracy transcription.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("API Key")
-                    .font(.headline)
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .disabled(isValidatingKey)
-                    .onChange(of: apiKeyInput) { _ in
-                        keyValidationError = nil
+            VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("How to get a free API key:")
+                        .font(.subheadline.weight(.semibold))
+                    VStack(alignment: .leading, spacing: 2) {
+                        instructionRow(number: "1", text: "Go to [console.groq.com/keys](https://console.groq.com/keys)")
+                        instructionRow(number: "2", text: "Create a free account (if you don't have one)")
+                        instructionRow(number: "3", text: "Click **Create API Key** and copy it")
                     }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.blue.opacity(0.06))
+                )
 
-                if let error = keyValidationError {
-                    Label(error, systemImage: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                        .font(.caption)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("API Key")
+                        .font(.headline)
+                    SecureField("Paste your Groq API key", text: $apiKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .disabled(isValidatingKey)
+                        .onChange(of: apiKeyInput) { _ in
+                            keyValidationError = nil
+                        }
+
+                    if let error = keyValidationError {
+                        Label(error, systemImage: "xmark.circle.fill")
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                    }
                 }
             }
-            .padding(.top, 10)
 
             stepIndicator
         }
@@ -494,6 +499,35 @@ struct SetupView: View {
         }
     }
 
+    var launchAtLoginStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "sunrise.fill")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Launch at Login")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Start FreeFlow automatically when you log in so it's always ready.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Image(systemName: "sunrise.fill")
+                    .frame(width: 24)
+                    .foregroundStyle(.blue)
+                Toggle("Launch FreeFlow at login", isOn: $appState.launchAtLogin)
+            }
+            .padding(12)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(8)
+
+            stepIndicator
+        }
+    }
+
     var readyStep: some View {
         VStack(spacing: 20) {
             Image(systemName: "checkmark.circle.fill")
@@ -528,6 +562,20 @@ struct SetupView: View {
             }
         }
         .padding(.top, 20)
+    }
+
+    // MARK: - Helpers
+
+    private func instructionRow(number: String, text: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(number + ".")
+                .font(.subheadline.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 16, alignment: .trailing)
+            Text(text)
+                .font(.subheadline)
+                .tint(.blue)
+        }
     }
 
     // MARK: - Actions
@@ -606,7 +654,7 @@ struct SetupView: View {
     }
 
     private func fetchRepositoryMetadata() async {
-        isLoadingStarCount = true
+        githubCache.isLoading = true
         var starsCount: Int?
         var recent: [GitHubStarRecord] = []
 
@@ -627,19 +675,19 @@ struct SetupView: View {
             }
 
             await MainActor.run {
-                repositoryStarCount = starsCount
-                recentStargazers = recent
-                isLoadingStarCount = false
+                githubCache.starCount = starsCount
+                githubCache.recentStargazers = recent
+                githubCache.isLoading = false
             }
         } catch {
             await MainActor.run {
-                isLoadingStarCount = false
+                githubCache.isLoading = false
             }
         }
     }
 }
 
-private struct GitHubRepoInfo: Decodable {
+struct GitHubRepoInfo: Decodable {
     let stargazersCount: Int
 
     private enum CodingKeys: String, CodingKey {
@@ -647,7 +695,7 @@ private struct GitHubRepoInfo: Decodable {
     }
 }
 
-private struct GitHubStarRecord: Decodable, Identifiable {
+struct GitHubStarRecord: Decodable, Identifiable {
     let user: GitHubStarUser
 
     var id: Int {
@@ -655,7 +703,7 @@ private struct GitHubStarRecord: Decodable, Identifiable {
     }
 }
 
-private struct GitHubStarUser: Decodable {
+struct GitHubStarUser: Decodable {
     let id: Int
     let login: String
     let avatarUrl: URL
@@ -666,6 +714,55 @@ private struct GitHubStarUser: Decodable {
         case login
         case avatarUrl = "avatar_url"
         case htmlUrl = "html_url"
+    }
+}
+
+@MainActor
+class GitHubMetadataCache: ObservableObject {
+    static let shared = GitHubMetadataCache()
+
+    @Published var starCount: Int?
+    @Published var githubCache.recentStargazers: [GitHubStarRecord] = []
+    @Published var isLoading = true
+
+    private var lastFetchDate: Date?
+    private let cacheDuration: TimeInterval = 5 * 60 // 5 minutes
+    private let repoAPIURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow")!
+    private let stargazersAPIURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/stargazers?per_page=3")!
+
+    private init() {}
+
+    func fetchIfNeeded() async {
+        if let lastFetch = lastFetchDate, Date().timeIntervalSince(lastFetch) < cacheDuration {
+            return
+        }
+
+        isLoading = true
+
+        do {
+            let repoResult = try await URLSession.shared.data(from: repoAPIURL)
+            guard let repoHTTP = repoResult.1 as? HTTPURLResponse,
+                  (200..<300).contains(repoHTTP.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let count = try JSONDecoder().decode(GitHubRepoInfo.self, from: repoResult.0).stargazersCount
+
+            var request = URLRequest(url: stargazersAPIURL)
+            request.setValue("application/vnd.github.v3.star+json", forHTTPHeaderField: "Accept")
+            let starredResult = try await URLSession.shared.data(for: request)
+            var recent: [GitHubStarRecord] = []
+            if let starredHTTP = starredResult.1 as? HTTPURLResponse,
+               (200..<300).contains(starredHTTP.statusCode) {
+                recent = try JSONDecoder().decode([GitHubStarRecord].self, from: starredResult.0)
+            }
+
+            starCount = count
+            githubCache.recentStargazers = recent
+            isLoading = false
+            lastFetchDate = Date()
+        } catch {
+            isLoading = false
+        }
     }
 }
 

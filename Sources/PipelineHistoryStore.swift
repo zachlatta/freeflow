@@ -9,7 +9,7 @@ final class PipelineHistoryStore {
         container = NSPersistentContainer(name: "PipelineHistory", managedObjectModel: model)
 
         if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let baseURL = appSupport.appendingPathComponent("VoiceToText", isDirectory: true)
+            let baseURL = appSupport.appendingPathComponent("FreeFlow", isDirectory: true)
             try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
             let storeURL = baseURL.appendingPathComponent("PipelineHistory.sqlite")
             let description = NSPersistentStoreDescription(url: storeURL)

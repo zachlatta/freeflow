@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import ServiceManagement
 
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
@@ -51,23 +52,152 @@ struct SettingsView: View {
 
 struct GeneralSettingsView: View {
     @EnvironmentObject var appState: AppState
+    @Environment(\.openURL) private var openURL
     @State private var apiKeyInput: String = ""
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
     @State private var keyValidationSuccess = false
     @State private var customVocabularyInput: String = ""
     @State private var micPermissionGranted = false
+    @State private var repositoryStarCount: Int?
+    @State private var isLoadingStarCount = true
+    @State private var recentStargazers: [GitHubStarRecord] = []
+    private let freeflowRepoURL = URL(string: "https://github.com/zachlatta/freeflow")!
+    private let freeflowRepoAPIURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow")!
+    private let freeflowRecentStargazersAPIURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/stargazers?per_page=3")!
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                apiKeySection
-                Divider()
-                hotkeySection
-                Divider()
-                vocabularySection
-                Divider()
-                permissionsSection
+            VStack(spacing: 20) {
+                // App branding header
+                VStack(spacing: 12) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 64, height: 64)
+
+                    Text("FreeFlow")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+
+                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    // GitHub card
+                    VStack(spacing: 10) {
+                        HStack(spacing: 8) {
+                            AsyncImage(url: URL(string: "https://avatars.githubusercontent.com/u/992248")) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                default:
+                                    Color.gray.opacity(0.2)
+                                }
+                            }
+                            .frame(width: 22, height: 22)
+                            .clipShape(Circle())
+
+                            Button {
+                                openURL(freeflowRepoURL)
+                            } label: {
+                                Text("zachlatta/freeflow")
+                                    .font(.system(.caption, design: .monospaced).weight(.medium))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
+
+                            Spacer()
+
+                            HStack(spacing: 4) {
+                                Image(systemName: "star.fill")
+                                    .foregroundStyle(.yellow)
+                                    .font(.caption2)
+                                if isLoadingStarCount {
+                                    ProgressView().scaleEffect(0.5)
+                                } else if let count = repositoryStarCount {
+                                    Text("\(count.formatted()) \(count == 1 ? "star" : "stars")")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color.yellow.opacity(0.14)))
+
+                            Button {
+                                openURL(freeflowRepoURL)
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "star")
+                                    Text("Star")
+                                }
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(Color.yellow.opacity(0.18)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if !recentStargazers.isEmpty {
+                            Divider()
+                            HStack(spacing: 8) {
+                                HStack(spacing: -6) {
+                                    ForEach(recentStargazers) { star in
+                                        Button {
+                                            openURL(star.user.htmlUrl)
+                                        } label: {
+                                            AsyncImage(url: star.user.avatarUrl) { phase in
+                                                switch phase {
+                                                case .success(let image):
+                                                    image.resizable().aspectRatio(contentMode: .fill)
+                                                default:
+                                                    Color.gray.opacity(0.2)
+                                                }
+                                            }
+                                            .frame(width: 22, height: 22)
+                                            .clipShape(Circle())
+                                            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                Text("recently starred")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                                Spacer()
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                            )
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 4)
+                .padding(.bottom, 4)
+
+                settingsCard("Startup", icon: "power") {
+                    startupSection
+                }
+                settingsCard("API Key", icon: "key.fill") {
+                    apiKeySection
+                }
+                settingsCard("Push-to-Talk Key", icon: "keyboard.fill") {
+                    hotkeySection
+                }
+                settingsCard("Custom Vocabulary", icon: "text.book.closed.fill") {
+                    vocabularySection
+                }
+                settingsCard("Permissions", icon: "lock.shield.fill") {
+                    permissionsSection
+                }
             }
             .padding(24)
         }
@@ -75,6 +205,47 @@ struct GeneralSettingsView: View {
             apiKeyInput = appState.apiKey
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
+            appState.refreshLaunchAtLoginStatus()
+            Task { await fetchRepositoryMetadata() }
+        }
+    }
+
+    private func settingsCard<Content: View>(_ title: String, icon: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: icon)
+                .font(.headline)
+            content()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+        )
+    }
+
+    // MARK: Startup
+
+    private var startupSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Launch FreeFlow at login", isOn: $appState.launchAtLogin)
+
+            if SMAppService.mainApp.status == .requiresApproval {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Text("Login item requires approval in System Settings.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Open Login Items Settings") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
+                    }
+                    .font(.caption)
+                }
+            }
         }
     }
 
@@ -82,8 +253,6 @@ struct GeneralSettingsView: View {
 
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("API Key")
-                .font(.headline)
             Text("FreeFlow uses Groq's whisper-large-v3 model for transcription.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -140,8 +309,6 @@ struct GeneralSettingsView: View {
 
     private var hotkeySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Push-to-Talk Key")
-                .font(.headline)
             Text("Hold this key to record, release to transcribe.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -170,8 +337,6 @@ struct GeneralSettingsView: View {
 
     private var vocabularySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Custom Vocabulary")
-                .font(.headline)
             Text("Words and phrases to preserve during post-processing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -197,9 +362,6 @@ struct GeneralSettingsView: View {
 
     private var permissionsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Permissions")
-                .font(.headline)
-
             permissionRow(
                 title: "Microphone",
                 icon: "mic.fill",
@@ -260,6 +422,37 @@ struct GeneralSettingsView: View {
 
     private func checkMicPermission() {
         micPermissionGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+    }
+
+    private func fetchRepositoryMetadata() async {
+        isLoadingStarCount = true
+        do {
+            let repoResult = try await URLSession.shared.data(from: freeflowRepoAPIURL)
+            guard let repoHTTP = repoResult.1 as? HTTPURLResponse,
+                  (200..<300).contains(repoHTTP.statusCode) else {
+                throw URLError(.badServerResponse)
+            }
+            let starsCount = try JSONDecoder().decode(GitHubRepoInfo.self, from: repoResult.0).stargazersCount
+
+            var request = URLRequest(url: freeflowRecentStargazersAPIURL)
+            request.setValue("application/vnd.github.v3.star+json", forHTTPHeaderField: "Accept")
+            let starredResult = try await URLSession.shared.data(for: request)
+            var recent: [GitHubStarRecord] = []
+            if let starredHTTP = starredResult.1 as? HTTPURLResponse,
+               (200..<300).contains(starredHTTP.statusCode) {
+                recent = try JSONDecoder().decode([GitHubStarRecord].self, from: starredResult.0)
+            }
+
+            await MainActor.run {
+                repositoryStarCount = starsCount
+                recentStargazers = recent
+                isLoadingStarCount = false
+            }
+        } catch {
+            await MainActor.run {
+                isLoadingStarCount = false
+            }
+        }
     }
 }
 
@@ -457,6 +650,7 @@ struct RunLogEntryView: View {
                                         Text(item.contextSummary)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
                                     } else {
                                         Text("No context captured")
                                             .font(.caption)
@@ -475,6 +669,7 @@ struct RunLogEntryView: View {
                                     Text("Sent audio to Groq whisper-large-v3")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
                                     if !item.rawTranscript.isEmpty {
                                         Text(item.rawTranscript)
                                             .font(.system(.caption, design: .monospaced))
@@ -501,6 +696,7 @@ struct RunLogEntryView: View {
                                     Text(item.postProcessingStatus)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
 
                                     if let prompt = item.postProcessingPrompt, !prompt.isEmpty {
                                         Button {

@@ -14,27 +14,7 @@ struct AppContext {
     let screenshotError: String?
 
     var contextSummary: String {
-        var lines: [String] = ["Current activity: \(currentActivity)"]
-
-        lines.append("Current app: \(appName ?? "Unknown")")
-
-        if let bundleIdentifier {
-            lines.append("Bundle ID: \(bundleIdentifier)")
-        }
-        if let windowTitle, !windowTitle.isEmpty {
-            lines.append("Window: \(windowTitle)")
-        }
-        if let selectedText, !selectedText.isEmpty {
-            lines.append("Visible selected text:\n\(selectedText)")
-        }
-        if let screenshotError {
-            lines.append("Screenshot status: \(screenshotError)")
-        } else {
-            let mimeType = screenshotMimeType ?? "image"
-            lines.append("Screenshot status: available (\(mimeType))")
-        }
-
-        return lines.joined(separator: "\n")
+        currentActivity
     }
 }
 

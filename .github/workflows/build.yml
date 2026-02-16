@@ -1,0 +1,25 @@
+name: Build macOS App
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make CODESIGN_IDENTITY="-"
+
+      - name: Create DMG
+        run: hdiutil create -volname "FreeFlow" -srcfolder build/FreeFlow.app -ov -format UDZO build/FreeFlow.dmg
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FreeFlow
+          path: build/FreeFlow.dmg
