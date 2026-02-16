@@ -105,6 +105,7 @@ class AudioRecorder: NSObject, ObservableObject {
     private var audioEngine: AVAudioEngine?
     private var audioFile: AVAudioFile?
     private var tempFileURL: URL?
+    private let audioFileQueue = DispatchQueue(label: "com.zachlatta.freeflow.audiofile")
 
     @Published var isRecording = false
     @Published var audioLevel: Float = 0.0
@@ -174,13 +175,15 @@ class AudioRecorder: NSObject, ObservableObject {
         do {
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
                 guard let self else { return }
-                do {
-                    try audioFile.write(from: buffer)
-                    self.computeAudioLevel(from: buffer)
-                } catch {
-                    // Best-effort: if write fails after start, recording will stop and be surfaced by next action.
-                    self.audioFile = nil
+                self.audioFileQueue.sync {
+                    do {
+                        try audioFile.write(from: buffer)
+                    } catch {
+                        // Best-effort: if write fails after start, recording will stop and be surfaced by next action.
+                        self.audioFile = nil
+                    }
                 }
+                self.computeAudioLevel(from: buffer)
             }
 
             audioEngine.prepare()
@@ -200,7 +203,7 @@ class AudioRecorder: NSObject, ObservableObject {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
-        audioFile = nil
+        audioFileQueue.sync { audioFile = nil }
         isRecording = false
         smoothedLevel = 0.0
         DispatchQueue.main.async { self.audioLevel = 0.0 }

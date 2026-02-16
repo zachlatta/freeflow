@@ -19,7 +19,20 @@ final class PipelineHistoryStore {
             container.persistentStoreDescriptions = [description]
         }
 
-        container.loadPersistentStores { _, _ in }
+        container.loadPersistentStores { description, error in
+            if let error = error {
+                print("[PipelineHistoryStore] Failed to load persistent store at \(description.url?.path ?? "unknown"): \(error)")
+                // Attempt to recover by destroying and recreating the store
+                if let storeURL = description.url {
+                    try? FileManager.default.removeItem(at: storeURL)
+                    self.container.loadPersistentStores { _, retryError in
+                        if let retryError = retryError {
+                            print("[PipelineHistoryStore] Failed to recreate store: \(retryError)")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     func loadAllHistory() -> [PipelineHistoryItem] {

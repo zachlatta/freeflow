@@ -42,14 +42,11 @@ class TranscriptionService {
                 throw TranscriptionError.transcriptionTimedOut(self.transcriptionTimeoutSeconds)
             }
 
-            do {
-                let result = try await group.next()!
-                group.cancelAll()
-                return result
-            } catch {
-                group.cancelAll()
-                throw error
+            guard let result = try await group.next() else {
+                throw TranscriptionError.submissionFailed("No transcription result")
             }
+            group.cancelAll()
+            return result
         }
     }
 
