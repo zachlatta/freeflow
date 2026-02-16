@@ -13,11 +13,11 @@
   <sub>Works on all Macs (Apple Silicon + Intel)</sub>
 </p>
 
+---
+
 <p align="center">
   <img src="Resources/demo.gif" alt="FreeFlow demo" width="600">
 </p>
-
----
 
 I vibe-coded this over the weekend because I didn't want to pay $10/month for voice-to-text. I was also annoyed with intrusive UI and frequent up-sells from other apps.
 
