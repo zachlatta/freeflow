@@ -29,14 +29,14 @@ public class TextInjector
                 // Set new text
                 Clipboard.SetText(text);
 
-                // Wait a bit
-                Thread.Sleep(50);
+                // Wait a bit for clipboard to settle
+                Thread.Sleep(100);
 
                 // Simulate Ctrl+V
                 _inputSimulator.Keyboard.ModifiedKeyStroke(VirtualKeyCode.CONTROL, VirtualKeyCode.VK_V);
 
-                // Wait a bit for the app to process the paste
-                Thread.Sleep(100);
+                // Wait a bit for the app to process the paste before restoring clipboard
+                Thread.Sleep(500);
 
                 // Restore clipboard
                 if (oldData != null)

@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="RecordingOverlay" Height="50" Width="200"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        Topmost="True" ShowInTaskbar="False">
+        Topmost="True" ShowInTaskbar="False" ShowActivated="False" Focusable="False">
     <Border Background="#CC000000" CornerRadius="25">
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
             <Ellipse x:Name="RecordingDot" Width="10" Height="10" Fill="Red" Margin="0,0,10,0">

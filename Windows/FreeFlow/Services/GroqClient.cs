@@ -40,7 +40,7 @@ public class GroqClient
 
     public async Task<string> PostProcessAsync(string transcript, string contextSummary, string? screenshotBase64 = null, string customVocabulary = "")
     {
-        var model = "meta-llama/llama-4-scout-17b-16e-instruct"; // Using the same model as Mac app if available, otherwise fallback
+        var model = "llama-3.2-11b-vision-preview";
 
         var vocabularyPrompt = !string.IsNullOrEmpty(customVocabulary) ? $"\n\nThe following vocabulary must be treated as high-priority terms while rewriting. Use these spellings exactly in the output when relevant:\n{customVocabulary}" : "";
 
