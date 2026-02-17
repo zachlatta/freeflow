@@ -11,6 +11,8 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    env:
+      DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -20,7 +22,7 @@ jobs:
       # Import Developer ID certificate when secrets are available (pushes to main).
       # PRs from forks won't have access to secrets, so this step is skipped.
       - name: Import Developer ID certificate
-        if: secrets.DEVELOPER_ID_CERTIFICATE_BASE64 != ''
+        if: env.DEVELOPER_ID_CERTIFICATE_BASE64 != ''
         id: codesign
         env:
           CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
