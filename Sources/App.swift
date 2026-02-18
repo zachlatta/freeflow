@@ -24,7 +24,7 @@ struct MenuBarLabel: View {
         } else if appState.isTranscribing {
             "ellipsis.circle"
         } else {
-            "mic.fill"
+            "waveform"
         }
         Image(systemName: icon)
     }
