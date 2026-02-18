@@ -75,7 +75,7 @@ final class UpdateManager: ObservableObject {
     private let stabilityBufferDays: TimeInterval = 3
     private let checkIntervalSeconds: TimeInterval = 7 * 24 * 60 * 60 // 7 days
     private var periodicTimer: Timer?
-    private var activeDownloadTask: URLSessionDataTask?
+    private var activeDownloadTask: Task<Void, Never>?
 
     private init() {
         lastCheckDate = UserDefaults.standard.object(forKey: "updateLastCheckDate") as? Date
@@ -303,7 +303,8 @@ final class UpdateManager: ObservableObject {
 
         guard let downloadURL = URL(string: dmgAsset.browserDownloadUrl) else { return }
 
-        Task {
+        activeDownloadTask?.cancel()
+        activeDownloadTask = Task {
             await performUpdate(downloadURL: downloadURL, expectedSize: dmgAsset.size)
         }
     }
@@ -340,29 +341,44 @@ final class UpdateManager: ObservableObject {
                 return dmgPath
             }())
 
-            var receivedBytes = 0
-            let bufferSize = 65_536
-            var buffer = Data()
-            buffer.reserveCapacity(bufferSize)
+            // Run the byte-iteration and file I/O off the main thread
+            let mgr = self
+            let downloadTask = Task.detached {
+                var receivedBytes = 0
+                let bufferSize = 65_536
+                var buffer = Data()
+                buffer.reserveCapacity(bufferSize)
+                var lastProgressUpdate = CFAbsoluteTimeGetCurrent()
 
-            for try await byte in asyncBytes {
-                buffer.append(byte)
-                if buffer.count >= bufferSize {
-                    outputHandle.write(buffer)
-                    receivedBytes += buffer.count
-                    buffer.removeAll(keepingCapacity: true)
-                    if totalSize > 0 {
-                        downloadProgress = Double(receivedBytes) / Double(totalSize)
+                for try await byte in asyncBytes {
+                    try Task.checkCancellation()
+                    buffer.append(byte)
+                    if buffer.count >= bufferSize {
+                        outputHandle.write(buffer)
+                        receivedBytes += buffer.count
+                        buffer.removeAll(keepingCapacity: true)
+
+                        // Throttle progress updates to ~30fps
+                        let now = CFAbsoluteTimeGetCurrent()
+                        if totalSize > 0 && (now - lastProgressUpdate) >= 0.033 {
+                            lastProgressUpdate = now
+                            let progress = Double(receivedBytes) / Double(totalSize)
+                            await MainActor.run {
+                                mgr.downloadProgress = progress
+                            }
+                        }
                     }
                 }
+
+                // Write remaining bytes
+                if !buffer.isEmpty {
+                    outputHandle.write(buffer)
+                    receivedBytes += buffer.count
+                }
+                try outputHandle.close()
             }
 
-            // Write remaining bytes
-            if !buffer.isEmpty {
-                outputHandle.write(buffer)
-                receivedBytes += buffer.count
-            }
-            try outputHandle.close()
+            try await downloadTask.value
             downloadProgress = 1.0
 
         } catch is CancellationError {
@@ -383,7 +399,9 @@ final class UpdateManager: ObservableObject {
         downloadProgress = nil
 
         do {
-            let mountPoint = try await mountDMG(at: dmgPath)
+            let mountPoint = try await Task.detached {
+                try self.mountDMG(at: dmgPath)
+            }.value
 
             defer {
                 // Always try to detach
@@ -422,7 +440,7 @@ final class UpdateManager: ObservableObject {
         }
     }
 
-    private func mountDMG(at path: URL) async throws -> String {
+    nonisolated private func mountDMG(at path: URL) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
         process.arguments = ["attach", path.path, "-nobrowse", "-noverify", "-noautoopen", "-plist"]
