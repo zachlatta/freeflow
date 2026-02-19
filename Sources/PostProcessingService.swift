@@ -114,7 +114,7 @@ Output rules:
         }
 
         let userMessage = """
-Instructions: Clean up this RAW_TRANSCRIPTION. Return EMPTY if there should be no result.
+Instructions: Clean up RAW_TRANSCRIPTION and return only the cleaned transcript text without surrounding quotes. Return EMPTY if there should be no result.
 
 CONTEXT: "\(contextSummary)"
 
