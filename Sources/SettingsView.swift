@@ -428,7 +428,11 @@ struct GeneralSettingsView: View {
 
     private var hotkeySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Hold this key to record, release to transcribe.")
+            Toggle("Toggle mode (tap to start/stop)", isOn: $appState.useToggleMode)
+
+            Text(appState.useToggleMode
+                ? "Press the key to start recording, press again to stop and transcribe."
+                : "Hold this key to record, release to transcribe.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

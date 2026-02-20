@@ -82,6 +82,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var lastContextScreenshotDataURL: String? = nil
     @Published var lastContextScreenshotStatus = "No screenshot"
     @Published var hasScreenRecordingPermission = false
+    @Published var useToggleMode: Bool {
+        didSet {
+            UserDefaults.standard.set(useToggleMode, forKey: "use_toggle_mode")
+        }
+    }
+
     @Published var launchAtLogin: Bool {
         didSet { setLaunchAtLogin(launchAtLogin) }
     }
@@ -135,6 +141,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.pipelineHistory = savedHistory
         self.hasAccessibility = initialAccessibility
         self.hasScreenRecordingPermission = initialScreenCapturePermission
+        self.useToggleMode = UserDefaults.standard.bool(forKey: "use_toggle_mode")
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
         self.selectedMicrophoneID = selectedMicrophoneID
 
@@ -320,12 +327,28 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func handleHotkeyDown() {
-        os_log(.info, log: recordingLog, "handleHotkeyDown() fired, isRecording=%{public}d, isTranscribing=%{public}d", isRecording, isTranscribing)
-        guard !isRecording && !isTranscribing else { return }
-        startRecording()
+        os_log(.info, log: recordingLog, "handleHotkeyDown() fired, isRecording=%{public}d, isTranscribing=%{public}d, toggleMode=%{public}d", isRecording, isTranscribing, useToggleMode)
+        if useToggleMode {
+            // In toggle mode, key down toggles recording on/off
+            guard !isTranscribing else { return }
+            if isRecording {
+                stopAndTranscribe()
+            } else {
+                startRecording()
+            }
+        } else {
+            // Original hold-to-record behavior
+            guard !isRecording && !isTranscribing else { return }
+            startRecording()
+        }
     }
 
     private func handleHotkeyUp() {
+        if useToggleMode {
+            // In toggle mode, key release does nothing
+            return
+        }
+        // Original: release stops recording
         guard isRecording else { return }
         stopAndTranscribe()
     }

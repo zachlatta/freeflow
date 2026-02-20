@@ -65,7 +65,9 @@ struct MenuBarView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 6)
             } else {
-                Text("Hold \(appState.selectedHotkey.displayName) to dictate")
+                Text(appState.useToggleMode
+                    ? "Press \(appState.selectedHotkey.displayName) to toggle dictation"
+                    : "Hold \(appState.selectedHotkey.displayName) to dictate")
                     .foregroundStyle(.secondary)
                     .font(.caption)
                     .padding(.horizontal, 16)
