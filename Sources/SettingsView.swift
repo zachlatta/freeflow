@@ -449,6 +449,21 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+
+            Divider()
+                .padding(.vertical, 4)
+
+            HStack(spacing: 8) {
+                Image(systemName: "keyboard.badge.ellipsis")
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Toggle Dictation: Fn + Space")
+                        .font(.caption.weight(.medium))
+                    Text("Press to start recording, press again to stop. Works alongside hold-to-talk.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 

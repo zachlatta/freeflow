@@ -136,3 +136,41 @@ class HotkeyManager {
         stop()
     }
 }
+
+class ToggleHotkeyManager {
+    private var globalKeyDownMonitor: Any?
+    private var localKeyDownMonitor: Any?
+
+    var onToggle: (() -> Void)?
+
+    func start() {
+        stop()
+
+        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleKeyDown(event: event)
+        }
+        localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleKeyDown(event: event)
+            return event
+        }
+    }
+
+    private func handleKeyDown(event: NSEvent) {
+        // Space = keyCode 49, must have Fn/Globe modifier active
+        guard event.keyCode == 49,
+              event.modifierFlags.contains(.function),
+              !event.isARepeat else { return }
+        onToggle?()
+    }
+
+    func stop() {
+        if let m = globalKeyDownMonitor { NSEvent.removeMonitor(m) }
+        if let m = localKeyDownMonitor { NSEvent.removeMonitor(m) }
+        globalKeyDownMonitor = nil
+        localKeyDownMonitor = nil
+    }
+
+    deinit {
+        stop()
+    }
+}

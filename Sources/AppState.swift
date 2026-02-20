@@ -95,6 +95,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     let audioRecorder = AudioRecorder()
     let hotkeyManager = HotkeyManager()
+    let toggleHotkeyManager = ToggleHotkeyManager()
     let overlayManager = RecordingOverlayManager()
     private var accessibilityTimer: Timer?
     private var audioLevelCancellable: AnyCancellable?
@@ -313,6 +314,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
         }
         hotkeyManager.start(option: selectedHotkey)
+
+        toggleHotkeyManager.onToggle = { [weak self] in
+            DispatchQueue.main.async {
+                self?.handleToggleHotkey()
+            }
+        }
+        toggleHotkeyManager.start()
     }
 
     private func restartHotkeyMonitoring() {
@@ -328,6 +336,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func handleHotkeyUp() {
         guard isRecording else { return }
         stopAndTranscribe()
+    }
+
+    private func handleToggleHotkey() {
+        os_log(.info, log: recordingLog, "handleToggleHotkey() fired, isRecording=%{public}d, isTranscribing=%{public}d", isRecording, isTranscribing)
+        guard !isTranscribing else { return }
+        if isRecording {
+            stopAndTranscribe()
+        } else {
+            startRecording()
+        }
     }
 
     func toggleRecording() {
