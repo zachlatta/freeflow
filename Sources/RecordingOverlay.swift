@@ -35,40 +35,22 @@ private func makeOverlayPanel(width: CGFloat, height: CGFloat) -> NSPanel {
     return panel
 }
 
-/// Creates a container with a vibrancy blur layer and a SwiftUI overlay for the liquid glass effect.
-private func makeGlassContent<V: View>(
+/// Wraps a SwiftUI view in an NSView for use as panel content.
+private func makeNotchContent<V: View>(
     width: CGFloat,
     height: CGFloat,
     cornerRadius: CGFloat,
-    maskedCorners: CACornerMask = [.layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner],
     rootView: V
 ) -> NSView {
-    let scaleFactor = NSScreen.main?.backingScaleFactor ?? 2.0
+    let shaped = rootView
+        .frame(width: width, height: height)
+        .background(Color.black)
+        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: cornerRadius, bottomTrailingRadius: cornerRadius))
 
-    let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-    container.wantsLayer = true
-    container.layer?.contentsScale = scaleFactor
-
-    let blur = NSVisualEffectView(frame: container.bounds)
-    blur.appearance = NSAppearance(named: .darkAqua)
-    blur.material = .hudWindow
-    blur.blendingMode = .behindWindow
-    blur.state = .active
-    blur.wantsLayer = true
-    blur.layer?.contentsScale = scaleFactor
-    blur.layer?.cornerRadius = cornerRadius
-    blur.layer?.maskedCorners = maskedCorners
-    blur.layer?.masksToBounds = true
-    blur.autoresizingMask = [.width, .height]
-    container.addSubview(blur)
-
-    let hosting = NSHostingView(rootView: rootView)
-    hosting.frame = container.bounds
+    let hosting = NSHostingView(rootView: shaped)
+    hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
     hosting.autoresizingMask = [.width, .height]
-    hosting.layer?.contentsScale = scaleFactor
-    container.addSubview(hosting)
-
-    return container
+    return hosting
 }
 
 // MARK: - Manager
@@ -132,19 +114,26 @@ class RecordingOverlayManager {
         DispatchQueue.main.async { self._dismiss() }
     }
 
-    private func _showOverlayPanel() {
-        let panelWidth: CGFloat = screenHasNotch ? max(notchWidth, 120) : 120
-        let panelHeight: CGFloat = 32
+    /// Height of the notch area (menu bar inset) that the panel extends into.
+    private var notchOverlap: CGFloat {
+        guard let screen = NSScreen.main else { return 0 }
+        return screen.frame.maxY - screen.visibleFrame.maxY
+    }
 
+    private func _showOverlayPanel() {
         let hasNotch = screenHasNotch
-        let notchInset: CGFloat = 4 // tuck flat top behind menu bar (notch screens only)
+        let panelWidth: CGFloat = hasNotch ? max(notchWidth, 120) : 120
+        let contentHeight: CGFloat = 32
+        // On notch screens, extend the panel up into the menu bar to connect with the notch
+        let overlap = hasNotch ? notchOverlap : 0
+        let panelHeight = contentHeight + overlap
 
         if let panel = overlayWindow {
             guard let screen = NSScreen.main else { return }
             let x = panelX(screen, width: panelWidth)
             let y: CGFloat
             if hasNotch {
-                y = screen.visibleFrame.maxY - panelHeight + notchInset
+                y = screen.frame.maxY - panelHeight
             } else {
                 y = screen.frame.maxY - panelHeight
             }
@@ -155,29 +144,20 @@ class RecordingOverlayManager {
         }
 
         let panel = makeOverlayPanel(width: panelWidth, height: panelHeight)
+        panel.hasShadow = false
 
         let view = RecordingOverlayView(state: overlayState)
-        panel.contentView = makeGlassContent(
+        panel.contentView = makeNotchContent(
             width: panelWidth,
             height: panelHeight,
-            cornerRadius: 12,
-            maskedCorners: [.layerMinXMinYCorner, .layerMaxXMinYCorner],
-            rootView: view
+            cornerRadius: hasNotch ? 18 : 12,
+            rootView: view.padding(.top, overlap)
         )
 
         if let screen = NSScreen.main {
             let x = panelX(screen, width: panelWidth)
-            let hiddenY: CGFloat
-            let visibleY: CGFloat
-            if hasNotch {
-                // Start hidden behind menu bar, pop out from notch
-                hiddenY = screen.visibleFrame.maxY
-                visibleY = screen.visibleFrame.maxY - panelHeight + notchInset
-            } else {
-                // Start hidden above screen top, pop in from very top
-                hiddenY = screen.frame.maxY
-                visibleY = screen.frame.maxY - panelHeight
-            }
+            let hiddenY = screen.frame.maxY
+            let visibleY = screen.frame.maxY - panelHeight
 
             panel.setFrame(NSRect(x: x, y: hiddenY, width: panelWidth, height: panelHeight), display: true)
             panel.alphaValue = 1
@@ -200,7 +180,7 @@ class RecordingOverlayManager {
             return
         }
 
-        let hiddenY = screenHasNotch ? screen.visibleFrame.maxY : screen.frame.maxY
+        let hiddenY = screen.frame.maxY
         let frame = panel.frame
 
         NSAnimationContext.runAnimationGroup({ context in
@@ -224,28 +204,26 @@ class RecordingOverlayManager {
 
         if transcribingPanel != nil { return }
 
+        let hasNotch = screenHasNotch
+        let contentHeight: CGFloat = 22
+        let overlap = hasNotch ? notchOverlap : 0
         let panelWidth: CGFloat = 44
-        let panelHeight: CGFloat = 22
+        let panelHeight = contentHeight + overlap
 
         let panel = makeOverlayPanel(width: panelWidth, height: panelHeight)
+        panel.hasShadow = false
 
         let view = TranscribingIndicatorView()
-        panel.contentView = makeGlassContent(
+        panel.contentView = makeNotchContent(
             width: panelWidth,
             height: panelHeight,
-            cornerRadius: 11,
-            maskedCorners: [.layerMinXMinYCorner, .layerMaxXMinYCorner],
-            rootView: view
+            cornerRadius: hasNotch ? 14 : 11,
+            rootView: view.padding(.top, overlap)
         )
 
         if let screen = NSScreen.main {
             let x = panelX(screen, width: panelWidth)
-            let y: CGFloat
-            if screenHasNotch {
-                y = screen.visibleFrame.maxY - panelHeight
-            } else {
-                y = screen.frame.maxY - panelHeight
-            }
+            let y = screen.frame.maxY - panelHeight
             panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
         }
 
@@ -290,51 +268,6 @@ class RecordingOverlayManager {
     }
 }
 
-// MARK: - Liquid Glass Overlay
-
-/// Decorative layers on top of the NSVisualEffectView blur to create a liquid glass appearance:
-/// a specular highlight gradient and a gradient border that's brighter where light hits.
-private struct LiquidGlassOverlay<S: InsettableShape>: View {
-    let shape: S
-
-    var body: some View {
-        ZStack {
-            // Dark tint over the blur for a deeper glass look
-            shape
-                .fill(.black.opacity(0.45))
-
-            // Specular highlight — subtle light refraction at the top
-            shape
-                .fill(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .white.opacity(0.12), location: 0),
-                            .init(color: .white.opacity(0.03), location: 0.35),
-                            .init(color: .clear, location: 0.55)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-
-            // Glass edge — gradient border, brighter at top
-            shape
-                .strokeBorder(
-                    LinearGradient(
-                        stops: [
-                            .init(color: .white.opacity(0.35), location: 0),
-                            .init(color: .white.opacity(0.1), location: 0.5),
-                            .init(color: .white.opacity(0.04), location: 1.0)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 0.75
-                )
-        }
-    }
-}
-
 // MARK: - Waveform Views
 
 struct WaveformBar: View {
@@ -345,13 +278,7 @@ struct WaveformBar: View {
 
     var body: some View {
         Capsule()
-            .fill(
-                LinearGradient(
-                    colors: [.white, .white.opacity(0.85)],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
+            .fill(.white)
             .frame(width: 3, height: minHeight + (maxHeight - minHeight) * amplitude)
     }
 }
@@ -416,17 +343,14 @@ struct RecordingOverlayView: View {
         Group {
             if state.phase == .initializing {
                 InitializingDotsView()
-                    .frame(width: 100, height: 20)
                     .transition(.opacity)
             } else {
                 WaveformView(audioLevel: state.audioLevel)
-                    .frame(width: 100, height: 20)
                     .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: state.phase == .initializing)
-        .frame(width: 120, height: 32)
-        .background(LiquidGlassOverlay(shape: UnevenRoundedRectangle(bottomLeadingRadius: 12, bottomTrailingRadius: 12)))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -445,10 +369,7 @@ struct TranscribingIndicatorView: View {
                     .animation(.easeInOut(duration: 0.4), value: animatingDot)
             }
         }
-        .frame(width: 44, height: 22)
-        .background(
-            LiquidGlassOverlay(shape: UnevenRoundedRectangle(bottomLeadingRadius: 11, bottomTrailingRadius: 11))
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { startDotAnimation() }
         .onDisappear { stopDotAnimation() }
     }
