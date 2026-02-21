@@ -1001,7 +1001,7 @@ struct GitHubStarUser: Decodable {
     var avatarThumbnailUrl: URL {
         // GitHub avatar URLs already have query params, so append with &
         let separator = avatarUrl.absoluteString.contains("?") ? "&" : "?"
-        return URL(string: avatarUrl.absoluteString + "\(separator)s=44")!
+        return URL(string: avatarUrl.absoluteString + "\(separator)s=44") ?? avatarUrl
     }
 
     private enum CodingKeys: String, CodingKey {
