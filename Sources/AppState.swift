@@ -514,6 +514,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         lastContextScreenshotStatus = "No screenshot"
 
         guard let fileURL = audioRecorder.stopRecording() else {
+            audioRecorder.cleanup()
             errorMessage = "No audio recorded"
             isRecording = false
             statusText = "Error"
