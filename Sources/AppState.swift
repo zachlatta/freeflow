@@ -142,6 +142,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
         installAudioDeviceListener()
     }
 
+    deinit {
+        removeAudioDeviceListener()
+    }
+
+    private func removeAudioDeviceListener() {
+        guard let block = audioDeviceListenerBlock else { return }
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            DispatchQueue.main,
+            block
+        )
+        audioDeviceListenerBlock = nil
+    }
+
     private static func loadStoredAPIKey(account: String) -> String {
         if let storedKey = AppSettingsStorage.load(account: account), !storedKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return storedKey
