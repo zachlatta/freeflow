@@ -482,19 +482,26 @@ final class UpdateManager: ObservableObject {
 
     private func replaceAndRelaunch(stagedApp: URL, stagingDir: URL) {
         let currentAppPath = Bundle.main.bundlePath
-        let pid = ProcessInfo.processInfo.processIdentifier
+        let pid = String(ProcessInfo.processInfo.processIdentifier)
+        let backupPath = currentAppPath + ".bak"
 
+        // Use an argument array instead of string interpolation into a shell
+        // script to avoid injection. Move old app to backup first so a failed
+        // mv doesn't leave the user with no app.
         let script = """
-        while kill -0 \(pid) 2>/dev/null; do sleep 0.2; done
-        rm -rf "\(currentAppPath)"
-        mv "\(stagedApp.path)" "\(currentAppPath)"
-        open "\(currentAppPath)"
-        rm -rf "\(stagingDir.path)"
+        while kill -0 "$1" 2>/dev/null; do sleep 0.2; done
+        mv "$2" "$5" && mv "$3" "$2" && open "$2" && rm -rf "$4" "$5" \
+            || { mv "$5" "$2" 2>/dev/null; exit 1; }
         """
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", script]
+        process.arguments = ["-c", script, "--",
+                             pid,                // $1
+                             currentAppPath,     // $2
+                             stagedApp.path,      // $3
+                             stagingDir.path,     // $4
+                             backupPath]          // $5
         try? process.run()
 
         // Quit the current app
