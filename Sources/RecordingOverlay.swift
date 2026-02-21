@@ -84,6 +84,14 @@ class RecordingOverlayManager {
         return screen.safeAreaInsets.top > 0
     }
 
+    /// Width of the camera housing (notch) in points, or 0 if no notch.
+    private var notchWidth: CGFloat {
+        guard let screen = NSScreen.main, screenHasNotch else { return 0 }
+        guard let leftArea = screen.auxiliaryTopLeftArea,
+              let rightArea = screen.auxiliaryTopRightArea else { return 0 }
+        return screen.frame.width - leftArea.width - rightArea.width
+    }
+
     func showInitializing() {
         DispatchQueue.main.async {
             self.overlayState.phase = .initializing
@@ -125,7 +133,7 @@ class RecordingOverlayManager {
     }
 
     private func _showOverlayPanel() {
-        let panelWidth: CGFloat = 120
+        let panelWidth: CGFloat = screenHasNotch ? max(notchWidth, 120) : 120
         let panelHeight: CGFloat = 32
 
         let hasNotch = screenHasNotch
