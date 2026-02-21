@@ -24,12 +24,13 @@ struct PostProcessingResult {
 
 final class PostProcessingService {
     private let apiKey: String
-    private let baseURL = "https://api.groq.com/openai/v1"
+    private let baseURL: String
     private let defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
-    init(apiKey: String) {
+    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
         self.apiKey = apiKey
+        self.baseURL = baseURL
     }
 
     func postProcess(
