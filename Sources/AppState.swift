@@ -809,27 +809,27 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
 
-        errorMessage = "Screenshot capture issue: \(message)"
-        NSSound(named: "Basso")?.play()
+        os_log(.error, "Screenshot capture issue: %{public}@", message)
 
         if isScreenCapturePermissionError(message) && !hasShownScreenshotPermissionAlert {
             hasShownScreenshotPermissionAlert = true
-            showScreenshotPermissionAlert(message: message)
-        } else {
-            showScreenshotCaptureErrorAlert(message: message)
-        }
 
-        // Stop the recording — a screenshot is required
-        _ = audioRecorder.stopRecording()
-        audioRecorder.cleanup()
-        audioLevelCancellable?.cancel()
-        audioLevelCancellable = nil
-        contextCaptureTask?.cancel()
-        contextCaptureTask = nil
-        capturedContext = nil
-        isRecording = false
-        statusText = "Screenshot Required"
-        overlayManager.dismiss()
+            // Permission errors are fatal — stop recording
+            _ = audioRecorder.stopRecording()
+            audioRecorder.cleanup()
+            audioLevelCancellable?.cancel()
+            audioLevelCancellable = nil
+            contextCaptureTask?.cancel()
+            contextCaptureTask = nil
+            capturedContext = nil
+            isRecording = false
+            statusText = "Screenshot Required"
+            overlayManager.dismiss()
+
+            NSSound(named: "Basso")?.play()
+            showScreenshotPermissionAlert(message: message)
+        }
+        // Non-permission errors (transient failures) — continue recording without context
     }
 
     private func isScreenCapturePermissionError(_ message: String) -> Bool {
