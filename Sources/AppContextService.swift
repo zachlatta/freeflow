@@ -20,15 +20,16 @@ struct AppContext {
 
 final class AppContextService {
     private let apiKey: String
-    private let baseURL = "https://api.groq.com/openai/v1"
+    private let baseURL: String
     private let fallbackTextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let visionModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let maxScreenshotDataURILength = 500_000
     private let screenshotCompressionPrimary = 0.5
     private let screenshotMaxDimension: CGFloat = 1024
 
-    init(apiKey: String) {
+    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
         self.apiKey = apiKey
+        self.baseURL = baseURL
     }
 
     func collectContext() async -> AppContext {

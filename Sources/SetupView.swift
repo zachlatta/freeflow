@@ -792,7 +792,7 @@ struct SetupView: View {
         keyValidationError = nil
 
         Task {
-            let valid = await TranscriptionService.validateAPIKey(key)
+            let valid = await TranscriptionService.validateAPIKey(key, baseURL: appState.apiBaseURL)
             await MainActor.run {
                 isValidatingKey = false
                 if valid {
@@ -920,7 +920,7 @@ struct SetupView: View {
 
                 Task {
                     do {
-                        let service = TranscriptionService(apiKey: appState.apiKey)
+                        let service = TranscriptionService(apiKey: appState.apiKey, baseURL: appState.apiBaseURL)
                         let transcript = try await service.transcribe(fileURL: url)
                         await MainActor.run {
                             testTranscript = transcript
@@ -1001,7 +1001,7 @@ struct GitHubStarUser: Decodable {
     var avatarThumbnailUrl: URL {
         // GitHub avatar URLs already have query params, so append with &
         let separator = avatarUrl.absoluteString.contains("?") ? "&" : "?"
-        return URL(string: avatarUrl.absoluteString + "\(separator)s=44")!
+        return URL(string: avatarUrl.absoluteString + "\(separator)s=44") ?? avatarUrl
     }
 
     private enum CodingKeys: String, CodingKey {

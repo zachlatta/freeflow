@@ -116,6 +116,8 @@ class AudioRecorder: NSObject, ObservableObject {
     private var storedInputFormat: AVAudioFormat?
 
     @Published var isRecording = false
+    /// Thread-safe flag read from the audio tap callback.
+    private let _recording = OSAllocatedUnfairLock(initialState: false)
     @Published var audioLevel: Float = 0.0
     private var smoothedLevel: Float = 0.0
 
@@ -182,7 +184,7 @@ class AudioRecorder: NSObject, ObservableObject {
 
             // Install tap — checks isRecording and audioFile dynamically
             inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-                guard let self, self.isRecording else { return }
+                guard let self, self._recording.withLock({ $0 }) else { return }
 
                 self.bufferCount += 1
 
@@ -268,6 +270,7 @@ class AudioRecorder: NSObject, ObservableObject {
         os_log(.info, log: recordingLog, "audio file created: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
 
         audioFileQueue.sync { self.audioFile = newAudioFile }
+        _recording.withLock { $0 = true }
         self.isRecording = true
         os_log(.info, log: recordingLog, "startRecording() complete: %.3fms total", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
     }
@@ -276,6 +279,7 @@ class AudioRecorder: NSObject, ObservableObject {
         let elapsed = (CFAbsoluteTimeGetCurrent() - recordingStartTime) * 1000
         os_log(.info, log: recordingLog, "stopRecording() called: %.3fms after start, %d buffers received", elapsed, bufferCount)
 
+        _recording.withLock { $0 = false }
         audioFileQueue.sync { audioFile = nil }
         isRecording = false
         smoothedLevel = 0.0

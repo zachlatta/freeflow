@@ -2,20 +2,21 @@ import Foundation
 
 class TranscriptionService {
     private let apiKey: String
-    private let baseURL = "https://api.groq.com/openai/v1"
+    private let baseURL: String
     private let transcriptionModel = "whisper-large-v3"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
 
-    init(apiKey: String) {
+    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
         self.apiKey = apiKey
+        self.baseURL = baseURL
     }
 
     // Validate API key by hitting a lightweight endpoint
-    static func validateAPIKey(_ key: String) async -> Bool {
+    static func validateAPIKey(_ key: String, baseURL: String = "https://api.groq.com/openai/v1") async -> Bool {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
 
-        var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/models")!)
+        var request = URLRequest(url: URL(string: "\(baseURL)/models")!)
         request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
 
         do {

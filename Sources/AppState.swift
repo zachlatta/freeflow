@@ -33,6 +33,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
 final class AppState: ObservableObject, @unchecked Sendable {
     private let apiKeyStorageKey = "groq_api_key"
+    private let apiBaseURLStorageKey = "api_base_url"
     private let customVocabularyStorageKey = "custom_vocabulary"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
     private let transcribingIndicatorDelay: TimeInterval = 1.0
@@ -47,7 +48,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var apiKey: String {
         didSet {
             persistAPIKey(apiKey)
-            contextService = AppContextService(apiKey: apiKey)
+            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL)
+        }
+    }
+
+    @Published var apiBaseURL: String {
+        didSet {
+            persistAPIBaseURL(apiBaseURL)
+            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL)
         }
     }
 
@@ -110,6 +118,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     init() {
         let hasCompletedSetup = UserDefaults.standard.bool(forKey: "hasCompletedSetup")
         let apiKey = Self.loadStoredAPIKey(account: apiKeyStorageKey)
+        let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
         let selectedHotkey = HotkeyOption(rawValue: UserDefaults.standard.string(forKey: "hotkey_option") ?? "fn") ?? .fnKey
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
         let initialAccessibility = AXIsProcessTrusted()
@@ -127,9 +136,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
-        self.contextService = AppContextService(apiKey: apiKey)
+        self.contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL)
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
+        self.apiBaseURL = apiBaseURL
         self.selectedHotkey = selectedHotkey
         self.customVocabulary = customVocabulary
         self.pipelineHistory = savedHistory
@@ -140,6 +150,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         refreshAvailableMicrophones()
         installAudioDeviceListener()
+    }
+
+    deinit {
+        removeAudioDeviceListener()
+    }
+
+    private func removeAudioDeviceListener() {
+        guard let block = audioDeviceListenerBlock else { return }
+        var propertyAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject),
+            &propertyAddress,
+            DispatchQueue.main,
+            block
+        )
+        audioDeviceListenerBlock = nil
     }
 
     private static func loadStoredAPIKey(account: String) -> String {
@@ -155,6 +185,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
             AppSettingsStorage.delete(account: apiKeyStorageKey)
         } else {
             AppSettingsStorage.save(trimmed, account: apiKeyStorageKey)
+        }
+    }
+
+    private static let defaultAPIBaseURL = "https://api.groq.com/openai/v1"
+
+    private static func loadStoredAPIBaseURL(account: String) -> String {
+        if let stored = AppSettingsStorage.load(account: account), !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return stored
+        }
+        return defaultAPIBaseURL
+    }
+
+    private func persistAPIBaseURL(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == Self.defaultAPIBaseURL {
+            AppSettingsStorage.delete(account: apiBaseURLStorageKey)
+        } else {
+            AppSettingsStorage.save(trimmed, account: apiBaseURLStorageKey)
         }
     }
 
@@ -514,6 +562,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         lastContextScreenshotStatus = "No screenshot"
 
         guard let fileURL = audioRecorder.stopRecording() else {
+            audioRecorder.cleanup()
             errorMessage = "No audio recorded"
             isRecording = false
             statusText = "Error"
@@ -541,8 +590,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             } catch {}
         }
 
-        let transcriptionService = TranscriptionService(apiKey: apiKey)
-        let postProcessingService = PostProcessingService(apiKey: apiKey)
+        let transcriptionService = TranscriptionService(apiKey: apiKey, baseURL: apiBaseURL)
+        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
 
         Task {
             do {
@@ -788,27 +837,27 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
 
-        errorMessage = "Screenshot capture issue: \(message)"
-        NSSound(named: "Basso")?.play()
+        os_log(.error, "Screenshot capture issue: %{public}@", message)
 
         if isScreenCapturePermissionError(message) && !hasShownScreenshotPermissionAlert {
             hasShownScreenshotPermissionAlert = true
-            showScreenshotPermissionAlert(message: message)
-        } else {
-            showScreenshotCaptureErrorAlert(message: message)
-        }
 
-        // Stop the recording — a screenshot is required
-        _ = audioRecorder.stopRecording()
-        audioRecorder.cleanup()
-        audioLevelCancellable?.cancel()
-        audioLevelCancellable = nil
-        contextCaptureTask?.cancel()
-        contextCaptureTask = nil
-        capturedContext = nil
-        isRecording = false
-        statusText = "Screenshot Required"
-        overlayManager.dismiss()
+            // Permission errors are fatal — stop recording
+            _ = audioRecorder.stopRecording()
+            audioRecorder.cleanup()
+            audioLevelCancellable?.cancel()
+            audioLevelCancellable = nil
+            contextCaptureTask?.cancel()
+            contextCaptureTask = nil
+            capturedContext = nil
+            isRecording = false
+            statusText = "Screenshot Required"
+            overlayManager.dismiss()
+
+            NSSound(named: "Basso")?.play()
+            showScreenshotPermissionAlert(message: message)
+        }
+        // Non-permission errors (transient failures) — continue recording without context
     }
 
     private func isScreenCapturePermissionError(_ message: String) -> Bool {

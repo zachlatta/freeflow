@@ -52,6 +52,7 @@ struct GeneralSettingsView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.openURL) private var openURL
     @State private var apiKeyInput: String = ""
+    @State private var apiBaseURLInput: String = ""
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
     @State private var keyValidationSuccess = false
@@ -207,6 +208,7 @@ struct GeneralSettingsView: View {
         }
         .onAppear {
             apiKeyInput = appState.apiKey
+            apiBaseURLInput = appState.apiBaseURL
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             appState.refreshLaunchAtLoginStatus()
@@ -401,17 +403,45 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.green)
                     .font(.caption)
             }
+
+            Divider()
+
+            Text("API Base URL")
+                .font(.caption.weight(.semibold))
+
+            Text("Change this to use a different OpenAI-compatible API provider.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onChange(of: apiBaseURLInput) { newValue in
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            appState.apiBaseURL = trimmed
+                        }
+                    }
+
+                Button("Reset to Default") {
+                    apiBaseURLInput = "https://api.groq.com/openai/v1"
+                    appState.apiBaseURL = "https://api.groq.com/openai/v1"
+                }
+                .font(.caption)
+            }
         }
     }
 
     private func validateAndSaveKey() {
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
         isValidatingKey = true
         keyValidationError = nil
         keyValidationSuccess = false
 
         Task {
-            let valid = await TranscriptionService.validateAPIKey(key)
+            let valid = await TranscriptionService.validateAPIKey(key, baseURL: baseURL.isEmpty ? "https://api.groq.com/openai/v1" : baseURL)
             await MainActor.run {
                 isValidatingKey = false
                 if valid {
