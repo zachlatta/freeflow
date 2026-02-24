@@ -49,6 +49,10 @@ final class PipelineHistoryStore {
                 isStoreLoaded = true
             } else {
                 print("[PipelineHistoryStore] Failed to recover persistent store. Falling back to in-memory history.")
+                let coordinator = container.persistentStoreCoordinator
+                for store in coordinator.persistentStores {
+                    try? coordinator.remove(store)
+                }
                 let description = NSPersistentStoreDescription()
                 description.type = NSInMemoryStoreType
                 container.persistentStoreDescriptions = [description]
@@ -58,6 +62,7 @@ final class PipelineHistoryStore {
     }
 
     func loadAllHistory() -> [PipelineHistoryItem] {
+        guard isStoreLoaded else { return [] }
         var result: [PipelineHistoryItem] = []
         container.viewContext.performAndWait {
             let request = pipelineHistoryRequest()
@@ -189,6 +194,7 @@ final class PipelineHistoryStore {
         NSFetchRequest<PipelineHistoryEntry>(entityName: "PipelineHistoryEntry")
     }
 
+    // Safe: loadPersistentStores calls back on a private queue, not the calling thread.
     private static func loadPersistentStoresSynchronously(container: NSPersistentContainer) -> Error? {
         let semaphore = DispatchSemaphore(value: 0)
         let lock = NSLock()
