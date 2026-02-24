@@ -49,8 +49,12 @@ struct AudioDevice: Identifiable {
             guard AudioObjectGetPropertyDataSize(deviceID, &inputStreamAddress, 0, nil, &streamSize) == noErr,
                   streamSize > 0 else { continue }
 
-            let bufferListPointer = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: 1)
-            defer { bufferListPointer.deallocate() }
+            let bufferListRaw = UnsafeMutableRawPointer.allocate(
+                byteCount: Int(streamSize),
+                alignment: MemoryLayout<AudioBufferList>.alignment
+            )
+            defer { bufferListRaw.deallocate() }
+            let bufferListPointer = bufferListRaw.bindMemory(to: AudioBufferList.self, capacity: 1)
             guard AudioObjectGetPropertyData(deviceID, &inputStreamAddress, 0, nil, &streamSize, bufferListPointer) == noErr else { continue }
 
             let bufferList = UnsafeMutableAudioBufferListPointer(bufferListPointer)
@@ -63,10 +67,16 @@ struct AudioDevice: Identifiable {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            var uidRef: Unmanaged<CFString>?
-            var uidSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-            guard AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, &uidRef) == noErr,
-                  let uid = uidRef?.takeUnretainedValue() as String? else { continue }
+            var uidSize = UInt32(MemoryLayout<CFString?>.size)
+            let uidRaw = UnsafeMutableRawPointer.allocate(
+                byteCount: Int(uidSize),
+                alignment: MemoryLayout<CFString?>.alignment
+            )
+            defer { uidRaw.deallocate() }
+            guard AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, uidRaw) == noErr else { continue }
+            guard let uidRef = uidRaw.load(as: CFString?.self) else { continue }
+            let uid = uidRef as String
+            guard !uid.isEmpty else { continue }
 
             // Get device name
             var nameAddress = AudioObjectPropertyAddress(
@@ -74,10 +84,16 @@ struct AudioDevice: Identifiable {
                 mScope: kAudioObjectPropertyScopeGlobal,
                 mElement: kAudioObjectPropertyElementMain
             )
-            var nameRef: Unmanaged<CFString>?
-            var nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-            guard AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, &nameRef) == noErr,
-                  let name = nameRef?.takeUnretainedValue() as String? else { continue }
+            var nameSize = UInt32(MemoryLayout<CFString?>.size)
+            let nameRaw = UnsafeMutableRawPointer.allocate(
+                byteCount: Int(nameSize),
+                alignment: MemoryLayout<CFString?>.alignment
+            )
+            defer { nameRaw.deallocate() }
+            guard AudioObjectGetPropertyData(deviceID, &nameAddress, 0, nil, &nameSize, nameRaw) == noErr else { continue }
+            guard let nameRef = nameRaw.load(as: CFString?.self) else { continue }
+            let name = nameRef as String
+            guard !name.isEmpty else { continue }
 
             devices.append(AudioDevice(id: deviceID, uid: uid, name: name))
         }
