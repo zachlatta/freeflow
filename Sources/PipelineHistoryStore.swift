@@ -4,7 +4,6 @@ import CoreData
 final class PipelineHistoryStore {
     private let container: NSPersistentContainer
     private let isStoreLoaded: Bool
-    private let isPersistentOnDisk: Bool
 
     init() {
         let model = Self.makeModel()
@@ -29,23 +28,31 @@ final class PipelineHistoryStore {
 
         if Self.loadPersistentStoresSynchronously(container: container) == nil {
             isStoreLoaded = true
-            isPersistentOnDisk = true
         } else {
             if let storeURL {
                 print("[PipelineHistoryStore] Failed to load persistent store at \(storeURL.path). Attempting recovery.")
                 Self.destroySQLiteStoreFiles(at: storeURL)
+
+                // Clear any partially loaded stores and reset descriptions before retrying.
+                let coordinator = container.persistentStoreCoordinator
+                for store in coordinator.persistentStores {
+                    try? coordinator.remove(store)
+                }
+
+                let recoveryDescription = NSPersistentStoreDescription(url: storeURL)
+                recoveryDescription.shouldMigrateStoreAutomatically = true
+                recoveryDescription.shouldInferMappingModelAutomatically = true
+                container.persistentStoreDescriptions = [recoveryDescription]
             }
 
             if Self.loadPersistentStoresSynchronously(container: container) == nil {
                 isStoreLoaded = true
-                isPersistentOnDisk = true
             } else {
                 print("[PipelineHistoryStore] Failed to recover persistent store. Falling back to in-memory history.")
                 let description = NSPersistentStoreDescription()
                 description.type = NSInMemoryStoreType
                 container.persistentStoreDescriptions = [description]
                 isStoreLoaded = Self.loadPersistentStoresSynchronously(container: container) == nil
-                isPersistentOnDisk = false
             }
         }
     }
@@ -184,16 +191,20 @@ final class PipelineHistoryStore {
 
     private static func loadPersistentStoresSynchronously(container: NSPersistentContainer) -> Error? {
         let semaphore = DispatchSemaphore(value: 0)
+        let lock = NSLock()
         var capturedError: Error?
-        var completionCount = 0
-        let expectedCompletions = max(1, container.persistentStoreDescriptions.count)
+        var remainingCompletions = max(1, container.persistentStoreDescriptions.count)
 
         container.loadPersistentStores { _, error in
+            lock.lock()
             if capturedError == nil, let error {
                 capturedError = error
             }
-            completionCount += 1
-            if completionCount >= expectedCompletions {
+            remainingCompletions -= 1
+            let shouldSignal = remainingCompletions <= 0
+            lock.unlock()
+
+            if shouldSignal {
                 semaphore.signal()
             }
         }
