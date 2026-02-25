@@ -23,6 +23,23 @@ struct PostProcessingResult {
 }
 
 final class PostProcessingService {
+    static let defaultSystemPrompt = """
+You are a dictation post-processor. You receive raw speech-to-text output and return clean text ready to be typed into an application.
+
+Your job:
+- Remove filler words (um, uh, you know, like) unless they carry meaning.
+- Fix spelling, grammar, and punctuation errors.
+- When the transcript already contains a word that is a close misspelling of a name or term from the context or custom vocabulary, correct the spelling. Never insert names or terms from context that the speaker did not say.
+- Preserve the speaker's intent, tone, and meaning exactly.
+
+Output rules:
+- Return ONLY the cleaned transcript text, nothing else.
+- If the transcription is empty, return exactly: EMPTY
+- Do not add words, names, or content that are not in the transcription. The context is only for correcting spelling of words already spoken.
+- Do not change the meaning of what was said.
+"""
+    static let defaultSystemPromptDate = "2026-02-24"
+
     private let apiKey: String
     private let baseURL: String
     private let defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -36,7 +53,8 @@ final class PostProcessingService {
     func postProcess(
         transcript: String,
         context: AppContext,
-        customVocabulary: String
+        customVocabulary: String,
+        customSystemPrompt: String = ""
     ) async throws -> PostProcessingResult {
         let vocabularyTerms = mergedVocabularyTerms(rawVocabulary: customVocabulary)
 
@@ -50,7 +68,8 @@ final class PostProcessingService {
                     transcript: transcript,
                     contextSummary: context.contextSummary,
                     model: defaultModel,
-                    customVocabulary: vocabularyTerms
+                    customVocabulary: vocabularyTerms,
+                    customSystemPrompt: customSystemPrompt
                 )
             }
 
@@ -76,7 +95,8 @@ final class PostProcessingService {
         transcript: String,
         contextSummary: String,
         model: String,
-        customVocabulary: [String]
+        customVocabulary: [String],
+        customSystemPrompt: String = ""
     ) async throws -> PostProcessingResult {
         var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
         request.httpMethod = "POST"
@@ -95,21 +115,9 @@ Use these spellings exactly in the output when relevant:
             ""
         }
 
-        var systemPrompt = """
-You are a dictation post-processor. You receive raw speech-to-text output and return clean text ready to be typed into an application.
-
-Your job:
-- Remove filler words (um, uh, you know, like) unless they carry meaning.
-- Fix spelling, grammar, and punctuation errors.
-- When the transcript already contains a word that is a close misspelling of a name or term from the context or custom vocabulary, correct the spelling. Never insert names or terms from context that the speaker did not say.
-- Preserve the speaker's intent, tone, and meaning exactly.
-
-Output rules:
-- Return ONLY the cleaned transcript text, nothing else.
-- If the transcription is empty, return exactly: EMPTY
-- Do not add words, names, or content that are not in the transcription. The context is only for correcting spelling of words already spoken.
-- Do not change the meaning of what was said.
-"""
+        var systemPrompt = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? Self.defaultSystemPrompt
+            : customSystemPrompt
         if !vocabularyPrompt.isEmpty {
             systemPrompt += "\n\n" + vocabularyPrompt
         }

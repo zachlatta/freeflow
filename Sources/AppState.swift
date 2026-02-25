@@ -12,6 +12,7 @@ private let recordingLog = OSLog(subsystem: "com.zachlatta.freeflow", category: 
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
+    case prompts
     case runLog
 
     var id: String { rawValue }
@@ -19,6 +20,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return "General"
+        case .prompts: return "Prompts"
         case .runLog: return "Run Log"
         }
     }
@@ -26,6 +28,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "gearshape"
+        case .prompts: return "text.bubble"
         case .runLog: return "clock.arrow.circlepath"
         }
     }
@@ -36,6 +39,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let apiBaseURLStorageKey = "api_base_url"
     private let customVocabularyStorageKey = "custom_vocabulary"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
+    private let customSystemPromptStorageKey = "custom_system_prompt"
+    private let customContextPromptStorageKey = "custom_context_prompt"
+    private let customSystemPromptLastModifiedStorageKey = "custom_system_prompt_last_modified"
+    private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
     private let transcribingIndicatorDelay: TimeInterval = 1.0
     let maxPipelineHistoryCount = 20
 
@@ -48,14 +55,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var apiKey: String {
         didSet {
             persistAPIKey(apiKey)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL)
+            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
         }
     }
 
     @Published var apiBaseURL: String {
         didSet {
             persistAPIBaseURL(apiBaseURL)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL)
+            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
         }
     }
 
@@ -69,6 +76,31 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var customVocabulary: String {
         didSet {
             UserDefaults.standard.set(customVocabulary, forKey: customVocabularyStorageKey)
+        }
+    }
+
+    @Published var customSystemPrompt: String {
+        didSet {
+            UserDefaults.standard.set(customSystemPrompt, forKey: customSystemPromptStorageKey)
+        }
+    }
+
+    @Published var customContextPrompt: String {
+        didSet {
+            UserDefaults.standard.set(customContextPrompt, forKey: customContextPromptStorageKey)
+            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+        }
+    }
+
+    @Published var customSystemPromptLastModified: String {
+        didSet {
+            UserDefaults.standard.set(customSystemPromptLastModified, forKey: customSystemPromptLastModifiedStorageKey)
+        }
+    }
+
+    @Published var customContextPromptLastModified: String {
+        didSet {
+            UserDefaults.standard.set(customContextPromptLastModified, forKey: customContextPromptLastModifiedStorageKey)
         }
     }
 
@@ -121,6 +153,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
         let selectedHotkey = HotkeyOption(rawValue: UserDefaults.standard.string(forKey: "hotkey_option") ?? "fn") ?? .fnKey
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
+        let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
+        let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
+        let customSystemPromptLastModified = UserDefaults.standard.string(forKey: customSystemPromptLastModifiedStorageKey) ?? ""
+        let customContextPromptLastModified = UserDefaults.standard.string(forKey: customContextPromptLastModifiedStorageKey) ?? ""
         let initialAccessibility = AXIsProcessTrusted()
         let initialScreenCapturePermission = CGPreflightScreenCaptureAccess()
         var removedAudioFileNames: [String] = []
@@ -136,12 +172,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
-        self.contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL)
+        self.contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
         self.apiBaseURL = apiBaseURL
         self.selectedHotkey = selectedHotkey
         self.customVocabulary = customVocabulary
+        self.customSystemPrompt = customSystemPrompt
+        self.customContextPrompt = customContextPrompt
+        self.customSystemPromptLastModified = customSystemPromptLastModified
+        self.customContextPromptLastModified = customContextPromptLastModified
         self.pipelineHistory = savedHistory
         self.hasAccessibility = initialAccessibility
         self.hasScreenRecordingPermission = initialScreenCapturePermission
@@ -615,7 +655,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let postProcessingResult = try await postProcessingService.postProcess(
                         transcript: rawTranscript,
                         context: appContext,
-                        customVocabulary: customVocabulary
+                        customVocabulary: customVocabulary,
+                        customSystemPrompt: customSystemPrompt
                     )
                     finalTranscript = postProcessingResult.transcript
                     processingStatus = "Post-processing succeeded"
