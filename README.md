@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Resources/AppIcon-README.png" width="128" height="128" alt="FreeFlow icon">
+  <img src="Resources/AppIcon-Source.png" width="128" height="128" alt="FreeFlow icon">
 </p>
 
 <h1 align="center">FreeFlow</h1>

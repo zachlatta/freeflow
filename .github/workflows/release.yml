@@ -104,6 +104,13 @@ jobs:
             --wait
           xcrun stapler staple build/FreeFlow.dmg
 
+      - name: Stamp custom icon on DMG
+        run: |
+          DeRez -only icns Resources/AppIcon.icns > build/icon.rsrc
+          Rez -append build/icon.rsrc -o build/FreeFlow.dmg
+          SetFile -a C build/FreeFlow.dmg
+          rm build/icon.rsrc
+
       - name: Save universal DMG
         run: mv build/FreeFlow.dmg FreeFlow.dmg
 

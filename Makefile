@@ -85,6 +85,10 @@ dmg: all
 		--no-internet-enable \
 		$(BUILD_DIR)/$(APP_NAME).dmg \
 		$(APP_BUNDLE)
+	@DeRez -only icns "$(ICON_ICNS)" > "$(BUILD_DIR)/icon.rsrc"
+	@Rez -append "$(BUILD_DIR)/icon.rsrc" -o "$(BUILD_DIR)/$(APP_NAME).dmg"
+	@SetFile -a C "$(BUILD_DIR)/$(APP_NAME).dmg"
+	@rm "$(BUILD_DIR)/icon.rsrc"
 	@echo "Created $(BUILD_DIR)/$(APP_NAME).dmg"
 
 codesign-dmg: dmg
