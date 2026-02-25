@@ -72,6 +72,12 @@ $(ICON_ICNS): $(ICON_SOURCE)
 
 dmg: all
 	@rm -f $(BUILD_DIR)/$(APP_NAME).dmg
+	@rm -rf $(BUILD_DIR)/dmg-staging
+	@mkdir -p $(BUILD_DIR)/dmg-staging
+	@cp -R "$(APP_BUNDLE)" $(BUILD_DIR)/dmg-staging/
+	@osascript -e 'tell application "Finder" to make alias file to POSIX file "/Applications" at POSIX file "'"$$(cd $(BUILD_DIR)/dmg-staging && pwd)"'"'
+	@ALIAS=$$(find $(BUILD_DIR)/dmg-staging -maxdepth 1 -not -name '*.app' -not -name '.DS_Store' -type f | head -1) && mv "$$ALIAS" "$(BUILD_DIR)/dmg-staging/Applications"
+	@fileicon set "$(BUILD_DIR)/dmg-staging/Applications" /System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/ApplicationsFolderIcon.icns
 	@echo "Creating DMG..."
 	@create-dmg \
 		--volname "$(APP_NAME)" \
@@ -81,14 +87,11 @@ dmg: all
 		--icon-size 128 \
 		--icon "$(APP_NAME).app" 180 170 \
 		--hide-extension "$(APP_NAME).app" \
-		--app-drop-link 480 170 \
+		--icon "Applications" 480 170 \
 		--no-internet-enable \
 		$(BUILD_DIR)/$(APP_NAME).dmg \
-		$(APP_BUNDLE)
-	@DeRez -only icns "$(ICON_ICNS)" > "$(BUILD_DIR)/icon.rsrc"
-	@Rez -append "$(BUILD_DIR)/icon.rsrc" -o "$(BUILD_DIR)/$(APP_NAME).dmg"
-	@SetFile -a C "$(BUILD_DIR)/$(APP_NAME).dmg"
-	@rm "$(BUILD_DIR)/icon.rsrc"
+		$(BUILD_DIR)/dmg-staging
+	@rm -rf $(BUILD_DIR)/dmg-staging
 	@echo "Created $(BUILD_DIR)/$(APP_NAME).dmg"
 
 codesign-dmg: dmg

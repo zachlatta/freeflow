@@ -14,8 +14,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install create-dmg
-        run: brew install create-dmg
+      - name: Install build tools
+        run: brew install create-dmg fileicon
 
       # Import Developer ID certificate when secrets are available (pushes to main).
       # PRs from forks won't have access to secrets, so this step is skipped.
