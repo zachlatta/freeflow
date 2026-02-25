@@ -3,120 +3,181 @@ import CoreData
 
 final class PipelineHistoryStore {
     private let container: NSPersistentContainer
+    private let isStoreLoaded: Bool
 
     init() {
         let model = Self.makeModel()
         container = NSPersistentContainer(name: "PipelineHistory", managedObjectModel: model)
 
+        var storeURL: URL?
         if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "FreeFlow"
             let baseURL = appSupport.appendingPathComponent(appName, isDirectory: true)
             try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
-            let storeURL = baseURL.appendingPathComponent("PipelineHistory.sqlite")
+            storeURL = baseURL.appendingPathComponent("PipelineHistory.sqlite")
+        }
+
+        if let storeURL {
             let description = NSPersistentStoreDescription(url: storeURL)
             description.shouldMigrateStoreAutomatically = true
             description.shouldInferMappingModelAutomatically = true
             container.persistentStoreDescriptions = [description]
+        } else {
+            container.persistentStoreDescriptions = [NSPersistentStoreDescription()]
         }
 
-        container.loadPersistentStores { description, error in
-            if let error = error {
-                print("[PipelineHistoryStore] Failed to load persistent store at \(description.url?.path ?? "unknown"): \(error)")
-                // Attempt to recover by destroying and recreating the store
-                if let storeURL = description.url {
-                    try? FileManager.default.removeItem(at: storeURL)
-                    self.container.loadPersistentStores { _, retryError in
-                        if let retryError = retryError {
-                            print("[PipelineHistoryStore] Failed to recreate store: \(retryError)")
-                        }
-                    }
+        if Self.loadPersistentStoresSynchronously(container: container) == nil {
+            isStoreLoaded = true
+        } else {
+            if let storeURL {
+                print("[PipelineHistoryStore] Failed to load persistent store at \(storeURL.path). Attempting recovery.")
+                Self.destroySQLiteStoreFiles(at: storeURL)
+
+                // Clear any partially loaded stores and reset descriptions before retrying.
+                let coordinator = container.persistentStoreCoordinator
+                for store in coordinator.persistentStores {
+                    try? coordinator.remove(store)
                 }
+
+                let recoveryDescription = NSPersistentStoreDescription(url: storeURL)
+                recoveryDescription.shouldMigrateStoreAutomatically = true
+                recoveryDescription.shouldInferMappingModelAutomatically = true
+                container.persistentStoreDescriptions = [recoveryDescription]
+            }
+
+            if Self.loadPersistentStoresSynchronously(container: container) == nil {
+                isStoreLoaded = true
+            } else {
+                print("[PipelineHistoryStore] Failed to recover persistent store. Falling back to in-memory history.")
+                let coordinator = container.persistentStoreCoordinator
+                for store in coordinator.persistentStores {
+                    try? coordinator.remove(store)
+                }
+                let description = NSPersistentStoreDescription()
+                description.type = NSInMemoryStoreType
+                container.persistentStoreDescriptions = [description]
+                isStoreLoaded = Self.loadPersistentStoresSynchronously(container: container) == nil
             }
         }
     }
 
     func loadAllHistory() -> [PipelineHistoryItem] {
-        let request = pipelineHistoryRequest()
-        request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
-
-        guard let entities = try? container.viewContext.fetch(request) else {
-            return []
+        guard isStoreLoaded else { return [] }
+        var result: [PipelineHistoryItem] = []
+        container.viewContext.performAndWait {
+            let request = pipelineHistoryRequest()
+            request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
+            guard let entities = try? container.viewContext.fetch(request) else { return }
+            result = entities.compactMap(Self.makeHistoryItem(from:))
         }
-
-        return entities.compactMap(Self.makeHistoryItem(from:))
+        return result
     }
 
     func append(_ item: PipelineHistoryItem, maxCount: Int) throws -> [String] {
+        guard isStoreLoaded else { return [] }
         try insert(item)
         return try trim(to: maxCount)
     }
 
     func delete(id: UUID) throws -> String? {
-        let request = pipelineHistoryRequest()
-        request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
-        guard let entity = try? container.viewContext.fetch(request).first else {
-            return nil
-        }
+        guard isStoreLoaded else { return nil }
 
-        let audioFileName = entity.audioFileName
-        container.viewContext.delete(entity)
-        try saveContext()
-        return audioFileName
+        var deletedAudioFileName: String?
+        var thrownError: Error?
+        container.viewContext.performAndWait {
+            do {
+                let request = pipelineHistoryRequest()
+                request.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+                guard let entity = try container.viewContext.fetch(request).first else { return }
+                deletedAudioFileName = entity.audioFileName
+                container.viewContext.delete(entity)
+                try saveContext()
+            } catch {
+                thrownError = error
+            }
+        }
+        if let thrownError { throw thrownError }
+        return deletedAudioFileName
     }
 
     func clearAll() throws -> [String] {
-        let request = pipelineHistoryRequest()
-        request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
-        guard let entities = try? container.viewContext.fetch(request) else {
-            return []
-        }
+        guard isStoreLoaded else { return [] }
 
-        let audioFileNames = entities.compactMap(\.audioFileName)
-        for entity in entities {
-            container.viewContext.delete(entity)
+        var audioFileNames: [String] = []
+        var thrownError: Error?
+        container.viewContext.performAndWait {
+            do {
+                let request = pipelineHistoryRequest()
+                request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
+                guard let entities = try? container.viewContext.fetch(request) else { return }
+                audioFileNames = entities.compactMap(\.audioFileName)
+                for entity in entities {
+                    container.viewContext.delete(entity)
+                }
+                try saveContext()
+            } catch {
+                thrownError = error
+            }
         }
-        try saveContext()
+        if let thrownError { throw thrownError }
         return audioFileNames
     }
 
     func trim(to maxCount: Int) throws -> [String] {
+        guard isStoreLoaded else { return [] }
         guard maxCount > 0 else {
             let audioFileNames = try clearAll()
             return audioFileNames
         }
 
-        let request = pipelineHistoryRequest()
-        request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
-        guard let entities = try? container.viewContext.fetch(request), entities.count > maxCount else {
-            return []
+        var audioFileNames: [String] = []
+        var thrownError: Error?
+        container.viewContext.performAndWait {
+            do {
+                let request = pipelineHistoryRequest()
+                request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
+                guard let entities = try? container.viewContext.fetch(request), entities.count > maxCount else { return }
+                let dropped = entities[maxCount...]
+                audioFileNames = dropped.compactMap(\.audioFileName)
+                for entity in dropped {
+                    container.viewContext.delete(entity)
+                }
+                try saveContext()
+            } catch {
+                thrownError = error
+            }
         }
-
-        let dropped = entities[maxCount...]
-        let audioFileNames = dropped.compactMap(\.audioFileName)
-        for entity in dropped {
-            container.viewContext.delete(entity)
-        }
-        try saveContext()
+        if let thrownError { throw thrownError }
         return audioFileNames
     }
 
     private func insert(_ item: PipelineHistoryItem) throws {
-        let context = container.viewContext
-        let entity = PipelineHistoryEntry(context: context)
-        entity.id = item.id
-        entity.timestamp = item.timestamp
-        entity.rawTranscript = item.rawTranscript
-        entity.postProcessedTranscript = item.postProcessedTranscript
-        entity.postProcessingPrompt = item.postProcessingPrompt
-        entity.contextSummary = item.contextSummary
-        entity.contextPrompt = item.contextPrompt
-        entity.contextScreenshotDataURL = item.contextScreenshotDataURL
-        entity.contextScreenshotStatus = item.contextScreenshotStatus
-        entity.postProcessingStatus = item.postProcessingStatus
-        entity.debugStatus = item.debugStatus
-        entity.customVocabulary = item.customVocabulary
-        entity.audioFileName = item.audioFileName
-        try saveContext()
+        guard isStoreLoaded else { return }
+
+        var thrownError: Error?
+        container.viewContext.performAndWait {
+            do {
+                let context = container.viewContext
+                let entity = PipelineHistoryEntry(context: context)
+                entity.id = item.id
+                entity.timestamp = item.timestamp
+                entity.rawTranscript = item.rawTranscript
+                entity.postProcessedTranscript = item.postProcessedTranscript
+                entity.postProcessingPrompt = item.postProcessingPrompt
+                entity.contextSummary = item.contextSummary
+                entity.contextPrompt = item.contextPrompt
+                entity.contextScreenshotDataURL = item.contextScreenshotDataURL
+                entity.contextScreenshotStatus = item.contextScreenshotStatus
+                entity.postProcessingStatus = item.postProcessingStatus
+                entity.debugStatus = item.debugStatus
+                entity.customVocabulary = item.customVocabulary
+                entity.audioFileName = item.audioFileName
+                try saveContext()
+            } catch {
+                thrownError = error
+            }
+        }
+        if let thrownError { throw thrownError }
     }
 
     private func saveContext() throws {
@@ -131,6 +192,39 @@ final class PipelineHistoryStore {
 
     private func pipelineHistoryRequest() -> NSFetchRequest<PipelineHistoryEntry> {
         NSFetchRequest<PipelineHistoryEntry>(entityName: "PipelineHistoryEntry")
+    }
+
+    // Safe: loadPersistentStores calls back on a private queue, not the calling thread.
+    private static func loadPersistentStoresSynchronously(container: NSPersistentContainer) -> Error? {
+        let semaphore = DispatchSemaphore(value: 0)
+        let lock = NSLock()
+        var capturedError: Error?
+        var remainingCompletions = max(1, container.persistentStoreDescriptions.count)
+
+        container.loadPersistentStores { _, error in
+            lock.lock()
+            if capturedError == nil, let error {
+                capturedError = error
+            }
+            remainingCompletions -= 1
+            let shouldSignal = remainingCompletions <= 0
+            lock.unlock()
+
+            if shouldSignal {
+                semaphore.signal()
+            }
+        }
+
+        semaphore.wait()
+        return capturedError
+    }
+
+    private static func destroySQLiteStoreFiles(at storeURL: URL) {
+        let basePath = storeURL.path
+        let fileManager = FileManager.default
+        for path in [basePath, basePath + "-wal", basePath + "-shm"] {
+            try? fileManager.removeItem(atPath: path)
+        }
     }
 
     private static func makeHistoryItem(from entity: PipelineHistoryEntry) -> PipelineHistoryItem {
