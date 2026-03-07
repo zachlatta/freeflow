@@ -43,6 +43,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let customContextPromptStorageKey = "custom_context_prompt"
     private let customSystemPromptLastModifiedStorageKey = "custom_system_prompt_last_modified"
     private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
+    private let hotkeyHoldDelaySecondsStorageKey = "hotkey_hold_delay_seconds"
     private let transcribingIndicatorDelay: TimeInterval = 1.0
     let maxPipelineHistoryCount = 20
 
@@ -70,6 +71,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         didSet {
             UserDefaults.standard.set(selectedHotkey.rawValue, forKey: "hotkey_option")
             restartHotkeyMonitoring()
+        }
+    }
+
+    @Published var hotkeyHoldDelaySeconds: Int {
+        didSet {
+            let clamped = min(5, max(0, hotkeyHoldDelaySeconds))
+            if clamped != hotkeyHoldDelaySeconds { hotkeyHoldDelaySeconds = clamped; return }
+            UserDefaults.standard.set(hotkeyHoldDelaySeconds, forKey: hotkeyHoldDelaySecondsStorageKey)
         }
     }
 
@@ -146,6 +155,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var hasShownScreenshotPermissionAlert = false
     private var audioDeviceListenerBlock: AudioObjectPropertyListenerBlock?
     private let pipelineHistoryStore = PipelineHistoryStore()
+    private var holdToRecordWorkItem: DispatchWorkItem?
 
     init() {
         let hasCompletedSetup = UserDefaults.standard.bool(forKey: "hasCompletedSetup")
@@ -172,11 +182,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
+        let hotkeyHoldDelaySeconds: Int
+        if UserDefaults.standard.object(forKey: "hotkey_hold_delay_seconds") == nil {
+            hotkeyHoldDelaySeconds = 1
+        } else {
+            let raw = UserDefaults.standard.integer(forKey: "hotkey_hold_delay_seconds")
+            hotkeyHoldDelaySeconds = min(5, max(0, raw))
+        }
+
         self.contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
         self.apiBaseURL = apiBaseURL
         self.selectedHotkey = selectedHotkey
+        self.hotkeyHoldDelaySeconds = hotkeyHoldDelaySeconds
         self.customVocabulary = customVocabulary
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
@@ -410,10 +429,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func handleHotkeyDown() {
         os_log(.info, log: recordingLog, "handleHotkeyDown() fired, isRecording=%{public}d, isTranscribing=%{public}d", isRecording, isTranscribing)
         guard !isRecording && !isTranscribing else { return }
-        startRecording()
+        holdToRecordWorkItem?.cancel()
+        holdToRecordWorkItem = nil
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard !self.isRecording && !self.isTranscribing else { return }
+            self.holdToRecordWorkItem = nil
+            self.startRecording()
+        }
+        holdToRecordWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + TimeInterval(hotkeyHoldDelaySeconds), execute: workItem)
     }
 
     private func handleHotkeyUp() {
+        if holdToRecordWorkItem != nil {
+            holdToRecordWorkItem?.cancel()
+            holdToRecordWorkItem = nil
+            return
+        }
         guard isRecording else { return }
         stopAndTranscribe()
     }

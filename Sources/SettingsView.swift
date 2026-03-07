@@ -234,6 +234,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Push-to-Talk Key", icon: "keyboard.fill") {
                     hotkeySection
                 }
+                SettingsCard("Hold delay", icon: "timer") {
+                    holdDelaySection
+                }
                 SettingsCard("Microphone", icon: "mic.fill") {
                     microphoneSection
                 }
@@ -503,6 +506,25 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
+        }
+    }
+
+    // MARK: Hold delay
+
+    private var holdDelaySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("How long to hold the key before recording starts. 0 = no delay.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Hold delay", selection: $appState.hotkeyHoldDelaySeconds) {
+                ForEach(0...5, id: \.self) { seconds in
+                    Text(seconds == 0 ? "No delay" : (seconds == 1 ? "1 second" : "\(seconds) seconds"))
+                        .tag(seconds)
+                }
+            }
+            .pickerStyle(.menu)
+            .frame(maxWidth: 200)
         }
     }
 
