@@ -3,12 +3,14 @@ import Foundation
 class TranscriptionService {
     private let apiKey: String
     private let baseURL: String
+    private let forceHTTP2: Bool
     private let transcriptionModel = "whisper-large-v3"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
+    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1", forceHTTP2: Bool = false) {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.forceHTTP2 = forceHTTP2
     }
 
     // Validate API key by hitting a lightweight endpoint
@@ -53,14 +55,19 @@ class TranscriptionService {
 
     // Send audio file for transcription and return text
     private func transcribeAudio(fileURL: URL) async throws -> String {
+        if forceHTTP2 {
+            return try await transcribeAudioWithCurl(fileURL: fileURL)
+        }
+        return try await transcribeAudioWithURLSession(fileURL: fileURL)
+    }
+
+    private func transcribeAudioWithURLSession(fileURL: URL) async throws -> String {
         let url = URL(string: "\(baseURL)/audio/transcriptions")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let boundary = UUID().uuidString
-        let contentType = "multipart/form-data; boundary=\(boundary)"
-        request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let audioData = try Data(contentsOf: fileURL)
         let body = makeMultipartBody(
@@ -69,7 +76,6 @@ class TranscriptionService {
             model: transcriptionModel,
             boundary: boundary
         )
-        request.httpBody = body
 
         let (data, response) = try await URLSession.shared.upload(for: request, from: body)
 
@@ -83,6 +89,58 @@ class TranscriptionService {
         }
 
         return try parseTranscript(from: data)
+    }
+
+    private func transcribeAudioWithCurl(fileURL: URL) async throws -> String {
+        try await Task.detached(priority: .userInitiated) { [apiKey, transcriptionModel] in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+            process.arguments = [
+                "--silent",
+                "--show-error",
+                "--fail",
+                "--http2",
+                "--max-time", String(Int(self.transcriptionTimeoutSeconds)),
+                "\(self.baseURL)/audio/transcriptions",
+                "-H", "Authorization: Bearer \(apiKey)",
+                "-F", "model=\(transcriptionModel)",
+                "-F", "file=@\(fileURL.path);type=\(self.audioContentType(for: fileURL.lastPathComponent))"
+            ]
+
+            let stdout = Pipe()
+            let stderr = Pipe()
+            process.standardOutput = stdout
+            process.standardError = stderr
+
+            try process.run()
+            process.waitUntilExit()
+
+            let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
+            let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
+            let errorText = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            guard process.terminationStatus == 0 else {
+                throw TranscriptionError.submissionFailed(
+                    "curl transport failed with exit \(process.terminationStatus): \(errorText)"
+                )
+            }
+
+            return try self.parseTranscript(from: outputData)
+        }.value
+    }
+
+    private func audioContentType(for fileName: String) -> String {
+        if fileName.lowercased().hasSuffix(".wav") {
+            return "audio/wav"
+        }
+        if fileName.lowercased().hasSuffix(".mp3") {
+            return "audio/mpeg"
+        }
+        if fileName.lowercased().hasSuffix(".m4a") {
+            return "audio/mp4"
+        }
+        return "audio/mp4"
     }
 
     private func makeMultipartBody(audioData: Data, fileName: String, model: String, boundary: String) -> Data {
@@ -104,19 +162,6 @@ class TranscriptionService {
         append("--\(boundary)--\r\n")
 
         return body
-    }
-
-    private func audioContentType(for fileName: String) -> String {
-        if fileName.lowercased().hasSuffix(".wav") {
-            return "audio/wav"
-        }
-        if fileName.lowercased().hasSuffix(".mp3") {
-            return "audio/mpeg"
-        }
-        if fileName.lowercased().hasSuffix(".m4a") {
-            return "audio/mp4"
-        }
-        return "audio/mp4"
     }
 
     private func parseTranscript(from data: Data) throws -> String {
