@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let transcriptionLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Transcription")
 
 class TranscriptionService {
     private let apiKey: String
@@ -32,7 +35,7 @@ class TranscriptionService {
 
     // Upload audio file, submit for transcription, poll until done, return text
     func transcribe(fileURL: URL) async throws -> String {
-        try await withThrowingTaskGroup(of: String.self) { group in
+        return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask { [weak self] in
                 guard let self else {
                     throw TranscriptionError.submissionFailed("Service deallocated")
@@ -77,7 +80,25 @@ class TranscriptionService {
             boundary: boundary
         )
 
-        let (data, response) = try await URLSession.shared.upload(for: request, from: body)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.upload(for: request, from: body)
+        } catch {
+            let nsError = error as NSError
+            os_log(
+                .error,
+                log: transcriptionLog,
+                "URLSession upload failed for %{public}@ (transport=%{public}@, bytes=%{public}lld): domain=%{public}@ code=%ld desc=%{public}@",
+                fileURL.lastPathComponent,
+                "urlsession-default",
+                fileSizeBytes(for: fileURL),
+                nsError.domain,
+                nsError.code,
+                error.localizedDescription
+            )
+            throw error
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw TranscriptionError.submissionFailed("No response from server")
@@ -85,6 +106,15 @@ class TranscriptionService {
 
         guard httpResponse.statusCode == 200 else {
             let responseBody = String(data: data, encoding: .utf8) ?? ""
+            os_log(
+                .error,
+                log: transcriptionLog,
+                "URLSession upload returned HTTP %ld for %{public}@ (transport=%{public}@, bytes=%{public}lld)",
+                httpResponse.statusCode,
+                fileURL.lastPathComponent,
+                "urlsession-default",
+                fileSizeBytes(for: fileURL)
+            )
             throw TranscriptionError.submissionFailed("Status \(httpResponse.statusCode): \(responseBody)")
         }
 
@@ -121,6 +151,16 @@ class TranscriptionService {
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
             guard process.terminationStatus == 0 else {
+                os_log(
+                    .error,
+                    log: transcriptionLog,
+                    "curl upload failed for %{public}@ (transport=%{public}@, bytes=%{public}lld): exit=%d%{public}@",
+                    fileURL.lastPathComponent,
+                    "http2-curl",
+                    self.fileSizeBytes(for: fileURL),
+                    process.terminationStatus,
+                    errorText.isEmpty ? "" : " stderr=\(errorText)"
+                )
                 throw TranscriptionError.submissionFailed(
                     "curl transport failed with exit \(process.terminationStatus): \(errorText)"
                 )
@@ -141,6 +181,11 @@ class TranscriptionService {
             return "audio/mp4"
         }
         return "audio/mp4"
+    }
+
+    private func fileSizeBytes(for fileURL: URL) -> Int64 {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value ?? -1
     }
 
     private func makeMultipartBody(audioData: Data, fileName: String, model: String, boundary: String) -> Data {
