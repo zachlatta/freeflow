@@ -920,7 +920,11 @@ struct SetupView: View {
 
                 Task {
                     do {
-                        let service = TranscriptionService(apiKey: appState.apiKey, baseURL: appState.apiBaseURL)
+                        let service = TranscriptionService(
+                            apiKey: appState.apiKey,
+                            baseURL: appState.apiBaseURL,
+                            forceHTTP2: appState.forceHTTP2Transcription
+                        )
                         let transcript = try await service.transcribe(fileURL: url)
                         await MainActor.run {
                             testTranscript = transcript

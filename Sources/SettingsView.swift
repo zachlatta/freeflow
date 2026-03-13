@@ -454,6 +454,19 @@ struct GeneralSettingsView: View {
                 }
                 .font(.caption)
             }
+
+            Divider()
+
+            Toggle(isOn: $appState.forceHTTP2Transcription) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Force HTTP/2 for Transcription")
+                        .font(.caption.weight(.semibold))
+                    Text("Uses `curl --http2` for audio transcription uploads. Leave this off unless the default transport is failing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
         }
     }
 
@@ -1608,4 +1621,3 @@ struct FlowLayout: Layout {
         return (CGSize(width: maxWidth, height: totalHeight), positions)
     }
 }
-
