@@ -155,9 +155,9 @@ final class HotkeyManager {
     }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
-        guard !event.isARepeat else { return false }
         guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return false }
         let shouldConsume = shortcutReferencesKeyCode(event.keyCode)
+        guard !event.isARepeat else { return shouldConsume }
         pressedKeyCodes.insert(event.keyCode)
         evaluateActiveBindings()
         return shouldConsume

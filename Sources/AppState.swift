@@ -39,6 +39,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let apiBaseURLStorageKey = "api_base_url"
     private let holdShortcutStorageKey = "hold_shortcut"
     private let toggleShortcutStorageKey = "toggle_shortcut"
+    private let savedHoldCustomShortcutStorageKey = "saved_hold_custom_shortcut"
+    private let savedToggleCustomShortcutStorageKey = "saved_toggle_custom_shortcut"
     private let customVocabularyStorageKey = "custom_vocabulary"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
     private let customSystemPromptStorageKey = "custom_system_prompt"
@@ -80,6 +82,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         didSet {
             persistShortcut(toggleShortcut, key: toggleShortcutStorageKey)
             restartHotkeyMonitoring()
+        }
+    }
+
+    @Published private(set) var savedHoldCustomShortcut: ShortcutBinding? {
+        didSet {
+            persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
+        }
+    }
+
+    @Published private(set) var savedToggleCustomShortcut: ShortcutBinding? {
+        didSet {
+            persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
         }
     }
 
@@ -177,6 +191,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
             holdKey: holdShortcutStorageKey,
             toggleKey: toggleShortcutStorageKey
         )
+        let savedHoldCustomShortcut = Self.loadShortcut(forKey: savedHoldCustomShortcutStorageKey)
+            ?? (shortcuts.hold.isCustom ? shortcuts.hold : nil)
+        let savedToggleCustomShortcut = Self.loadShortcut(forKey: savedToggleCustomShortcutStorageKey)
+            ?? (shortcuts.toggle.isCustom ? shortcuts.toggle : nil)
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
@@ -204,6 +222,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.apiBaseURL = apiBaseURL
         self.holdShortcut = shortcuts.hold
         self.toggleShortcut = shortcuts.toggle
+        self.savedHoldCustomShortcut = savedHoldCustomShortcut
+        self.savedToggleCustomShortcut = savedToggleCustomShortcut
         self.customVocabulary = customVocabulary
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
@@ -223,6 +243,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             persistShortcut(shortcuts.hold, key: holdShortcutStorageKey)
             persistShortcut(shortcuts.toggle, key: toggleShortcutStorageKey)
         }
+        persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
+        persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
 
         overlayManager.onStopButtonPressed = { [weak self] in
             DispatchQueue.main.async {
@@ -315,6 +337,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func persistShortcut(_ binding: ShortcutBinding, key: String) {
         guard let data = try? JSONEncoder().encode(binding) else { return }
         UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private func persistOptionalShortcut(_ binding: ShortcutBinding?, key: String) {
+        guard let binding else {
+            UserDefaults.standard.removeObject(forKey: key)
+            return
+        }
+        persistShortcut(binding, key: key)
     }
 
     static func audioStorageDirectory() -> URL {
@@ -489,6 +519,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
         Int((shortcutStartDelay * 1000).rounded())
     }
 
+    func savedCustomShortcut(for role: ShortcutRole) -> ShortcutBinding? {
+        switch role {
+        case .hold:
+            return savedHoldCustomShortcut
+        case .toggle:
+            return savedToggleCustomShortcut
+        }
+    }
+
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let otherBinding = role == .hold ? toggleShortcut : holdShortcut
@@ -501,8 +540,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         switch role {
         case .hold:
+            if binding.isCustom {
+                savedHoldCustomShortcut = binding
+            }
             holdShortcut = binding
         case .toggle:
+            if binding.isCustom {
+                savedToggleCustomShortcut = binding
+            }
             toggleShortcut = binding
         }
 

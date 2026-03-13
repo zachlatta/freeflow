@@ -131,10 +131,17 @@ struct MenuBarView: View {
                     .disabled(preset.binding == appState.toggleShortcut)
                 }
 
-                if appState.holdShortcut.isCustom {
+                if let savedCustomShortcut = appState.savedCustomShortcut(for: .hold) {
                     Divider()
-                    Button("Current: \(appState.holdShortcut.displayName)") { }
-                        .disabled(true)
+                    Button {
+                        _ = appState.setShortcut(savedCustomShortcut, for: .hold)
+                    } label: {
+                        if appState.holdShortcut == savedCustomShortcut {
+                            Text("✓ Custom: \(savedCustomShortcut.displayName)")
+                        } else {
+                            Text("  Custom: \(savedCustomShortcut.displayName)")
+                        }
+                    }
                 }
 
                 Divider()
@@ -169,10 +176,17 @@ struct MenuBarView: View {
                     .disabled(preset.binding == appState.holdShortcut)
                 }
 
-                if appState.toggleShortcut.isCustom {
+                if let savedCustomShortcut = appState.savedCustomShortcut(for: .toggle) {
                     Divider()
-                    Button("Current: \(appState.toggleShortcut.displayName)") { }
-                        .disabled(true)
+                    Button {
+                        _ = appState.setShortcut(savedCustomShortcut, for: .toggle)
+                    } label: {
+                        if appState.toggleShortcut == savedCustomShortcut {
+                            Text("✓ Custom: \(savedCustomShortcut.displayName)")
+                        } else {
+                            Text("  Custom: \(savedCustomShortcut.displayName)")
+                        }
+                    }
                 }
 
                 Divider()

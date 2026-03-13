@@ -70,6 +70,7 @@ struct DictationShortcutEditor: View {
 }
 
 struct ShortcutRoleSection: View {
+    @EnvironmentObject var appState: AppState
     let role: ShortcutRole
     let selection: ShortcutBinding
     let validationMessage: String?
@@ -97,8 +98,10 @@ struct ShortcutRoleSection: View {
                 }
 
                 ShortcutCaptureRow(
-                    currentBinding: selection.isCustom ? selection : nil,
+                    savedBinding: appState.savedCustomShortcut(for: role),
+                    isSelected: selection.isCustom,
                     isCapturing: $isCapturing,
+                    onSelectSaved: onSelect,
                     onCapture: onSelect
                 )
             }
@@ -139,8 +142,10 @@ private struct ShortcutPresetRow: View {
 }
 
 private struct ShortcutCaptureRow: View {
-    let currentBinding: ShortcutBinding?
+    let savedBinding: ShortcutBinding?
+    let isSelected: Bool
     @Binding var isCapturing: Bool
+    let onSelectSaved: (ShortcutBinding) -> Void
     let onCapture: (ShortcutBinding) -> Void
 
     @State private var localKeyMonitor: Any?
@@ -149,21 +154,40 @@ private struct ShortcutCaptureRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
-                Image(systemName: currentBinding == nil ? "plus.circle" : "checkmark.circle.fill")
-                    .foregroundColor(currentBinding == nil ? .secondary : .blue)
+                Button {
+                    if let savedBinding {
+                        onSelectSaved(savedBinding)
+                    } else if !isCapturing {
+                        startCapture()
+                    }
+                } label: {
+                    HStack(alignment: .center, spacing: 10) {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : (savedBinding == nil ? "plus.circle" : "circle"))
+                            .foregroundStyle(isSelected ? .blue : .secondary)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(currentBinding?.displayName ?? "Custom Shortcut")
-                        .font(currentBinding == nil ? .body : .system(.body, design: .monospaced).weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(currentBinding == nil ? "Record any key combo." : "Current custom selection")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(savedBinding?.displayName ?? "Custom Shortcut")
+                                .font(savedBinding == nil ? .body : .system(.body, design: .monospaced).weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Text(savedBinding == nil ? "Record any key combo." : "Saved custom shortcut")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(isSelected ? Color.blue.opacity(0.1) : Color(nsColor: .controlBackgroundColor))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 1.5)
+                    )
                 }
+                .buttonStyle(.plain)
+                .disabled(isCapturing)
 
-                Spacer()
-
-                Button(isCapturing ? "Cancel" : (currentBinding == nil ? "Record…" : "Re-record")) {
+                Button(isCapturing ? "Cancel" : (savedBinding == nil ? "Record…" : "Re-record")) {
                     if isCapturing {
                         stopCapture(clearCaptureState: true)
                     } else {
@@ -172,13 +196,6 @@ private struct ShortcutCaptureRow: View {
                 }
                 .buttonStyle(.bordered)
             }
-            .padding(12)
-            .background(currentBinding == nil ? Color(nsColor: .controlBackgroundColor) : Color.blue.opacity(0.1))
-            .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(currentBinding == nil ? Color.clear : Color.blue, lineWidth: 1.5)
-            )
 
             if isCapturing {
                 Label("Press a shortcut now. Use Escape to cancel.", systemImage: "keyboard")
@@ -195,8 +212,8 @@ private struct ShortcutCaptureRow: View {
         stopCapture(clearCaptureState: false)
         isCapturing = true
 
-        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { _ in
-            nil
+        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+            event
         }
 
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
