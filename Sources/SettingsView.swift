@@ -481,11 +481,36 @@ struct GeneralSettingsView: View {
     // MARK: Dictation Shortcuts
 
     private var hotkeySection: some View {
-        DictationShortcutEditor { isCapturing in
-            if isCapturing {
-                appState.suspendHotkeyMonitoringForShortcutCapture()
-            } else {
-                appState.resumeHotkeyMonitoringAfterShortcutCapture()
+        VStack(alignment: .leading, spacing: 12) {
+            DictationShortcutEditor { isCapturing in
+                if isCapturing {
+                    appState.suspendHotkeyMonitoringForShortcutCapture()
+                } else {
+                    appState.resumeHotkeyMonitoringAfterShortcutCapture()
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Shortcut Start Delay")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Text("\(appState.shortcutStartDelayMilliseconds) ms")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Slider(
+                    value: $appState.shortcutStartDelay,
+                    in: 0...0.5,
+                    step: 0.025
+                )
+
+                Text("Applies before recording starts for both hold and tap shortcuts. Stopping still happens immediately.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -1592,4 +1617,3 @@ struct FlowLayout: Layout {
         return (CGSize(width: maxWidth, height: totalHeight), positions)
     }
 }
-

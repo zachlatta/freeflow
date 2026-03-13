@@ -45,6 +45,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let customContextPromptStorageKey = "custom_context_prompt"
     private let customSystemPromptLastModifiedStorageKey = "custom_system_prompt_last_modified"
     private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
+    private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let transcribingIndicatorDelay: TimeInterval = 1.0
     let maxPipelineHistoryCount = 20
 
@@ -113,6 +114,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var shortcutStartDelay: TimeInterval {
+        didSet {
+            UserDefaults.standard.set(shortcutStartDelay, forKey: shortcutStartDelayStorageKey)
+        }
+    }
+
     @Published var isRecording = false
     @Published var isTranscribing = false
     @Published var lastTranscript: String = ""
@@ -157,6 +164,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let pipelineHistoryStore = PipelineHistoryStore()
     private let shortcutSessionController = DictationShortcutSessionController()
     private var activeRecordingTriggerMode: RecordingTriggerMode?
+    private var pendingShortcutStartTask: Task<Void, Never>?
+    private var pendingShortcutStartMode: RecordingTriggerMode?
     private var shouldMonitorHotkeys = false
     private var isCapturingShortcut = false
 
@@ -173,6 +182,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
         let customSystemPromptLastModified = UserDefaults.standard.string(forKey: customSystemPromptLastModifiedStorageKey) ?? ""
         let customContextPromptLastModified = UserDefaults.standard.string(forKey: customContextPromptLastModifiedStorageKey) ?? ""
+        let shortcutStartDelay = max(0, UserDefaults.standard.double(forKey: shortcutStartDelayStorageKey))
         let initialAccessibility = AXIsProcessTrusted()
         let initialScreenCapturePermission = CGPreflightScreenCaptureAccess()
         var removedAudioFileNames: [String] = []
@@ -199,6 +209,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.customContextPrompt = customContextPrompt
         self.customSystemPromptLastModified = customSystemPromptLastModified
         self.customContextPromptLastModified = customContextPromptLastModified
+        self.shortcutStartDelay = shortcutStartDelay
         self.pipelineHistory = savedHistory
         self.hasAccessibility = initialAccessibility
         self.hasScreenRecordingPermission = initialScreenCapturePermission
@@ -474,6 +485,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    var shortcutStartDelayMilliseconds: Int {
+        Int((shortcutStartDelay * 1000).rounded())
+    }
+
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let otherBinding = role == .hold ? toggleShortcut : holdShortcut
@@ -536,8 +551,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         switch action {
         case .start(let mode):
             os_log(.info, log: recordingLog, "Shortcut start fired for mode %{public}@", mode.rawValue)
-            startRecording(triggerMode: mode)
+            scheduleShortcutStart(mode: mode)
         case .stop:
+            cancelPendingShortcutStart()
             guard isRecording else {
                 shortcutSessionController.reset()
                 activeRecordingTriggerMode = nil
@@ -545,14 +561,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
             stopAndTranscribe()
         case .switchedToToggle:
-            guard isRecording else { return }
-            activeRecordingTriggerMode = .toggle
-            overlayManager.setRecordingTriggerMode(.toggle, animated: true)
+            if isRecording {
+                activeRecordingTriggerMode = .toggle
+                overlayManager.setRecordingTriggerMode(.toggle, animated: true)
+            } else if pendingShortcutStartMode != nil {
+                pendingShortcutStartMode = .toggle
+            }
         }
     }
 
     func toggleRecording() {
         os_log(.info, log: recordingLog, "toggleRecording() called, isRecording=%{public}d", isRecording)
+        cancelPendingShortcutStart()
         if isRecording {
             stopAndTranscribe()
         } else {
@@ -566,10 +586,46 @@ final class AppState: ObservableObject, @unchecked Sendable {
         stopAndTranscribe()
     }
 
+    private func scheduleShortcutStart(mode: RecordingTriggerMode) {
+        cancelPendingShortcutStart(resetMode: false)
+        pendingShortcutStartMode = mode
+        let delay = shortcutStartDelay
+
+        guard delay > 0 else {
+            pendingShortcutStartMode = nil
+            startRecording(triggerMode: mode)
+            return
+        }
+
+        pendingShortcutStartTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                return
+            }
+
+            await MainActor.run { [weak self] in
+                guard let self, let pendingMode = self.pendingShortcutStartMode else { return }
+                self.pendingShortcutStartTask = nil
+                self.pendingShortcutStartMode = nil
+                self.startRecording(triggerMode: pendingMode)
+            }
+        }
+    }
+
+    private func cancelPendingShortcutStart(resetMode: Bool = true) {
+        pendingShortcutStartTask?.cancel()
+        pendingShortcutStartTask = nil
+        if resetMode {
+            pendingShortcutStartMode = nil
+        }
+    }
+
     private func startRecording(triggerMode: RecordingTriggerMode) {
         let t0 = CFAbsoluteTimeGetCurrent()
         os_log(.info, log: recordingLog, "startRecording() entered")
         guard !isRecording && !isTranscribing else { return }
+        cancelPendingShortcutStart()
         activeRecordingTriggerMode = triggerMode
         overlayManager.setRecordingTriggerMode(triggerMode, animated: false)
         guard hasAccessibility else {
@@ -737,6 +793,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func stopAndTranscribe() {
+        cancelPendingShortcutStart()
         shortcutSessionController.reset()
         activeRecordingTriggerMode = nil
         audioLevelCancellable?.cancel()
