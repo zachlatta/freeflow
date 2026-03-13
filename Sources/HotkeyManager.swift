@@ -1,12 +1,11 @@
 import Cocoa
 
 final class HotkeyManager {
-    private var globalFlagsMonitor: Any?
     private var localFlagsMonitor: Any?
-    private var globalKeyDownMonitor: Any?
-    private var globalKeyUpMonitor: Any?
     private var localKeyDownMonitor: Any?
     private var localKeyUpMonitor: Any?
+    private var eventTap: CFMachPort?
+    private var eventTapRunLoopSource: CFRunLoopSource?
 
     private var configuration = ShortcutConfiguration(
         hold: .defaultHold,
@@ -26,18 +25,20 @@ final class HotkeyManager {
     }
 
     func stop() {
-        if let monitor = globalFlagsMonitor { NSEvent.removeMonitor(monitor) }
         if let monitor = localFlagsMonitor { NSEvent.removeMonitor(monitor) }
-        if let monitor = globalKeyDownMonitor { NSEvent.removeMonitor(monitor) }
-        if let monitor = globalKeyUpMonitor { NSEvent.removeMonitor(monitor) }
         if let monitor = localKeyDownMonitor { NSEvent.removeMonitor(monitor) }
         if let monitor = localKeyUpMonitor { NSEvent.removeMonitor(monitor) }
-        globalFlagsMonitor = nil
         localFlagsMonitor = nil
-        globalKeyDownMonitor = nil
-        globalKeyUpMonitor = nil
         localKeyDownMonitor = nil
         localKeyUpMonitor = nil
+        if let source = eventTapRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+        eventTapRunLoopSource = nil
+        if let tap = eventTap {
+            CFMachPortInvalidate(tap)
+        }
+        eventTap = nil
         pressedKeyCodes.removeAll()
         pressedModifierKeyCodes.removeAll()
         holdIsActive = false
@@ -49,18 +50,14 @@ final class HotkeyManager {
     }
 
     private func installMonitors() {
-        globalFlagsMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            _ = self?.handleFlagsChanged(event)
-        }
+        installEventTap()
+
+        // Fall back to local monitors if the event tap cannot be installed.
+        guard eventTap == nil else { return }
+
         localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             let shouldConsume = self?.handleFlagsChanged(event) ?? false
             return shouldConsume ? nil : event
-        }
-        globalKeyDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            _ = self?.handleKeyDown(event)
-        }
-        globalKeyUpMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyUp) { [weak self] event in
-            _ = self?.handleKeyUp(event)
         }
         localKeyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let shouldConsume = self?.handleKeyDown(event) ?? false
@@ -69,6 +66,78 @@ final class HotkeyManager {
         localKeyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { [weak self] event in
             let shouldConsume = self?.handleKeyUp(event) ?? false
             return shouldConsume ? nil : event
+        }
+    }
+
+    var hasPressedShortcutInputs: Bool {
+        pressedKeyCodes.contains(where: shortcutReferencesKeyCode)
+            || pressedModifierKeyCodes.contains(where: shortcutReferencesModifierKeyCode)
+    }
+
+    private func installEventTap() {
+        let eventMask = [
+            CGEventType.flagsChanged,
+            CGEventType.keyDown,
+            CGEventType.keyUp
+        ].reduce(CGEventMask(0)) { partialResult, eventType in
+            partialResult | (CGEventMask(1) << eventType.rawValue)
+        }
+
+        let callback: CGEventTapCallBack = { _, type, event, userInfo in
+            guard let userInfo else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            let manager = Unmanaged<HotkeyManager>.fromOpaque(userInfo).takeUnretainedValue()
+            return manager.handleEventTap(type: type, event: event)
+        }
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: eventMask,
+            callback: callback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            return
+        }
+
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+
+        eventTap = tap
+        eventTapRunLoopSource = source
+    }
+
+    private func handleEventTap(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            if let tap = eventTap {
+                CGEvent.tapEnable(tap: tap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+        case .flagsChanged, .keyDown, .keyUp:
+            guard let nsEvent = NSEvent(cgEvent: event) else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            let shouldConsume: Bool
+            switch type {
+            case .flagsChanged:
+                shouldConsume = handleFlagsChanged(nsEvent)
+            case .keyDown:
+                shouldConsume = handleKeyDown(nsEvent)
+            case .keyUp:
+                shouldConsume = handleKeyUp(nsEvent)
+            default:
+                shouldConsume = false
+            }
+
+            return shouldConsume ? nil : Unmanaged.passUnretained(event)
+        default:
+            return Unmanaged.passUnretained(event)
         }
     }
 

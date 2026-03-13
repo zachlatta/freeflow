@@ -219,7 +219,7 @@ final class RecordingOverlayManager {
     }
 
     private var overlayWidth: CGFloat {
-        let baseWidth: CGFloat = overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle ? 212 : 132
+        let baseWidth: CGFloat = overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle ? 150 : 92
         guard screenHasNotch else { return baseWidth }
         return max(notchWidth, baseWidth)
     }
@@ -353,24 +353,6 @@ struct WaveformView: View {
     }
 }
 
-// MARK: - Recording Overlay View
-
-private struct OverlayModeBadge: View {
-    let mode: RecordingTriggerMode
-
-    var body: some View {
-        Text(mode.badgeTitle)
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .foregroundStyle(mode == .toggle ? Color.white : Color.white.opacity(0.9))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                Capsule()
-                    .fill(mode == .toggle ? Color.red.opacity(0.8) : Color.white.opacity(0.14))
-            )
-    }
-}
-
 struct InitializingDotsView: View {
     @State private var activeDot = 0
     @State private var timer: Timer?
@@ -414,9 +396,6 @@ struct RecordingOverlayView: View {
                         .transition(.opacity)
                 }
             }
-
-            OverlayModeBadge(mode: state.recordingTriggerMode)
-                .transition(.move(edge: .leading).combined(with: .opacity))
 
             if state.phase == .recording && state.recordingTriggerMode == .toggle {
                 Button(action: onStopButtonPressed) {

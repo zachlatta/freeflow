@@ -834,9 +834,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(trimmedFinalTranscript, forType: .string)
 
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            self.pasteAtCursor()
-                        }
+                        self.pasteAtCursorWhenShortcutReleased()
                     }
 
                     self.audioRecorder.cleanup()
@@ -1110,5 +1108,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
         keyUp?.flags = .maskCommand
         keyUp?.post(tap: .cgSessionEventTap)
+    }
+
+    private func pasteAtCursorWhenShortcutReleased(attempt: Int = 0) {
+        let maxAttempts = 24
+        if hotkeyManager.hasPressedShortcutInputs && attempt < maxAttempts {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.025) { [weak self] in
+                self?.pasteAtCursorWhenShortcutReleased(attempt: attempt + 1)
+            }
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+            self?.pasteAtCursor()
+        }
     }
 }
