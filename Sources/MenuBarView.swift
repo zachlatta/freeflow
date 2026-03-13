@@ -65,7 +65,7 @@ struct MenuBarView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 6)
             } else {
-                Text("Hold \(appState.holdShortcut.displayName) or tap \(appState.toggleShortcut.displayName) to dictate")
+                Text(appState.shortcutStatusText)
                     .foregroundStyle(.secondary)
                     .font(.caption)
                     .padding(.horizontal, 16)
@@ -107,6 +107,17 @@ struct MenuBarView: View {
             Divider()
 
             Menu("Hold Shortcut") {
+                Button {
+                    _ = appState.setShortcut(.disabled, for: .hold)
+                } label: {
+                    if appState.holdShortcut.isDisabled {
+                        Text("✓ Disabled")
+                    } else {
+                        Text("  Disabled")
+                    }
+                }
+                .disabled(appState.toggleShortcut.isDisabled)
+
                 ForEach(ShortcutPreset.allCases) { preset in
                     Button {
                         _ = appState.setShortcut(preset.binding, for: .hold)
@@ -134,6 +145,17 @@ struct MenuBarView: View {
             }
 
             Menu("Toggle Shortcut") {
+                Button {
+                    _ = appState.setShortcut(.disabled, for: .toggle)
+                } label: {
+                    if appState.toggleShortcut.isDisabled {
+                        Text("✓ Disabled")
+                    } else {
+                        Text("  Disabled")
+                    }
+                }
+                .disabled(appState.holdShortcut.isDisabled)
+
                 ForEach(ShortcutPreset.allCases) { preset in
                     Button {
                         _ = appState.setShortcut(preset.binding, for: .toggle)

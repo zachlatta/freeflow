@@ -503,7 +503,7 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Choose the shortcut you want to hold while speaking.\nRelease it to stop unless you latch into tap mode later.")
+            Text("Choose the shortcut you want to hold while speaking.\nRelease it to stop unless you latch into tap mode later, or disable hold-to-talk entirely.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -539,7 +539,7 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Choose the shortcut you want to tap once to start dictating and tap again to stop.\nIf this shortcut becomes active while you are holding the hold shortcut, FreeFlow latches into tap mode.")
+            Text("Choose the shortcut you want to tap once to start dictating and tap again to stop.\nIf this shortcut becomes active while you are holding the hold shortcut, FreeFlow latches into tap mode. You can also disable tap-to-toggle entirely.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -661,7 +661,7 @@ struct SetupView: View {
                             .font(.title)
                             .fontWeight(.bold)
 
-                        Text("Hold **\(appState.holdShortcut.displayName)** or tap **\(appState.toggleShortcut.displayName)**")
+                        Text(testShortcutPrompt)
                             .font(.headline)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
@@ -720,7 +720,7 @@ struct SetupView: View {
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
 
-                            Text("Hold **\(appState.holdShortcut.displayName)** or tap **\(appState.toggleShortcut.displayName)** to try again")
+                            Text(retryShortcutPrompt)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         } else if testTranscript.isEmpty {
@@ -729,7 +729,7 @@ struct SetupView: View {
                                 .fontWeight(.semibold)
                                 .foregroundStyle(.secondary)
 
-                            Text("Hold **\(appState.holdShortcut.displayName)** or tap **\(appState.toggleShortcut.displayName)** to try again")
+                            Text(retryShortcutPrompt)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -745,7 +745,7 @@ struct SetupView: View {
                                 .cornerRadius(10)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
 
-                            Text("Hold **\(appState.holdShortcut.displayName)** or tap **\(appState.toggleShortcut.displayName)** to try again")
+                            Text(retryShortcutPrompt)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
@@ -782,9 +782,15 @@ struct SetupView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 12) {
-                HowToRow(icon: "keyboard", text: "Hold \(appState.holdShortcut.displayName) to record")
-                HowToRow(icon: "switch.2", text: "Tap \(appState.toggleShortcut.displayName) to start and stop")
-                HowToRow(icon: "arrow.triangle.branch", text: "While holding, press the toggle shortcut to latch on")
+                if appState.hasEnabledHoldShortcut {
+                    HowToRow(icon: "keyboard", text: "Hold \(appState.holdShortcut.displayName) to record")
+                }
+                if appState.hasEnabledToggleShortcut {
+                    HowToRow(icon: "switch.2", text: "Tap \(appState.toggleShortcut.displayName) to start and stop")
+                }
+                if appState.hasEnabledHoldShortcut && appState.hasEnabledToggleShortcut {
+                    HowToRow(icon: "arrow.triangle.branch", text: "While holding, press the toggle shortcut to latch on")
+                }
                 HowToRow(icon: "doc.on.clipboard", text: "Text is typed at your cursor & copied")
             }
             .padding(.top, 10)
@@ -815,6 +821,23 @@ struct SetupView: View {
         default:
             return true
         }
+    }
+
+    private var testShortcutPrompt: String {
+        switch (appState.hasEnabledHoldShortcut, appState.hasEnabledToggleShortcut) {
+        case (true, true):
+            return "Hold \(appState.holdShortcut.displayName) or tap \(appState.toggleShortcut.displayName)"
+        case (true, false):
+            return "Hold \(appState.holdShortcut.displayName)"
+        case (false, true):
+            return "Tap \(appState.toggleShortcut.displayName)"
+        case (false, false):
+            return "Use Start Dictating from the menu bar"
+        }
+    }
+
+    private var retryShortcutPrompt: String {
+        "\(testShortcutPrompt) to try again"
     }
 
     // MARK: - Helpers

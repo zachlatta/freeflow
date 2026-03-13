@@ -217,12 +217,15 @@ final class HotkeyManager {
     }
 
     private func bindingIsActive(_ binding: ShortcutBinding) -> Bool {
+        guard !binding.isDisabled else { return false }
         let activeModifiers = currentModifiers
         guard activeModifiers.isSuperset(of: binding.modifiers) else {
             return false
         }
 
         switch binding.kind {
+        case .disabled:
+            return false
         case .key:
             return pressedKeyCodes.contains(binding.keyCode)
         case .modifierKey:

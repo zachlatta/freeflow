@@ -453,9 +453,33 @@ final class AppState: ObservableObject, @unchecked Sendable {
         holdShortcut.usesFnKey || toggleShortcut.usesFnKey
     }
 
+    var hasEnabledHoldShortcut: Bool {
+        !holdShortcut.isDisabled
+    }
+
+    var hasEnabledToggleShortcut: Bool {
+        !toggleShortcut.isDisabled
+    }
+
+    var shortcutStatusText: String {
+        switch (hasEnabledHoldShortcut, hasEnabledToggleShortcut) {
+        case (true, true):
+            return "Hold \(holdShortcut.displayName) or tap \(toggleShortcut.displayName) to dictate"
+        case (true, false):
+            return "Hold \(holdShortcut.displayName) to dictate"
+        case (false, true):
+            return "Tap \(toggleShortcut.displayName) to dictate"
+        case (false, false):
+            return "No dictation shortcut enabled"
+        }
+    }
+
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let otherBinding = role == .hold ? toggleShortcut : holdShortcut
+        if binding.isDisabled && otherBinding.isDisabled {
+            return "At least one shortcut must remain enabled."
+        }
         guard binding != otherBinding else {
             return "Hold and tap shortcuts must be different."
         }

@@ -45,6 +45,7 @@ struct ShortcutModifiers: OptionSet, Hashable, Codable {
 }
 
 enum ShortcutBindingKind: String, Codable {
+    case disabled
     case key
     case modifierKey
 }
@@ -142,6 +143,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
     }
 
     var displayName: String {
+        if isDisabled { return "Disabled" }
         let parts = modifiers.orderedDisplayNames + [keyDisplay]
         return parts.joined(separator: " + ")
     }
@@ -151,7 +153,11 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
     }
 
     var isCustom: Bool {
-        preset == nil
+        preset == nil && !isDisabled
+    }
+
+    var isDisabled: Bool {
+        kind == .disabled
     }
 
     var specificityScore: Int {
@@ -159,11 +165,13 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
     }
 
     var usesFnKey: Bool {
-        keyCode == 63 || modifiers.contains(.function)
+        guard !isDisabled else { return false }
+        return keyCode == 63 || modifiers.contains(.function)
     }
 
     func withAddedModifiers(_ extraModifiers: ShortcutModifiers) -> ShortcutBinding {
-        ShortcutBinding(
+        guard !isDisabled else { return self }
+        return ShortcutBinding(
             keyCode: keyCode,
             keyDisplay: keyDisplay,
             modifiers: modifiers.union(extraModifiers),
@@ -172,6 +180,13 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
         )
     }
 
+    static let disabled = ShortcutBinding(
+        keyCode: 0,
+        keyDisplay: "Disabled",
+        modifiers: [],
+        kind: .disabled,
+        preset: nil
+    )
     static let defaultHold = ShortcutPreset.fnKey.binding
     static let defaultToggle = ShortcutPreset.fnKey.binding.withAddedModifiers(.command)
 
