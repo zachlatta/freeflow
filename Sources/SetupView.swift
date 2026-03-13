@@ -1020,7 +1020,7 @@ struct SetupView: View {
         testHotkeyHarness.start(configuration: ShortcutConfiguration(
             hold: appState.holdShortcut,
             toggle: appState.toggleShortcut
-        ))
+        ), startDelay: appState.shortcutStartDelay)
     }
 
     private func stopTestHotkeyMonitoring() {
