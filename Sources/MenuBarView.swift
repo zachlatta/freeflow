@@ -65,7 +65,7 @@ struct MenuBarView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 6)
             } else {
-                Text("Hold \(appState.selectedHotkey.displayName) to dictate")
+                Text("Hold \(appState.holdShortcut.displayName) or tap \(appState.toggleShortcut.displayName) to dictate")
                     .foregroundStyle(.secondary)
                     .font(.caption)
                     .padding(.horizontal, 16)
@@ -106,18 +106,57 @@ struct MenuBarView: View {
 
             Divider()
 
-            // Hotkey picker
-            Menu("Push-to-Talk Key") {
-                ForEach(HotkeyOption.allCases) { option in
+            Menu("Hold Shortcut") {
+                ForEach(ShortcutPreset.allCases) { preset in
                     Button {
-                        appState.selectedHotkey = option
+                        _ = appState.setShortcut(preset.binding, for: .hold)
                     } label: {
-                        if appState.selectedHotkey == option {
-                            Text("✓ \(option.displayName)")
+                        if appState.holdShortcut == preset.binding {
+                            Text("✓ \(preset.title)")
                         } else {
-                            Text("  \(option.displayName)")
+                            Text("  \(preset.title)")
                         }
                     }
+                    .disabled(preset.binding == appState.toggleShortcut)
+                }
+
+                if appState.holdShortcut.isCustom {
+                    Divider()
+                    Button("Current: \(appState.holdShortcut.displayName)") { }
+                        .disabled(true)
+                }
+
+                Divider()
+                Button("Customize…") {
+                    appState.selectedSettingsTab = .general
+                    NotificationCenter.default.post(name: .showSettings, object: nil)
+                }
+            }
+
+            Menu("Toggle Shortcut") {
+                ForEach(ShortcutPreset.allCases) { preset in
+                    Button {
+                        _ = appState.setShortcut(preset.binding, for: .toggle)
+                    } label: {
+                        if appState.toggleShortcut == preset.binding {
+                            Text("✓ \(preset.title)")
+                        } else {
+                            Text("  \(preset.title)")
+                        }
+                    }
+                    .disabled(preset.binding == appState.holdShortcut)
+                }
+
+                if appState.toggleShortcut.isCustom {
+                    Divider()
+                    Button("Current: \(appState.toggleShortcut.displayName)") { }
+                        .disabled(true)
+                }
+
+                Divider()
+                Button("Customize…") {
+                    appState.selectedSettingsTab = .general
+                    NotificationCenter.default.post(name: .showSettings, object: nil)
                 }
             }
 

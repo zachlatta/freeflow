@@ -231,7 +231,7 @@ struct GeneralSettingsView: View {
                 SettingsCard("API Key", icon: "key.fill") {
                     apiKeySection
                 }
-                SettingsCard("Push-to-Talk Key", icon: "keyboard.fill") {
+                SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
                 SettingsCard("Microphone", icon: "mic.fill") {
@@ -478,30 +478,14 @@ struct GeneralSettingsView: View {
         }
     }
 
-    // MARK: Push-to-Talk Key
+    // MARK: Dictation Shortcuts
 
     private var hotkeySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Hold this key to record, release to transcribe.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            VStack(spacing: 6) {
-                ForEach(HotkeyOption.allCases) { option in
-                    HotkeyOptionRow(
-                        option: option,
-                        isSelected: appState.selectedHotkey == option,
-                        action: {
-                            appState.selectedHotkey = option
-                        }
-                    )
-                }
-            }
-
-            if appState.selectedHotkey == .fnKey {
-                Text("Tip: If Fn opens Emoji picker, go to System Settings > Keyboard and change \"Press fn key to\" to \"Do Nothing\".")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+        DictationShortcutEditor { isCapturing in
+            if isCapturing {
+                appState.suspendHotkeyMonitoringForShortcutCapture()
+            } else {
+                appState.resumeHotkeyMonitoringAfterShortcutCapture()
             }
         }
     }
