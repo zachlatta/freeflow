@@ -234,6 +234,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
+                SettingsCard("Clipboard", icon: "doc.on.clipboard") {
+                    clipboardSection
+                }
                 SettingsCard("Microphone", icon: "mic.fill") {
                     microphoneSection
                 }
@@ -525,6 +528,18 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    // MARK: Clipboard
+
+    private var clipboardSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Preserve clipboard after paste", isOn: $appState.preserveClipboard)
+
+            Text("FreeFlow will temporarily place the transcript on your clipboard to paste it, then restore whatever was there before. If you copy something else before the restore happens, FreeFlow leaves it alone.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
