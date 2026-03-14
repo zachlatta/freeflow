@@ -42,12 +42,13 @@ Output rules:
 
     private let apiKey: String
     private let baseURL: String
-    private let defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    private let model: String
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
+    init(apiKey: String, baseURL: String, model: String) {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.model = model
     }
 
     func postProcess(
@@ -67,7 +68,7 @@ Output rules:
                 return try await self.process(
                     transcript: transcript,
                     contextSummary: context.contextSummary,
-                    model: defaultModel,
+                    model: model,
                     customVocabulary: vocabularyTerms,
                     customSystemPrompt: customSystemPrompt
                 )

@@ -31,15 +31,17 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     private let apiKey: String
     private let baseURL: String
     private let customContextPrompt: String
-    private let fallbackTextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
-    private let visionModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    private let fallbackTextModel: String
+    private let visionModel: String
     private let maxScreenshotDataURILength = 500_000
     private let screenshotCompressionPrimary = 0.5
     private let screenshotMaxDimension: CGFloat = 1024
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1", customContextPrompt: String = "") {
+    init(apiKey: String, baseURL: String, chatModel: String, visionModel: String, customContextPrompt: String = "") {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.fallbackTextModel = chatModel
+        self.visionModel = visionModel
         self.customContextPrompt = customContextPrompt
     }
 

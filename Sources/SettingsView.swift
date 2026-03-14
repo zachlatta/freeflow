@@ -228,8 +228,8 @@ struct GeneralSettingsView: View {
                 SettingsCard("Updates", icon: "arrow.triangle.2.circlepath") {
                     updatesSection
                 }
-                SettingsCard("API Key", icon: "key.fill") {
-                    apiKeySection
+                SettingsCard("API Provider", icon: "server.rack") {
+                    apiProviderSection
                 }
                 SettingsCard("Push-to-Talk Key", icon: "keyboard.fill") {
                     hotkeySection
@@ -394,16 +394,32 @@ struct GeneralSettingsView: View {
         }
     }
 
-    // MARK: API Key
+    // MARK: API Provider
 
-    private var apiKeySection: some View {
+    private var apiProviderSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("FreeFlow uses Groq's whisper-large-v3 model for transcription.")
+            Picker("Provider", selection: Binding(
+                get: { appState.selectedProvider },
+                set: { newProvider in
+                    appState.selectedProvider = newProvider
+                    apiKeyInput = appState.apiKey
+                    apiBaseURLInput = appState.apiBaseURL
+                    keyValidationError = nil
+                    keyValidationSuccess = false
+                }
+            )) {
+                ForEach(APIProvider.allCases) { provider in
+                    Text(provider.displayName).tag(provider)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            Text("FreeFlow uses \(appState.selectedProvider.displayName) for transcription and post-processing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
+                SecureField(appState.selectedProvider.apiKeyPlaceholder, text: $apiKeyInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .disabled(isValidatingKey)
@@ -418,6 +434,12 @@ struct GeneralSettingsView: View {
                 .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
             }
 
+            if !appState.selectedProvider.keyInstructionURL.isEmpty {
+                Text("Get an API key at [\(appState.selectedProvider.keyInstructionDisplayURL)](\(appState.selectedProvider.keyInstructionURL))")
+                    .font(.caption)
+                    .tint(.blue)
+            }
+
             if let error = keyValidationError {
                 Label(error, systemImage: "xmark.circle.fill")
                     .foregroundStyle(.red)
@@ -428,44 +450,37 @@ struct GeneralSettingsView: View {
                     .font(.caption)
             }
 
-            Divider()
+            if appState.selectedProvider == .custom {
+                Divider()
 
-            Text("API Base URL")
-                .font(.caption.weight(.semibold))
+                Text("API Base URL")
+                    .font(.caption.weight(.semibold))
 
-            Text("Change this to use a different OpenAI-compatible API provider.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onChange(of: apiBaseURLInput) { newValue in
-                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
-                            appState.apiBaseURL = trimmed
+                HStack(spacing: 8) {
+                    TextField("https://api.example.com/v1", text: $apiBaseURLInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .onChange(of: apiBaseURLInput) { newValue in
+                            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !trimmed.isEmpty {
+                                appState.apiBaseURL = trimmed
+                            }
                         }
-                    }
-
-                Button("Reset to Default") {
-                    apiBaseURLInput = "https://api.groq.com/openai/v1"
-                    appState.apiBaseURL = "https://api.groq.com/openai/v1"
                 }
-                .font(.caption)
             }
         }
     }
 
     private func validateAndSaveKey() {
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
         isValidatingKey = true
         keyValidationError = nil
         keyValidationSuccess = false
 
+        let baseURL = appState.apiBaseURL
+
         Task {
-            let valid = await TranscriptionService.validateAPIKey(key, baseURL: baseURL.isEmpty ? "https://api.groq.com/openai/v1" : baseURL)
+            let valid = await TranscriptionService.validateAPIKey(key, baseURL: baseURL)
             await MainActor.run {
                 isValidatingKey = false
                 if valid {
@@ -881,7 +896,7 @@ struct PromptsSettingsView: View {
         systemTestError = nil
         systemTestPrompt = nil
 
-        let service = PostProcessingService(apiKey: appState.apiKey, baseURL: appState.apiBaseURL)
+        let service = PostProcessingService(apiKey: appState.apiKey, baseURL: appState.apiBaseURL, model: appState.selectedProvider.chatModel)
         let input = systemTestInput
         let customPrompt = appState.customSystemPrompt
         let vocabulary = appState.customVocabulary
@@ -1097,6 +1112,8 @@ struct PromptsSettingsView: View {
         let service = AppContextService(
             apiKey: appState.apiKey,
             baseURL: appState.apiBaseURL,
+            chatModel: appState.selectedProvider.chatModel,
+            visionModel: appState.selectedProvider.visionModel,
             customContextPrompt: appState.customContextPrompt
         )
 
