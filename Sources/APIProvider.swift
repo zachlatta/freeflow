@@ -34,7 +34,7 @@ enum APIProvider: String, CaseIterable, Identifiable {
     var chatModel: String {
         switch self {
         case .groq: return "meta-llama/llama-4-scout-17b-16e-instruct"
-        case .openai: return "gpt-4o-mini"
+        case .openai: return "gpt-5-mini-2025-08-07"
         case .custom: return "meta-llama/llama-4-scout-17b-16e-instruct"
         }
     }
