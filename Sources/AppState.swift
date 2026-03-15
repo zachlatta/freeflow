@@ -35,8 +35,8 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 }
 
 final class AppState: ObservableObject, @unchecked Sendable {
-    private let apiKeyStorageKey = "groq_api_key"
     private let apiBaseURLStorageKey = "api_base_url"
+    private let selectedProviderStorageKey = "selected_provider"
     private let customVocabularyStorageKey = "custom_vocabulary"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
     private let customSystemPromptStorageKey = "custom_system_prompt"
@@ -52,17 +52,28 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var selectedProvider: APIProvider {
+        didSet {
+            UserDefaults.standard.set(selectedProvider.rawValue, forKey: selectedProviderStorageKey)
+            apiKey = Self.loadStoredAPIKey(account: selectedProvider.apiKeyStorageKey)
+            if selectedProvider != .custom {
+                apiBaseURL = selectedProvider.defaultBaseURL
+            }
+            rebuildContextService()
+        }
+    }
+
     @Published var apiKey: String {
         didSet {
             persistAPIKey(apiKey)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            rebuildContextService()
         }
     }
 
     @Published var apiBaseURL: String {
         didSet {
             persistAPIBaseURL(apiBaseURL)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            rebuildContextService()
         }
     }
 
@@ -88,7 +99,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var customContextPrompt: String {
         didSet {
             UserDefaults.standard.set(customContextPrompt, forKey: customContextPromptStorageKey)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            rebuildContextService()
         }
     }
 
@@ -149,8 +160,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     init() {
         let hasCompletedSetup = UserDefaults.standard.bool(forKey: "hasCompletedSetup")
-        let apiKey = Self.loadStoredAPIKey(account: apiKeyStorageKey)
-        let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
+        let selectedProvider = APIProvider(rawValue: UserDefaults.standard.string(forKey: "selected_provider") ?? "") ?? .groq
+        let apiKey = Self.loadStoredAPIKey(account: selectedProvider.apiKeyStorageKey)
+        let apiBaseURL: String
+        if selectedProvider == .custom {
+            apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
+        } else {
+            apiBaseURL = selectedProvider.defaultBaseURL
+        }
         let selectedHotkey = HotkeyOption(rawValue: UserDefaults.standard.string(forKey: "hotkey_option") ?? "fn") ?? .fnKey
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
@@ -172,8 +189,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
-        self.contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+        self.contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, chatModel: selectedProvider.chatModel, visionModel: selectedProvider.visionModel, customContextPrompt: customContextPrompt)
         self.hasCompletedSetup = hasCompletedSetup
+        self.selectedProvider = selectedProvider
         self.apiKey = apiKey
         self.apiBaseURL = apiBaseURL
         self.selectedHotkey = selectedHotkey
@@ -222,9 +240,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func persistAPIKey(_ value: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            AppSettingsStorage.delete(account: apiKeyStorageKey)
+            AppSettingsStorage.delete(account: selectedProvider.apiKeyStorageKey)
         } else {
-            AppSettingsStorage.save(trimmed, account: apiKeyStorageKey)
+            AppSettingsStorage.save(trimmed, account: selectedProvider.apiKeyStorageKey)
         }
     }
 
@@ -244,6 +262,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         } else {
             AppSettingsStorage.save(trimmed, account: apiBaseURLStorageKey)
         }
+    }
+
+    private func rebuildContextService() {
+        contextService = AppContextService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            chatModel: selectedProvider.chatModel,
+            visionModel: selectedProvider.visionModel,
+            customContextPrompt: customContextPrompt
+        )
     }
 
     static func audioStorageDirectory() -> URL {
@@ -630,8 +658,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             } catch {}
         }
 
-        let transcriptionService = TranscriptionService(apiKey: apiKey, baseURL: apiBaseURL)
-        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+        let transcriptionService = TranscriptionService(apiKey: apiKey, baseURL: apiBaseURL, transcriptionModel: selectedProvider.transcriptionModel)
+        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL, model: selectedProvider.chatModel)
 
         Task {
             do {

@@ -11,6 +11,7 @@ struct SetupView: View {
     private let freeflowRepoURL = URL(string: "https://github.com/zachlatta/freeflow")!
     private enum SetupStep: Int, CaseIterable {
         case welcome = 0
+        case provider
         case apiKey
         case micPermission
         case accessibility
@@ -53,6 +54,8 @@ struct SetupView: View {
                 switch currentStep {
                 case .welcome:
                     welcomeStep
+                case .provider:
+                    providerStep
                 case .apiKey:
                     apiKeyStep
                 case .micPermission:
@@ -96,7 +99,7 @@ struct SetupView: View {
                             validateAndContinue()
                         }
                         .keyboardShortcut(.defaultAction)
-                        .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
+                        .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey || (appState.selectedProvider == .custom && appState.apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
                     } else if currentStep == .vocabulary {
                         Button("Continue") {
                             saveCustomVocabularyAndContinue()
@@ -275,42 +278,89 @@ struct SetupView: View {
         }
     }
 
+    var providerStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("API Provider")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Choose which API provider to use for\ntranscription and post-processing.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 8) {
+                ForEach(APIProvider.allCases) { provider in
+                    Button {
+                        appState.selectedProvider = provider
+                        apiKeyInput = appState.apiKey
+                    } label: {
+                        HStack {
+                            Image(systemName: appState.selectedProvider == provider ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(appState.selectedProvider == provider ? .blue : .secondary)
+                            Text(provider.displayName)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                        .padding(12)
+                        .background(appState.selectedProvider == provider ? Color.blue.opacity(0.1) : Color(nsColor: .controlBackgroundColor))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(appState.selectedProvider == provider ? Color.blue : Color.clear, lineWidth: 1.5)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 10)
+
+            stepIndicator
+        }
+    }
+
     var apiKeyStep: some View {
         VStack(spacing: 20) {
             Image(systemName: "key.fill")
                 .font(.system(size: 60))
                 .foregroundStyle(.blue)
 
-            Text("Groq API Key")
+            Text("\(appState.selectedProvider.displayName) API Key")
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("FreeFlow uses Groq for fast, high-accuracy transcription.")
+            Text("FreeFlow uses \(appState.selectedProvider.displayName) for transcription and post-processing.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("How to get a free API key:")
-                        .font(.subheadline.weight(.semibold))
-                    VStack(alignment: .leading, spacing: 2) {
-                        instructionRow(number: "1", text: "Go to [console.groq.com/keys](https://console.groq.com/keys)")
-                        instructionRow(number: "2", text: "Create a free account (if you don't have one)")
-                        instructionRow(number: "3", text: "Click **Create API Key** and copy it")
+                if !appState.selectedProvider.keyInstructionURL.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("How to get an API key:")
+                            .font(.subheadline.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            instructionRow(number: "1", text: "Go to [\(appState.selectedProvider.keyInstructionDisplayURL)](\(appState.selectedProvider.keyInstructionURL))")
+                            instructionRow(number: "2", text: "Create an account (if you don't have one)")
+                            instructionRow(number: "3", text: "Click **Create API Key** and copy it")
+                        }
                     }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.blue.opacity(0.06))
+                    )
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.blue.opacity(0.06))
-                )
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text("API Key")
                         .font(.headline)
-                    SecureField("Paste your Groq API key", text: $apiKeyInput)
+                    SecureField(appState.selectedProvider.apiKeyPlaceholder, text: $apiKeyInput)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
                         .disabled(isValidatingKey)
@@ -322,6 +372,19 @@ struct SetupView: View {
                         Label(error, systemImage: "xmark.circle.fill")
                             .foregroundStyle(.red)
                             .font(.caption)
+                    }
+                }
+
+                if appState.selectedProvider == .custom {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("API Base URL")
+                            .font(.headline)
+                        TextField("https://api.example.com/v1", text: Binding(
+                            get: { appState.apiBaseURL },
+                            set: { appState.apiBaseURL = $0 }
+                        ))
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
                     }
                 }
             }
@@ -791,8 +854,10 @@ struct SetupView: View {
         isValidatingKey = true
         keyValidationError = nil
 
+        let baseURL = appState.apiBaseURL
+
         Task {
-            let valid = await TranscriptionService.validateAPIKey(key, baseURL: appState.apiBaseURL)
+            let valid = await TranscriptionService.validateAPIKey(key, baseURL: baseURL)
             await MainActor.run {
                 isValidatingKey = false
                 if valid {
@@ -920,7 +985,7 @@ struct SetupView: View {
 
                 Task {
                     do {
-                        let service = TranscriptionService(apiKey: appState.apiKey, baseURL: appState.apiBaseURL)
+                        let service = TranscriptionService(apiKey: appState.apiKey, baseURL: appState.apiBaseURL, transcriptionModel: appState.selectedProvider.transcriptionModel)
                         let transcript = try await service.transcribe(fileURL: url)
                         await MainActor.run {
                             testTranscript = transcript
