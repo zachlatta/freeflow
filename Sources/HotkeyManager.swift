@@ -142,33 +142,74 @@ final class HotkeyManager {
     }
 
     private func handleFlagsChanged(_ event: NSEvent) -> Bool {
-        let shouldConsume = shortcutReferencesModifierKeyCode(event.keyCode)
+        let shouldConsumeBefore = shouldConsumeModifierEvent(
+            for: event.keyCode,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
+
         if ShortcutBinding.modifierKeyCodes.contains(event.keyCode) {
-            if pressedModifierKeyCodes.contains(event.keyCode) {
-                pressedModifierKeyCodes.remove(event.keyCode)
+            var updatedModifierKeyCodes = pressedModifierKeyCodes
+            if updatedModifierKeyCodes.contains(event.keyCode) {
+                updatedModifierKeyCodes.remove(event.keyCode)
             } else {
-                pressedModifierKeyCodes.insert(event.keyCode)
+                updatedModifierKeyCodes.insert(event.keyCode)
             }
+            pressedModifierKeyCodes = updatedModifierKeyCodes
         }
+
+        let shouldConsumeAfter = shouldConsumeModifierEvent(
+            for: event.keyCode,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
         evaluateActiveBindings()
-        return shouldConsume
+        return shouldConsumeBefore || shouldConsumeAfter
     }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return false }
-        let shouldConsume = shortcutReferencesKeyCode(event.keyCode)
-        guard !event.isARepeat else { return shouldConsume }
-        pressedKeyCodes.insert(event.keyCode)
+
+        let shouldConsumeBefore = shouldConsumeKeyEvent(
+            for: event.keyCode,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
+        guard !event.isARepeat else { return shouldConsumeBefore }
+
+        var updatedKeyCodes = pressedKeyCodes
+        updatedKeyCodes.insert(event.keyCode)
+        pressedKeyCodes = updatedKeyCodes
+
+        let shouldConsumeAfter = shouldConsumeKeyEvent(
+            for: event.keyCode,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
         evaluateActiveBindings()
-        return shouldConsume
+        return shouldConsumeBefore || shouldConsumeAfter
     }
 
     private func handleKeyUp(_ event: NSEvent) -> Bool {
         guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return false }
-        let shouldConsume = shortcutReferencesKeyCode(event.keyCode)
-        pressedKeyCodes.remove(event.keyCode)
+
+        let shouldConsumeBefore = shouldConsumeKeyEvent(
+            for: event.keyCode,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
+
+        var updatedKeyCodes = pressedKeyCodes
+        updatedKeyCodes.remove(event.keyCode)
+        pressedKeyCodes = updatedKeyCodes
+
+        let shouldConsumeAfter = shouldConsumeKeyEvent(
+            for: event.keyCode,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
         evaluateActiveBindings()
-        return shouldConsume
+        return shouldConsumeBefore || shouldConsumeAfter
     }
 
     private func evaluateActiveBindings() {
@@ -217,8 +258,20 @@ final class HotkeyManager {
     }
 
     private func bindingIsActive(_ binding: ShortcutBinding) -> Bool {
+        bindingIsActive(
+            binding,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
+    }
+
+    private func bindingIsActive(
+        _ binding: ShortcutBinding,
+        pressedKeys: Set<UInt16>,
+        pressedModifiers: Set<UInt16>
+    ) -> Bool {
         guard !binding.isDisabled else { return false }
-        let activeModifiers = currentModifiers
+        let activeModifiers = currentModifiers(for: pressedModifiers)
         guard activeModifiers.isSuperset(of: binding.modifiers) else {
             return false
         }
@@ -227,30 +280,60 @@ final class HotkeyManager {
         case .disabled:
             return false
         case .key:
-            return pressedKeyCodes.contains(binding.keyCode)
+            return pressedKeys.contains(binding.keyCode)
         case .modifierKey:
-            return pressedModifierKeyCodes.contains(binding.keyCode)
+            return pressedModifiers.contains(binding.keyCode)
         }
     }
 
     private var currentModifiers: ShortcutModifiers {
+        currentModifiers(for: pressedModifierKeyCodes)
+    }
+
+    private func currentModifiers(for pressedModifiers: Set<UInt16>) -> ShortcutModifiers {
         var modifiers: ShortcutModifiers = []
-        if pressedModifierKeyCodes.contains(54) || pressedModifierKeyCodes.contains(55) {
+        if pressedModifiers.contains(54) || pressedModifiers.contains(55) {
             modifiers.insert(.command)
         }
-        if pressedModifierKeyCodes.contains(59) || pressedModifierKeyCodes.contains(62) {
+        if pressedModifiers.contains(59) || pressedModifiers.contains(62) {
             modifiers.insert(.control)
         }
-        if pressedModifierKeyCodes.contains(58) || pressedModifierKeyCodes.contains(61) {
+        if pressedModifiers.contains(58) || pressedModifiers.contains(61) {
             modifiers.insert(.option)
         }
-        if pressedModifierKeyCodes.contains(56) || pressedModifierKeyCodes.contains(60) {
+        if pressedModifiers.contains(56) || pressedModifiers.contains(60) {
             modifiers.insert(.shift)
         }
-        if pressedModifierKeyCodes.contains(63) {
+        if pressedModifiers.contains(63) {
             modifiers.insert(.function)
         }
         return modifiers
+    }
+
+    private func shouldConsumeKeyEvent(
+        for keyCode: UInt16,
+        pressedKeys: Set<UInt16>,
+        pressedModifiers: Set<UInt16>
+    ) -> Bool {
+        relevantBindings(for: keyCode, kind: .key).contains {
+            bindingIsActive($0, pressedKeys: pressedKeys, pressedModifiers: pressedModifiers)
+        }
+    }
+
+    private func shouldConsumeModifierEvent(
+        for keyCode: UInt16,
+        pressedKeys: Set<UInt16>,
+        pressedModifiers: Set<UInt16>
+    ) -> Bool {
+        relevantBindings(for: keyCode, kind: .modifierKey).contains {
+            bindingIsActive($0, pressedKeys: pressedKeys, pressedModifiers: pressedModifiers)
+        }
+    }
+
+    private func relevantBindings(for keyCode: UInt16, kind: ShortcutBindingKind) -> [ShortcutBinding] {
+        [configuration.hold, configuration.toggle].filter { binding in
+            binding.kind == kind && binding.keyCode == keyCode
+        }
     }
 
     private func shortcutReferencesKeyCode(_ keyCode: UInt16) -> Bool {
