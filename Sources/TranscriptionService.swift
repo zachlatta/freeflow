@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import os.log
 
@@ -9,6 +10,8 @@ class TranscriptionService {
     private let forceHTTP2: Bool
     private let transcriptionModel = "whisper-large-v3"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
+    private let uploadSampleRate = 16_000.0
+    private let uploadChannelCount: AVAudioChannelCount = 1
 
     init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1", forceHTTP2: Bool = false) {
         self.apiKey = apiKey
@@ -58,10 +61,13 @@ class TranscriptionService {
 
     // Send audio file for transcription and return text
     private func transcribeAudio(fileURL: URL) async throws -> String {
+        let preparedAudio = try prepareAudioForUpload(from: fileURL)
+        defer { preparedAudio.cleanup() }
+
         if forceHTTP2 {
-            return try await transcribeAudioWithCurl(fileURL: fileURL)
+            return try await transcribeAudioWithCurl(fileURL: preparedAudio.fileURL)
         }
-        return try await transcribeAudioWithURLSession(fileURL: fileURL)
+        return try await transcribeAudioWithURLSession(fileURL: preparedAudio.fileURL)
     }
 
     private func transcribeAudioWithURLSession(fileURL: URL) async throws -> String {
@@ -209,6 +215,31 @@ class TranscriptionService {
         return body
     }
 
+    private func prepareAudioForUpload(from fileURL: URL) throws -> PreparedUploadAudio {
+        let inputFile = try AVAudioFile(forReading: fileURL)
+        if isPreferredUploadFormat(file: inputFile, fileURL: fileURL) {
+            return PreparedUploadAudio(fileURL: fileURL, deleteOnCleanup: false)
+        }
+
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("wav")
+        do {
+            try AudioNormalization.writePreferredAudioCopy(from: fileURL, to: outputURL)
+        } catch {
+            throw TranscriptionError.audioPreparationFailed(error.localizedDescription)
+        }
+        return PreparedUploadAudio(fileURL: outputURL, deleteOnCleanup: true)
+    }
+
+    private func isPreferredUploadFormat(file: AVAudioFile, fileURL: URL) -> Bool {
+        let format = file.fileFormat
+        return fileURL.pathExtension.lowercased() == "wav"
+            && abs(format.sampleRate - uploadSampleRate) < 0.5
+            && format.channelCount == uploadChannelCount
+            && format.commonFormat == .pcmFormatInt16
+    }
+
     private func parseTranscript(from data: Data) throws -> String {
         if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
            let text = json["text"] as? String {
@@ -234,6 +265,7 @@ enum TranscriptionError: LocalizedError {
     case transcriptionFailed(String)
     case transcriptionTimedOut(TimeInterval)
     case pollFailed(String)
+    case audioPreparationFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -242,6 +274,17 @@ enum TranscriptionError: LocalizedError {
         case .transcriptionTimedOut(let seconds): return "Transcription timed out after \(Int(seconds))s"
         case .transcriptionFailed(let msg): return "Transcription failed: \(msg)"
         case .pollFailed(let msg): return "Polling failed: \(msg)"
+        case .audioPreparationFailed(let msg): return "Audio preparation failed: \(msg)"
         }
+    }
+}
+
+private struct PreparedUploadAudio {
+    let fileURL: URL
+    let deleteOnCleanup: Bool
+
+    func cleanup() {
+        guard deleteOnCleanup else { return }
+        try? FileManager.default.removeItem(at: fileURL)
     }
 }
