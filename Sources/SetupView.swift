@@ -15,7 +15,8 @@ struct SetupView: View {
         case micPermission
         case accessibility
         case screenRecording
-        case hotkey
+        case holdShortcut
+        case toggleShortcut
         case vocabulary
         case launchAtLogin
         case testTranscription
@@ -44,101 +45,96 @@ struct SetupView: View {
     @State private var testError: String? = nil
     @State private var testAudioLevelCancellable: AnyCancellable? = nil
     @State private var testMicPulsing = false
+    @State private var holdShortcutValidationMessage: String?
+    @State private var toggleShortcutValidationMessage: String?
+    @State private var isCapturingHoldShortcut = false
+    @State private var isCapturingToggleShortcut = false
+    @StateObject private var testHotkeyHarness = SetupTestHotkeyHarness()
 
     private let totalSteps: [SetupStep] = SetupStep.allCases
 
     var body: some View {
         VStack(spacing: 0) {
-            Group {
-                switch currentStep {
-                case .welcome:
-                    welcomeStep
-                case .apiKey:
-                    apiKeyStep
-                case .micPermission:
-                    micPermissionStep
-                case .accessibility:
-                    accessibilityStep
-                case .screenRecording:
-                    screenRecordingStep
-                case .hotkey:
-                    hotkeyStep
-                case .vocabulary:
-                    vocabularyStep
-                case .launchAtLogin:
-                    launchAtLoginStep
-                case .testTranscription:
-                    testTranscriptionStep
-                case .ready:
-                    readyStep
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(40)
+            currentStepView
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 40)
+                .padding(.vertical, 32)
 
             Divider()
 
-            HStack {
-                if currentStep != .welcome {
-                    Button("Back") {
-                        keyValidationError = nil
-                        withAnimation {
-                            currentStep = previousStep(currentStep)
-                        }
-                    }
-                    .disabled(isValidatingKey)
-                }
-                Spacer()
-                if currentStep != .ready {
-                    if currentStep == .apiKey {
-                        // API key step: validate before continuing
-                        Button(isValidatingKey ? "Validating..." : "Continue") {
-                            validateAndContinue()
-                        }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
-                    } else if currentStep == .vocabulary {
-                        Button("Continue") {
-                            saveCustomVocabularyAndContinue()
-                        }
-                        .keyboardShortcut(.defaultAction)
-                    } else if currentStep == .testTranscription {
-                        Button("Skip") {
-                            stopTestHotkeyMonitoring()
-                            withAnimation {
-                                currentStep = nextStep(currentStep)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
+            ZStack {
+                stepIndicator
 
-                        Button("Continue") {
-                            stopTestHotkeyMonitoring()
-                            withAnimation {
-                                currentStep = nextStep(currentStep)
+                HStack(alignment: .center) {
+                    Group {
+                        if currentStep != .welcome {
+                            Button("Back") {
+                                keyValidationError = nil
+                                withAnimation {
+                                    currentStep = previousStep(currentStep)
+                                }
                             }
+                            .disabled(isValidatingKey)
                         }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(testPhase != .done || testTranscript.isEmpty || testError != nil)
-                    } else {
-                        Button("Continue") {
-                            withAnimation {
-                                currentStep = nextStep(currentStep)
+                    }
+
+                    Spacer()
+
+                    Group {
+                        if currentStep != .ready {
+                            if currentStep == .apiKey {
+                                Button(isValidatingKey ? "Validating..." : "Continue") {
+                                    validateAndContinue()
+                                }
+                                .keyboardShortcut(.defaultAction)
+                                .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
+                            } else if currentStep == .vocabulary {
+                                Button("Continue") {
+                                    saveCustomVocabularyAndContinue()
+                                }
+                                .keyboardShortcut(.defaultAction)
+                            } else if currentStep == .testTranscription {
+                                HStack(spacing: 10) {
+                                    Button("Skip") {
+                                        stopTestHotkeyMonitoring()
+                                        withAnimation {
+                                            currentStep = nextStep(currentStep)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(.secondary)
+
+                                    Button("Continue") {
+                                        stopTestHotkeyMonitoring()
+                                        withAnimation {
+                                            currentStep = nextStep(currentStep)
+                                        }
+                                    }
+                                    .keyboardShortcut(.defaultAction)
+                                    .disabled(testPhase != .done || testTranscript.isEmpty || testError != nil)
+                                }
+                            } else {
+                                Button("Continue") {
+                                    withAnimation {
+                                        currentStep = nextStep(currentStep)
+                                    }
+                                }
+                                .keyboardShortcut(.defaultAction)
+                                .disabled(!canContinueFromCurrentStep)
                             }
+                        } else {
+                            Button("Get Started") {
+                                onComplete()
+                            }
+                            .keyboardShortcut(.defaultAction)
                         }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(!canContinueFromCurrentStep)
                     }
-                } else {
-                    Button("Get Started") {
-                        onComplete()
-                    }
-                    .keyboardShortcut(.defaultAction)
                 }
             }
             .padding(20)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
-        .frame(width: 520, height: 520)
+        .frame(width: 520, height: 680)
         .onAppear {
             apiKeyInput = appState.apiKey
             customVocabularyInput = appState.customVocabulary
@@ -151,6 +147,34 @@ struct SetupView: View {
         .onDisappear {
             accessibilityTimer?.invalidate()
             screenRecordingTimer?.invalidate()
+        }
+    }
+
+    @ViewBuilder
+    private var currentStepView: some View {
+        switch currentStep {
+        case .welcome:
+            welcomeStep
+        case .apiKey:
+            apiKeyStep
+        case .micPermission:
+            micPermissionStep
+        case .accessibility:
+            accessibilityStep
+        case .screenRecording:
+            screenRecordingStep
+        case .holdShortcut:
+            holdShortcutStep
+        case .toggleShortcut:
+            toggleShortcutStep
+        case .vocabulary:
+            vocabularyStep
+        case .launchAtLogin:
+            launchAtLoginStep
+        case .testTranscription:
+            testTranscriptionStep
+        case .ready:
+            readyStep
         }
     }
 
@@ -167,7 +191,7 @@ struct SetupView: View {
                 Text("Welcome to FreeFlow")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
 
-                Text("Dictate text anywhere on your Mac.\nHold a key to record, release to transcribe.")
+                Text("Dictate text anywhere on your Mac.\nHold to talk or tap to toggle dictation.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -271,7 +295,6 @@ struct SetupView: View {
                     )
             )
 
-            stepIndicator
         }
     }
 
@@ -326,7 +349,6 @@ struct SetupView: View {
                 }
             }
 
-            stepIndicator
         }
     }
 
@@ -366,7 +388,6 @@ struct SetupView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
 
-            stepIndicator
         }
     }
 
@@ -413,7 +434,6 @@ struct SetupView: View {
                     .multilineTextAlignment(.center)
             }
 
-            stepIndicator
         }
         .onAppear {
             startAccessibilityPolling()
@@ -465,7 +485,6 @@ struct SetupView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
 
-            stepIndicator
         }
         .onAppear {
             startScreenRecordingPolling()
@@ -475,42 +494,75 @@ struct SetupView: View {
         }
     }
 
-    var hotkeyStep: some View {
+    var holdShortcutStep: some View {
         VStack(spacing: 20) {
             Image(systemName: "keyboard.fill")
                 .font(.system(size: 60))
                 .foregroundStyle(.blue)
 
-            Text("Push-to-Talk Key")
+            Text("Hold to Talk Shortcut")
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Choose which key to hold while speaking.\nPress and hold to record, release to transcribe.")
+            Text("Choose the shortcut you want to hold while speaking.\nRelease it to stop unless you latch into tap mode later, or disable hold-to-talk entirely.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: 8) {
-                ForEach(HotkeyOption.allCases) { option in
-                    HotkeyOptionRow(
-                        option: option,
-                        isSelected: appState.selectedHotkey == option,
-                        action: {
-                            appState.selectedHotkey = option
-                        }
-                    )
+            ShortcutRoleSection(
+                role: .hold,
+                selection: appState.holdShortcut,
+                validationMessage: holdShortcutValidationMessage,
+                isCapturing: $isCapturingHoldShortcut,
+                onSelect: { binding in
+                    holdShortcutValidationMessage = appState.setShortcut(binding, for: .hold)
                 }
-            }
-            .padding(.top, 10)
+            )
+                .padding(.top, 10)
 
-            if appState.selectedHotkey == .fnKey {
-                Text("Tip: If Fn opens Emoji picker, go to\nSystem Settings > Keyboard and change\n\"Press fn key to\" to \"Do Nothing\".")
+            if appState.holdShortcut.usesFnKey {
+                Text("Tip: If Fn opens Emoji picker, go to System Settings > Keyboard and change \"Press fn key to\" to \"Do Nothing\".")
                     .font(.caption)
                     .foregroundStyle(.orange)
                     .multilineTextAlignment(.center)
             }
 
-            stepIndicator
+        }
+    }
+
+    var toggleShortcutStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "switch.2")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Tap to Toggle Shortcut")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Choose the shortcut you want to tap once to start dictating and tap again to stop.\nIf this shortcut becomes active while you are holding the hold shortcut, FreeFlow latches into tap mode. You can also disable tap-to-toggle entirely.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ShortcutRoleSection(
+                role: .toggle,
+                selection: appState.toggleShortcut,
+                validationMessage: toggleShortcutValidationMessage,
+                isCapturing: $isCapturingToggleShortcut,
+                onSelect: { binding in
+                    toggleShortcutValidationMessage = appState.setShortcut(binding, for: .toggle)
+                }
+            )
+                .padding(.top, 10)
+
+            if appState.toggleShortcut.usesFnKey {
+                Text("Tip: If Fn opens Emoji picker, go to System Settings > Keyboard and change \"Press fn key to\" to \"Do Nothing\".")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+            }
+
         }
     }
 
@@ -546,7 +598,6 @@ struct SetupView: View {
                     .foregroundStyle(.secondary)
             }
 
-            stepIndicator
         }
     }
 
@@ -575,7 +626,6 @@ struct SetupView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
 
-            stepIndicator
         }
     }
 
@@ -612,7 +662,7 @@ struct SetupView: View {
                             .font(.title)
                             .fontWeight(.bold)
 
-                        Text("Hold **\(appState.selectedHotkey.displayName)**")
+                        Text(testShortcutPrompt)
                             .font(.headline)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 10)
@@ -671,7 +721,7 @@ struct SetupView: View {
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
 
-                            Text("Hold **\(appState.selectedHotkey.displayName)** to try again")
+                            Text(retryShortcutPrompt)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         } else if testTranscript.isEmpty {
@@ -680,7 +730,7 @@ struct SetupView: View {
                                 .fontWeight(.semibold)
                                 .foregroundStyle(.secondary)
 
-                            Text("Hold **\(appState.selectedHotkey.displayName)** to try again")
+                            Text(retryShortcutPrompt)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         } else {
@@ -696,7 +746,7 @@ struct SetupView: View {
                                 .cornerRadius(10)
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
 
-                            Text("Hold **\(appState.selectedHotkey.displayName)** to try again")
+                            Text(retryShortcutPrompt)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
@@ -707,7 +757,6 @@ struct SetupView: View {
             .id(testPhase)
 
             Spacer()
-            stepIndicator
         }
         .onAppear {
             appState.refreshAvailableMicrophones()
@@ -734,13 +783,19 @@ struct SetupView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 12) {
-                HowToRow(icon: "keyboard", text: "Hold \(appState.selectedHotkey.displayName) to record")
-                HowToRow(icon: "hand.raised", text: "Release to stop and transcribe")
+                if appState.hasEnabledHoldShortcut {
+                    HowToRow(icon: "keyboard", text: "Hold \(appState.holdShortcut.displayName) to record")
+                }
+                if appState.hasEnabledToggleShortcut {
+                    HowToRow(icon: "switch.2", text: "Tap \(appState.toggleShortcut.displayName) to start and stop")
+                }
+                if appState.hasEnabledHoldShortcut && appState.hasEnabledToggleShortcut {
+                    HowToRow(icon: "arrow.triangle.branch", text: "While holding, press the toggle shortcut to latch on")
+                }
                 HowToRow(icon: "doc.on.clipboard", text: "Text is typed at your cursor & copied")
             }
             .padding(.top, 10)
 
-            stepIndicator
         }
     }
 
@@ -752,7 +807,6 @@ struct SetupView: View {
                     .frame(width: 8, height: 8)
             }
         }
-        .padding(.top, 20)
     }
 
     private var canContinueFromCurrentStep: Bool {
@@ -768,6 +822,23 @@ struct SetupView: View {
         default:
             return true
         }
+    }
+
+    private var testShortcutPrompt: String {
+        switch (appState.hasEnabledHoldShortcut, appState.hasEnabledToggleShortcut) {
+        case (true, true):
+            return "Hold \(appState.holdShortcut.displayName) or tap \(appState.toggleShortcut.displayName)"
+        case (true, false):
+            return "Hold \(appState.holdShortcut.displayName)"
+        case (false, true):
+            return "Tap \(appState.toggleShortcut.displayName)"
+        case (false, false):
+            return "Use Start Dictating from the menu bar"
+        }
+    }
+
+    private var retryShortcutPrompt: String {
+        "\(testShortcutPrompt) to try again"
     }
 
     // MARK: - Helpers
@@ -871,8 +942,9 @@ struct SetupView: View {
     // MARK: - Test Transcription
 
     private func startTestHotkeyMonitoring() {
-        appState.hotkeyManager.onKeyDown = { [self] in
-            DispatchQueue.main.async {
+        testHotkeyHarness.onAction = { action in
+            switch action {
+            case .start:
                 guard testPhase == .idle || testPhase == .done else { return }
                 if testPhase == .done {
                     resetTest()
@@ -890,27 +962,27 @@ struct SetupView: View {
                         testPhase = .recording
                     }
                 } catch {
+                    testHotkeyHarness.resetSession()
                     testError = error.localizedDescription
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                         testPhase = .done
                     }
                 }
-            }
-        }
 
-        appState.hotkeyManager.onKeyUp = { [self] in
-            DispatchQueue.main.async {
+            case .stop:
                 guard testPhase == .recording, let recorder = testAudioRecorder else { return }
                 let fileURL = recorder.stopRecording()
                 testAudioLevelCancellable?.cancel()
                 testAudioLevelCancellable = nil
                 testAudioLevel = 0.0
+                testHotkeyHarness.isTranscribing = true
 
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     testPhase = .transcribing
                 }
 
                 guard let url = fileURL else {
+                    testHotkeyHarness.isTranscribing = false
                     testError = "No audio file was created."
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                         testPhase = .done
@@ -927,6 +999,7 @@ struct SetupView: View {
                         )
                         let transcript = try await service.transcribe(fileURL: url)
                         await MainActor.run {
+                            testHotkeyHarness.isTranscribing = false
                             testTranscript = transcript
                             withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
                                 testPhase = .done
@@ -934,25 +1007,29 @@ struct SetupView: View {
                         }
                     } catch {
                         await MainActor.run {
+                            testHotkeyHarness.isTranscribing = false
                             testError = error.localizedDescription
                             withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
                                 testPhase = .done
                             }
                         }
                     }
-                    // Clean up temp file
                     recorder.cleanup()
                 }
+
+            case .switchedToToggle:
+                break
             }
         }
 
-        appState.hotkeyManager.start(option: appState.selectedHotkey)
+        testHotkeyHarness.start(configuration: ShortcutConfiguration(
+            hold: appState.holdShortcut,
+            toggle: appState.toggleShortcut
+        ), startDelay: appState.shortcutStartDelay)
     }
 
     private func stopTestHotkeyMonitoring() {
-        appState.hotkeyManager.stop()
-        appState.hotkeyManager.onKeyDown = nil
-        appState.hotkeyManager.onKeyUp = nil
+        testHotkeyHarness.stop()
         testAudioLevelCancellable?.cancel()
         testAudioLevelCancellable = nil
         if let recorder = testAudioRecorder, recorder.isRecording {
@@ -968,6 +1045,8 @@ struct SetupView: View {
         testError = nil
         testAudioLevel = 0.0
         testMicPulsing = true
+        testHotkeyHarness.isTranscribing = false
+        testHotkeyHarness.resetSession()
         if let recorder = testAudioRecorder {
             if recorder.isRecording {
                 _ = recorder.stopRecording()
@@ -1087,32 +1166,6 @@ private struct InlineTranscribingDots: View {
         .onReceive(timer) { _ in
             activeDot = (activeDot + 1) % 3
         }
-    }
-}
-
-struct HotkeyOptionRow: View {
-    let option: HotkeyOption
-    let isSelected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? .blue : .secondary)
-                Text(option.displayName)
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            .padding(12)
-            .background(isSelected ? Color.blue.opacity(0.1) : Color(nsColor: .controlBackgroundColor))
-            .cornerRadius(8)
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 1.5)
-                )
-        }
-        .buttonStyle(.plain)
     }
 }
 

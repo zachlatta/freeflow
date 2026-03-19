@@ -3,9 +3,10 @@ import AppKit
 
 // MARK: - State
 
-class RecordingOverlayState: ObservableObject {
+final class RecordingOverlayState: ObservableObject {
     @Published var phase: OverlayPhase = .recording
     @Published var audioLevel: Float = 0.0
+    @Published var recordingTriggerMode: RecordingTriggerMode = .hold
 }
 
 enum OverlayPhase {
@@ -35,7 +36,6 @@ private func makeOverlayPanel(width: CGFloat, height: CGFloat) -> NSPanel {
     return panel
 }
 
-/// Wraps a SwiftUI view in an NSView for use as panel content.
 private func makeNotchContent<V: View>(
     width: CGFloat,
     height: CGFloat,
@@ -55,18 +55,18 @@ private func makeNotchContent<V: View>(
 
 // MARK: - Manager
 
-class RecordingOverlayManager {
+final class RecordingOverlayManager {
     private var overlayWindow: NSPanel?
     private var transcribingPanel: NSPanel?
-    private var overlayState = RecordingOverlayState()
+    private let overlayState = RecordingOverlayState()
 
-    /// Whether the main screen has a camera housing (notch).
+    var onStopButtonPressed: (() -> Void)?
+
     private var screenHasNotch: Bool {
         guard let screen = NSScreen.main else { return false }
         return screen.safeAreaInsets.top > 0
     }
 
-    /// Width of the camera housing (notch) in points, or 0 if no notch.
     private var notchWidth: CGFloat {
         guard let screen = NSScreen.main, screenHasNotch else { return 0 }
         guard let leftArea = screen.auxiliaryTopLeftArea,
@@ -74,107 +74,164 @@ class RecordingOverlayManager {
         return screen.frame.width - leftArea.width - rightArea.width
     }
 
-    func showInitializing() {
-        DispatchQueue.main.async {
-            self.overlayState.phase = .initializing
-            self.overlayState.audioLevel = 0.0
-            self._showOverlayPanel()
-        }
-    }
-
-    func showRecording() {
-        DispatchQueue.main.async {
-            self.overlayState.phase = .recording
-            self.overlayState.audioLevel = 0.0
-            self._showOverlayPanel()
-        }
-    }
-
-    func transitionToRecording() {
-        DispatchQueue.main.async { self.overlayState.phase = .recording }
-    }
-
-    func updateAudioLevel(_ level: Float) {
-        DispatchQueue.main.async { self.overlayState.audioLevel = level }
-    }
-
-    func showTranscribing() {
-        DispatchQueue.main.async { self._showTranscribing() }
-    }
-
-    func slideUpToNotch(completion: @escaping () -> Void) {
-        DispatchQueue.main.async { self._slideUpToNotch(completion: completion) }
-    }
-
-    func showDone() {
-        DispatchQueue.main.async { self._showDone() }
-    }
-
-    func dismiss() {
-        DispatchQueue.main.async { self._dismiss() }
-    }
-
-    /// Height of the notch area (menu bar inset) that the panel extends into.
     private var notchOverlap: CGFloat {
         guard let screen = NSScreen.main else { return 0 }
         return screen.frame.maxY - screen.visibleFrame.maxY
     }
 
-    private func _showOverlayPanel() {
-        let hasNotch = screenHasNotch
-        let panelWidth: CGFloat = hasNotch ? max(notchWidth, 120) : 120
-        let contentHeight: CGFloat = 32
-        // On notch screens, extend the panel up into the menu bar to connect with the notch
-        let overlap = hasNotch ? notchOverlap : 0
-        let panelHeight = contentHeight + overlap
+    private var overlayAcceptsMouseEvents: Bool {
+        overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle
+    }
+
+    func showInitializing(mode: RecordingTriggerMode = .hold) {
+        DispatchQueue.main.async {
+            self.overlayState.recordingTriggerMode = mode
+            self.overlayState.phase = .initializing
+            self.overlayState.audioLevel = 0
+            self.showOverlayPanel(animatedResize: false)
+        }
+    }
+
+    func showRecording(mode: RecordingTriggerMode = .hold) {
+        DispatchQueue.main.async {
+            self.overlayState.recordingTriggerMode = mode
+            self.overlayState.phase = .recording
+            self.overlayState.audioLevel = 0
+            self.showOverlayPanel(animatedResize: true)
+        }
+    }
+
+    func transitionToRecording(mode: RecordingTriggerMode = .hold) {
+        DispatchQueue.main.async {
+            self.overlayState.recordingTriggerMode = mode
+            self.overlayState.phase = .recording
+            self.updateOverlayLayout(animated: true)
+        }
+    }
+
+    func setRecordingTriggerMode(_ mode: RecordingTriggerMode, animated: Bool) {
+        DispatchQueue.main.async {
+            self.overlayState.recordingTriggerMode = mode
+            self.updateOverlayLayout(animated: animated)
+        }
+    }
+
+    func updateAudioLevel(_ level: Float) {
+        DispatchQueue.main.async {
+            self.overlayState.audioLevel = level
+        }
+    }
+
+    func showTranscribing() {
+        DispatchQueue.main.async {
+            self.showTranscribingPanel()
+        }
+    }
+
+    func slideUpToNotch(completion: @escaping () -> Void) {
+        DispatchQueue.main.async {
+            self.slideOverlayUp(completion: completion)
+        }
+    }
+
+    func showDone() {
+        DispatchQueue.main.async {
+            self.showDonePanel()
+        }
+    }
+
+    func dismiss() {
+        DispatchQueue.main.async {
+            self.dismissAll()
+        }
+    }
+
+    private func showOverlayPanel(animatedResize: Bool) {
+        let frame = overlayFrame
 
         if let panel = overlayWindow {
-            guard let screen = NSScreen.main else { return }
-            let x = panelX(screen, width: panelWidth)
-            let y: CGFloat
-            if hasNotch {
-                y = screen.frame.maxY - panelHeight
-            } else {
-                y = screen.frame.maxY - panelHeight
-            }
-            panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
+            panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
+            panel.contentView = makeOverlayContent(frame: frame)
+            resize(panel: panel, to: frame, animated: animatedResize)
             panel.alphaValue = 1
             panel.orderFrontRegardless()
             return
         }
 
-        let panel = makeOverlayPanel(width: panelWidth, height: panelHeight)
+        let panel = makeOverlayPanel(width: frame.width, height: frame.height)
         panel.hasShadow = false
+        panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
+        panel.contentView = makeOverlayContent(frame: frame)
 
-        let view = RecordingOverlayView(state: overlayState)
-        panel.contentView = makeNotchContent(
-            width: panelWidth,
-            height: panelHeight,
-            cornerRadius: hasNotch ? 18 : 12,
-            rootView: view.padding(.top, overlap)
-        )
+        guard let screen = NSScreen.main else { return }
 
-        if let screen = NSScreen.main {
-            let x = panelX(screen, width: panelWidth)
-            let hiddenY = screen.frame.maxY
-            let visibleY = screen.frame.maxY - panelHeight
+        let hiddenFrame = NSRect(x: frame.origin.x, y: screen.frame.maxY, width: frame.width, height: frame.height)
+        panel.setFrame(hiddenFrame, display: true)
+        panel.alphaValue = 1
+        panel.orderFrontRegardless()
 
-            panel.setFrame(NSRect(x: x, y: hiddenY, width: panelWidth, height: panelHeight), display: true)
-            panel.alphaValue = 1
-            panel.orderFrontRegardless()
-
-            // Spring-like drop: overshoots slightly then settles
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.18
-                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.56, 0.64, 1.0)
-                panel.animator().setFrame(NSRect(x: x, y: visibleY, width: panelWidth, height: panelHeight), display: true)
-            }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.34, 1.56, 0.64, 1.0)
+            panel.animator().setFrame(frame, display: true)
         }
 
-        self.overlayWindow = panel
+        overlayWindow = panel
     }
 
-    private func _slideUpToNotch(completion: @escaping () -> Void) {
+    private func updateOverlayLayout(animated: Bool) {
+        guard let panel = overlayWindow else { return }
+        let frame = overlayFrame
+        panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
+        panel.contentView = makeOverlayContent(frame: frame)
+        resize(panel: panel, to: frame, animated: animated)
+    }
+
+    private func makeOverlayContent(frame: NSRect) -> NSView {
+        makeNotchContent(
+            width: frame.width,
+            height: frame.height,
+            cornerRadius: screenHasNotch ? 18 : 12,
+            rootView: RecordingOverlayView(
+                state: overlayState,
+                onStopButtonPressed: { [weak self] in
+                    self?.onStopButtonPressed?()
+                }
+            )
+            .padding(.top, screenHasNotch ? notchOverlap : 0)
+        )
+    }
+
+    private func resize(panel: NSPanel, to frame: NSRect, animated: Bool) {
+        guard animated else {
+            panel.setFrame(frame, display: true)
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(frame, display: true)
+        }
+    }
+
+    private var overlayFrame: NSRect {
+        guard let screen = NSScreen.main else { return .zero }
+        let width = overlayWidth
+        let overlap = screenHasNotch ? notchOverlap : 0
+        let height: CGFloat = 38 + overlap
+        let x = screen.frame.midX - width / 2
+        let y = screen.frame.maxY - height
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    private var overlayWidth: CGFloat {
+        let baseWidth: CGFloat = overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle ? 150 : 92
+        guard screenHasNotch else { return baseWidth }
+        return max(notchWidth, baseWidth)
+    }
+
+    private func slideOverlayUp(completion: @escaping () -> Void) {
         guard let panel = overlayWindow, let screen = NSScreen.main else {
             completion()
             return
@@ -186,7 +243,10 @@ class RecordingOverlayManager {
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.09
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0.0, 1.0, 1.0)
-            panel.animator().setFrame(NSRect(x: frame.origin.x, y: hiddenY, width: frame.width, height: frame.height), display: true)
+            panel.animator().setFrame(
+                NSRect(x: frame.origin.x, y: hiddenY, width: frame.width, height: frame.height),
+                display: true
+            )
         }, completionHandler: {
             panel.orderOut(nil)
             self.overlayWindow = nil
@@ -194,7 +254,7 @@ class RecordingOverlayManager {
         })
     }
 
-    private func _showTranscribing() {
+    private func showTranscribingPanel() {
         overlayState.phase = .transcribing
 
         if let panel = overlayWindow {
@@ -204,25 +264,21 @@ class RecordingOverlayManager {
 
         if transcribingPanel != nil { return }
 
-        let hasNotch = screenHasNotch
-        let contentHeight: CGFloat = 22
-        let overlap = hasNotch ? notchOverlap : 0
+        let overlap = screenHasNotch ? notchOverlap : 0
         let panelWidth: CGFloat = 44
-        let panelHeight = contentHeight + overlap
+        let panelHeight: CGFloat = 22 + overlap
 
         let panel = makeOverlayPanel(width: panelWidth, height: panelHeight)
         panel.hasShadow = false
-
-        let view = TranscribingIndicatorView()
         panel.contentView = makeNotchContent(
             width: panelWidth,
             height: panelHeight,
-            cornerRadius: hasNotch ? 14 : 11,
-            rootView: view.padding(.top, overlap)
+            cornerRadius: screenHasNotch ? 14 : 11,
+            rootView: TranscribingIndicatorView().padding(.top, overlap)
         )
 
         if let screen = NSScreen.main {
-            let x = panelX(screen, width: panelWidth)
+            let x = screen.frame.midX - panelWidth / 2
             let y = screen.frame.maxY - panelHeight
             panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
         }
@@ -235,10 +291,10 @@ class RecordingOverlayManager {
             panel.animator().alphaValue = 1
         }
 
-        self.transcribingPanel = panel
+        transcribingPanel = panel
     }
 
-    private func _showDone() {
+    private func showDonePanel() {
         overlayState.phase = .done
 
         if let panel = transcribingPanel {
@@ -252,7 +308,7 @@ class RecordingOverlayManager {
         }
     }
 
-    private func _dismiss() {
+    private func dismissAll() {
         if let panel = overlayWindow {
             panel.orderOut(nil)
             overlayWindow = nil
@@ -261,10 +317,6 @@ class RecordingOverlayManager {
             panel.orderOut(nil)
             transcribingPanel = nil
         }
-    }
-
-    private func panelX(_ screen: NSScreen, width: CGFloat) -> CGFloat {
-        screen.frame.midX - width / 2
     }
 }
 
@@ -308,8 +360,6 @@ struct WaveformView: View {
     }
 }
 
-// MARK: - Recording Overlay View
-
 struct InitializingDotsView: View {
     @State private var activeDot = 0
     @State private var timer: Timer?
@@ -326,7 +376,9 @@ struct InitializingDotsView: View {
         .onAppear {
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-                DispatchQueue.main.async { activeDot = (activeDot + 1) % 3 }
+                DispatchQueue.main.async {
+                    activeDot = (activeDot + 1) % 3
+                }
             }
         }
         .onDisappear {
@@ -338,19 +390,41 @@ struct InitializingDotsView: View {
 
 struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
+    let onStopButtonPressed: () -> Void
 
     var body: some View {
-        Group {
-            if state.phase == .initializing {
-                InitializingDotsView()
-                    .transition(.opacity)
-            } else {
-                WaveformView(audioLevel: state.audioLevel)
-                    .transition(.opacity)
+        HStack(spacing: 10) {
+            Group {
+                if state.phase == .initializing {
+                    InitializingDotsView()
+                        .transition(.opacity)
+                } else {
+                    WaveformView(audioLevel: state.audioLevel)
+                        .transition(.opacity)
+                }
+            }
+
+            if state.phase == .recording && state.recordingTriggerMode == .toggle {
+                Button(action: onStopButtonPressed) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 9, weight: .bold))
+                        Text("Stop")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.red.opacity(0.92)))
+                }
+                .buttonStyle(.plain)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: state.phase == .initializing)
+        .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.phase)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.recordingTriggerMode)
     }
 }
 
