@@ -5,6 +5,10 @@ APP_BUNDLE = $(BUILD_DIR)/$(APP_NAME).app
 CODESIGN_IDENTITY ?= FreeFlow Dev
 CONTENTS = $(APP_BUNDLE)/Contents
 MACOS_DIR = $(CONTENTS)/MacOS
+empty :=
+space := $(empty) $(empty)
+APP_EXECUTABLE = $(MACOS_DIR)/$(APP_NAME)
+APP_EXECUTABLE_TARGET := $(subst $(space),\ ,$(APP_EXECUTABLE))
 
 SOURCES = $(wildcard Sources/*.swift)
 RESOURCES = $(CONTENTS)/Resources
@@ -14,9 +18,9 @@ ICON_ICNS = Resources/AppIcon.icns
 
 .PHONY: all clean run icon dmg codesign-dmg notarize
 
-all: $(MACOS_DIR)/$(APP_NAME)
+all: $(APP_EXECUTABLE_TARGET)
 
-$(MACOS_DIR)/$(APP_NAME): $(SOURCES) Info.plist $(ICON_ICNS)
+$(APP_EXECUTABLE_TARGET): $(SOURCES) Info.plist $(ICON_ICNS)
 	@mkdir -p "$(MACOS_DIR)" "$(RESOURCES)"
 ifeq ($(ARCH),universal)
 	swiftc \
@@ -71,7 +75,7 @@ $(ICON_ICNS): $(ICON_SOURCE)
 	@echo "Generated $@"
 
 dmg: all
-	@rm -f $(BUILD_DIR)/$(APP_NAME).dmg
+	@rm -f "$(BUILD_DIR)/$(APP_NAME).dmg"
 	@rm -rf $(BUILD_DIR)/dmg-staging
 	@mkdir -p $(BUILD_DIR)/dmg-staging
 	@cp -R "$(APP_BUNDLE)" $(BUILD_DIR)/dmg-staging/
@@ -89,18 +93,18 @@ dmg: all
 		--hide-extension "$(APP_NAME).app" \
 		--icon "Applications" 480 170 \
 		--no-internet-enable \
-		$(BUILD_DIR)/$(APP_NAME).dmg \
-		$(BUILD_DIR)/dmg-staging
+		"$(BUILD_DIR)/$(APP_NAME).dmg" \
+		"$(BUILD_DIR)/dmg-staging"
 	@rm -rf $(BUILD_DIR)/dmg-staging
 	@echo "Created $(BUILD_DIR)/$(APP_NAME).dmg"
 
 codesign-dmg: dmg
-	codesign --force --sign "$(CODESIGN_IDENTITY)" $(BUILD_DIR)/$(APP_NAME).dmg
+	codesign --force --sign "$(CODESIGN_IDENTITY)" "$(BUILD_DIR)/$(APP_NAME).dmg"
 
 notarize:
-	xcrun notarytool submit $(BUILD_DIR)/$(APP_NAME).dmg \
+	xcrun notarytool submit "$(BUILD_DIR)/$(APP_NAME).dmg" \
 		--keychain-profile "$(NOTARIZE_PROFILE)" --wait
-	xcrun stapler staple $(BUILD_DIR)/$(APP_NAME).dmg
+	xcrun stapler staple "$(BUILD_DIR)/$(APP_NAME).dmg"
 
 clean:
 	rm -rf $(BUILD_DIR)
