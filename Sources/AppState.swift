@@ -39,6 +39,7 @@ private struct PreservedPasteboardEntry {
     let value: Value
 
     enum Value {
+        case string(String)
         case propertyList(Any)
         case data(Data)
     }
@@ -49,6 +50,9 @@ private struct PreservedPasteboardItem {
 
     init(item: NSPasteboardItem) {
         self.entries = item.types.compactMap { type in
+            if let string = item.string(forType: type) {
+                return PreservedPasteboardEntry(type: type, value: .string(string))
+            }
             if let propertyList = item.propertyList(forType: type) {
                 return PreservedPasteboardEntry(type: type, value: .propertyList(propertyList))
             }
@@ -63,6 +67,8 @@ private struct PreservedPasteboardItem {
         let item = NSPasteboardItem()
         for entry in entries {
             switch entry.value {
+            case .string(let string):
+                item.setString(string, forType: entry.type)
             case .propertyList(let propertyList):
                 item.setPropertyList(propertyList, forType: entry.type)
             case .data(let data):
