@@ -237,6 +237,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Microphone", icon: "mic.fill") {
                     microphoneSection
                 }
+                SettingsCard("Sound Volume", icon: "speaker.wave.2.fill") {
+                    soundVolumeSection
+                }
                 SettingsCard("Custom Vocabulary", icon: "text.book.closed.fill") {
                     vocabularySection
                 }
@@ -553,6 +556,35 @@ struct GeneralSettingsView: View {
         }
         .onAppear {
             appState.refreshAvailableMicrophones()
+        }
+    }
+
+    // MARK: Sound Volume
+
+    private var soundVolumeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Adjust the volume of feedback sounds.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Image(systemName: "speaker.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                Slider(value: $appState.soundVolume, in: 0...1, step: 0.1)
+                Image(systemName: "speaker.wave.3.fill")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                Text("\(Int(appState.soundVolume * 100))%")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+            }
+
+            Button("Preview") {
+                let s = NSSound(named: "Tink"); s?.volume = appState.soundVolume; s?.play()
+            }
+            .font(.caption)
         }
     }
 
