@@ -45,6 +45,8 @@ If you do that, the total pipeline takes too long for the UX to be good (5-10 se
 
 Some day!
 
+**Update:** You can now use a custom model with FreeFlow by configuring the LLM API URL in the FreeFlow settings to use Ollama. Thank you @taciturnaxolotl!
+
 ## License
 
 Licensed under the MIT license.
