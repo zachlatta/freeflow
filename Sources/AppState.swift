@@ -114,6 +114,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let preserveClipboardStorageKey = "preserve_clipboard"
     private let forceHTTP2TranscriptionStorageKey = "force_http2_transcription"
+    private let soundVolumeStorageKey = "sound_volume"
     private let transcribingIndicatorDelay: TimeInterval = 1.0
     private let clipboardRestoreDelay: TimeInterval = 0.15
     let maxPipelineHistoryCount = 20
@@ -213,6 +214,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var soundVolume: Float {
+        didSet {
+            UserDefaults.standard.set(soundVolume, forKey: soundVolumeStorageKey)
+        }
+    }
+
     @Published var isRecording = false
     @Published var isTranscribing = false
     @Published var lastTranscript: String = ""
@@ -284,6 +291,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             ? true
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
         let forceHTTP2Transcription = UserDefaults.standard.bool(forKey: forceHTTP2TranscriptionStorageKey)
+        let soundVolume: Float = UserDefaults.standard.object(forKey: soundVolumeStorageKey) != nil
+            ? UserDefaults.standard.float(forKey: soundVolumeStorageKey) : 1.0
         let initialAccessibility = AXIsProcessTrusted()
         let initialScreenCapturePermission = CGPreflightScreenCaptureAccess()
         var removedAudioFileNames: [String] = []
@@ -315,6 +324,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.shortcutStartDelay = shortcutStartDelay
         self.preserveClipboard = preserveClipboard
         self.forceHTTP2Transcription = forceHTTP2Transcription
+        self.soundVolume = soundVolume
         self.pipelineHistory = savedHistory
         self.hasAccessibility = initialAccessibility
         self.hasScreenRecordingPermission = initialScreenCapturePermission
@@ -843,7 +853,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     self.overlayManager.showRecording(mode: self.activeRecordingTriggerMode ?? triggerMode)
                 }
                 overlayShown = true
-                NSSound(named: "Tink")?.play()
+                let s = NSSound(named: "Tink"); s?.volume = self.soundVolume; s?.play()
             }
         }
 
@@ -961,7 +971,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Transcribing..."
         debugStatusMessage = "Transcribing audio"
         errorMessage = nil
-        NSSound(named: "Pop")?.play()
+        let s = NSSound(named: "Pop"); s?.volume = soundVolume; s?.play()
         overlayManager.slideUpToNotch { }
 
         transcribingIndicatorTask?.cancel()
@@ -1247,7 +1257,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             statusText = "Screenshot Required"
             overlayManager.dismiss()
 
-            NSSound(named: "Basso")?.play()
+            let s = NSSound(named: "Basso"); s?.volume = soundVolume; s?.play()
             showScreenshotPermissionAlert(message: message)
         }
         // Non-permission errors (transient failures) — continue recording without context
