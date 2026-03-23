@@ -52,6 +52,9 @@ struct SetupView: View {
     @StateObject private var testHotkeyHarness = SetupTestHotkeyHarness()
 
     private let totalSteps: [SetupStep] = SetupStep.allCases
+    private var isCapturingShortcut: Bool {
+        isCapturingHoldShortcut || isCapturingToggleShortcut
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -147,6 +150,14 @@ struct SetupView: View {
         .onDisappear {
             accessibilityTimer?.invalidate()
             screenRecordingTimer?.invalidate()
+            appState.resumeHotkeyMonitoringAfterShortcutCapture()
+        }
+        .onChange(of: isCapturingShortcut) { isCapturing in
+            if isCapturing {
+                appState.suspendHotkeyMonitoringForShortcutCapture()
+            } else {
+                appState.resumeHotkeyMonitoringAfterShortcutCapture()
+            }
         }
     }
 

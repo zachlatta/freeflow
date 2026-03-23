@@ -50,7 +50,7 @@ struct DictationShortcutEditor: View {
                 }
             )
 
-            Text("Custom shortcuts can use a regular key combo or a modifier paired with another modifier. Bare modifier keys are available as presets.")
+            Text("Custom shortcuts can use regular keys, modifier-only shortcuts, or modifier combinations.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -151,6 +151,7 @@ private struct ShortcutCaptureRow: View {
     @State private var localKeyMonitor: Any?
     @State private var localFlagsMonitor: Any?
     @State private var pressedModifierKeyCodes: Set<UInt16> = []
+    @State private var currentBinding: ShortcutBinding?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -167,10 +168,10 @@ private struct ShortcutCaptureRow: View {
                             .foregroundStyle(isSelected ? .blue : .secondary)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(savedBinding?.displayName ?? "Custom Shortcut")
-                                .font(savedBinding == nil ? .body : .system(.body, design: .monospaced).weight(.semibold))
+                            Text(displayedBindingName)
+                                .font(displayedBindingUsesMonospace ? .system(.body, design: .monospaced).weight(.semibold) : .body)
                                 .foregroundStyle(.primary)
-                            Text(savedBinding == nil ? "Record any key combo." : "Saved custom shortcut")
+                            Text(displayedBindingSubtitle)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -188,19 +189,31 @@ private struct ShortcutCaptureRow: View {
                 .buttonStyle(.plain)
                 .disabled(isCapturing)
 
-                Button(isCapturing ? "Cancel" : (savedBinding == nil ? "Record…" : "Re-record")) {
+                Button(isCapturing ? "Done" : "Record…") {
                     if isCapturing {
-                        stopCapture(clearCaptureState: true)
+                        finishCapture()
                     } else {
                         startCapture()
                     }
                 }
                 .buttonStyle(.bordered)
+
+                if isCapturing {
+                    Button("Cancel") {
+                        cancelCapture()
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
             if isCapturing {
-                Label("Press a shortcut now. Use Escape to cancel.", systemImage: "keyboard")
-                    .font(.caption)
+                Label(
+                    currentBinding == nil
+                        ? "Press and hold the shortcut you want."
+                        : "Press Esc or Enter to save.",
+                    systemImage: "keyboard"
+                )
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.blue)
             }
         }
@@ -213,6 +226,7 @@ private struct ShortcutCaptureRow: View {
         stopCapture(clearCaptureState: false)
         isCapturing = true
         pressedModifierKeyCodes.removeAll()
+        currentBinding = nil
 
         localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
             if ShortcutBinding.modifierKeyCodes.contains(event.keyCode) {
@@ -225,18 +239,28 @@ private struct ShortcutCaptureRow: View {
 
             if let binding = ShortcutBinding.fromModifierKeyCode(
                 event.keyCode,
-                pressedModifierKeyCodes: pressedModifierKeyCodes
+                pressedModifierKeyCodes: pressedModifierKeyCodes,
+                allowBareModifier: true
             ) {
-                onCapture(binding)
-                stopCapture(clearCaptureState: true)
-                return nil
+                currentBinding = binding
             }
-            return event
+            return nil
         }
 
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 53 {
-                stopCapture(clearCaptureState: true)
+            let isReturnKey = event.keyCode == 36 || event.keyCode == 76
+            let hasPendingCapture = currentBinding != nil
+
+            if isReturnKey && hasPendingCapture {
+                finishCapture()
+                return nil
+            }
+            if event.keyCode == 53 && hasPendingCapture {
+                finishCapture()
+                return nil
+            }
+
+            guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else {
                 return nil
             }
 
@@ -244,10 +268,22 @@ private struct ShortcutCaptureRow: View {
                 return nil
             }
 
-            onCapture(binding)
-            stopCapture(clearCaptureState: true)
+            currentBinding = binding
             return nil
         }
+    }
+
+    private func finishCapture() {
+        guard let currentBinding else {
+            cancelCapture()
+            return
+        }
+        onCapture(currentBinding)
+        stopCapture(clearCaptureState: true)
+    }
+
+    private func cancelCapture() {
+        stopCapture(clearCaptureState: true)
     }
 
     private func stopCapture(clearCaptureState: Bool) {
@@ -260,8 +296,30 @@ private struct ShortcutCaptureRow: View {
             localFlagsMonitor = nil
         }
         pressedModifierKeyCodes.removeAll()
+        currentBinding = nil
         if clearCaptureState {
             isCapturing = false
         }
+    }
+
+    private var displayedBindingName: String {
+        if let currentBinding {
+            currentBinding.displayName
+        } else if let savedBinding {
+            savedBinding.displayName
+        } else {
+            "Custom Shortcut"
+        }
+    }
+
+    private var displayedBindingSubtitle: String {
+        if isCapturing {
+            return currentBinding == nil ? "Recording shortcut…" : "Recorded shortcut"
+        }
+        return savedBinding == nil ? "Record any key combo." : "Saved custom shortcut"
+    }
+
+    private var displayedBindingUsesMonospace: Bool {
+        currentBinding != nil || savedBinding != nil
     }
 }

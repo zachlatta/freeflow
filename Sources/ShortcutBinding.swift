@@ -208,7 +208,8 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
 
     static func fromModifierKeyCode(
         _ keyCode: UInt16,
-        pressedModifierKeyCodes: Set<UInt16>
+        pressedModifierKeyCodes: Set<UInt16>,
+        allowBareModifier: Bool = false
     ) -> ShortcutBinding? {
         guard modifierKeyCodes.contains(keyCode),
               let primaryModifier = modifierFlag(forKeyCode: keyCode) else {
@@ -222,7 +223,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
 
         var extraModifiers = activeModifiers
         extraModifiers.remove(primaryModifier)
-        guard !extraModifiers.isEmpty else {
+        guard allowBareModifier || !extraModifiers.isEmpty else {
             return nil
         }
 
