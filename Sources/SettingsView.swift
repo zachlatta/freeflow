@@ -463,7 +463,7 @@ struct GeneralSettingsView: View {
 
             Divider()
 
-            Toggle(isOn: $appState.forceHTTP2Transcription) {
+            HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Force HTTP/2 for Transcription")
                         .font(.caption.weight(.semibold))
@@ -471,8 +471,13 @@ struct GeneralSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                Spacer(minLength: 0)
+
+                Toggle("", isOn: $appState.forceHTTP2Transcription)
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
             }
-            .toggleStyle(.switch)
         }
     }
 
