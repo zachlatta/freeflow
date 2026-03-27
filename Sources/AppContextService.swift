@@ -487,10 +487,9 @@ Selected text: \(selectedText ?? "None")
         ) else {
             return nil
         }
-        guard let croppedImage = croppedWhitespaceImage(from: image) else { return nil }
 
         if let dataURL = convertImageToDataURL(
-            croppedImage,
+            image,
             mimeType: mimeType,
             fileType: fileType,
             compression: compression,
