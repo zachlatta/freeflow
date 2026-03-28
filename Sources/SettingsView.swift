@@ -1246,6 +1246,7 @@ struct RunLogEntryView: View {
     let item: PipelineHistoryItem
     @EnvironmentObject var appState: AppState
     @State private var isExpanded = false
+    @State private var isRetrying = false
     @State private var showContextPrompt = false
     @State private var showPostProcessingPrompt = false
 
@@ -1286,6 +1287,27 @@ struct RunLogEntryView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                if isError && item.audioFileName != nil {
+                    Button {
+                        appState.retryTranscription(item: item)
+                    } label: {
+                        if isRetrying {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .frame(width: 28, height: 28)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRetrying)
+                    .help("Retry transcription")
+                }
 
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -1486,6 +1508,9 @@ struct RunLogEntryView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(isError ? Color.red.opacity(0.4) : Color.secondary.opacity(0.2), lineWidth: 1)
         )
+        .onReceive(appState.$retryingItemIDs) { ids in
+            isRetrying = ids.contains(item.id)
+        }
     }
 
     private func parseVocabulary(_ text: String) -> [String] {
