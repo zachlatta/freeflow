@@ -155,11 +155,9 @@ class AudioRecorder: NSObject, ObservableObject {
         }
         os_log(.info, log: recordingLog, "AVCaptureDevice check: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
 
-        // Reuse existing engine if same device, otherwise build new one
-        if let _ = audioEngine, currentDeviceUID == deviceUID {
-            os_log(.info, log: recordingLog, "reusing existing engine: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        } else {
-            // Tear down old engine if device changed
+        let engineNeedsRebuild = audioEngine == nil || currentDeviceUID != deviceUID || !(audioEngine?.isRunning ?? false)
+
+        if engineNeedsRebuild {
             if audioEngine != nil {
                 audioEngine?.inputNode.removeTap(onBus: 0)
                 audioEngine?.stop()
