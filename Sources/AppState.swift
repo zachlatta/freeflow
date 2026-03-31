@@ -222,6 +222,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @Published var isRecording = false
     @Published var isTranscribing = false
+    @Published var retryingItemIDs: Set<UUID> = []
     @Published var lastTranscript: String = ""
     @Published var errorMessage: String?
     @Published var statusText: String = "Ready"
@@ -494,6 +495,114 @@ final class AppState: ObservableObject, @unchecked Sendable {
             pipelineHistory.remove(at: index)
         } catch {
             errorMessage = "Unable to delete run history entry: \(error.localizedDescription)"
+        }
+    }
+
+    func retryTranscription(item: PipelineHistoryItem) {
+        guard let audioFileName = item.audioFileName else { return }
+        guard !retryingItemIDs.contains(item.id) else { return }
+
+        retryingItemIDs.insert(item.id)
+
+        let audioURL = Self.audioStorageDirectory().appendingPathComponent(audioFileName)
+        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            retryingItemIDs.remove(item.id)
+            errorMessage = "Audio file not found for retry."
+            return
+        }
+
+        let restoredContext = AppContext(
+            appName: nil,
+            bundleIdentifier: nil,
+            windowTitle: nil,
+            selectedText: nil,
+            currentActivity: item.contextSummary,
+            contextPrompt: item.contextPrompt,
+            screenshotDataURL: item.contextScreenshotDataURL,
+            screenshotMimeType: item.contextScreenshotDataURL != nil ? "image/jpeg" : nil,
+            screenshotError: nil
+        )
+
+        let transcriptionService = TranscriptionService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            forceHTTP2: forceHTTP2Transcription
+        )
+        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+        let capturedCustomVocabulary = customVocabulary
+        let capturedCustomSystemPrompt = customSystemPrompt
+
+        Task {
+            do {
+                let rawTranscript = try await transcriptionService.transcribe(fileURL: audioURL)
+
+                let finalTranscript: String
+                let processingStatus: String
+                let postProcessingPrompt: String
+                do {
+                    let postProcessingResult = try await postProcessingService.postProcess(
+                        transcript: rawTranscript,
+                        context: restoredContext,
+                        customVocabulary: capturedCustomVocabulary,
+                        customSystemPrompt: capturedCustomSystemPrompt
+                    )
+                    finalTranscript = postProcessingResult.transcript
+                    processingStatus = "Post-processing succeeded (retried)"
+                    postProcessingPrompt = postProcessingResult.prompt
+                } catch {
+                    finalTranscript = rawTranscript
+                    processingStatus = "Post-processing failed on retry, using raw transcript"
+                    postProcessingPrompt = ""
+                }
+
+                await MainActor.run {
+                    let updatedItem = PipelineHistoryItem(
+                        id: item.id,
+                        timestamp: item.timestamp,
+                        rawTranscript: rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
+                        postProcessedTranscript: finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
+                        postProcessingPrompt: postProcessingPrompt,
+                        contextSummary: item.contextSummary,
+                        contextPrompt: item.contextPrompt,
+                        contextScreenshotDataURL: item.contextScreenshotDataURL,
+                        contextScreenshotStatus: item.contextScreenshotStatus,
+                        postProcessingStatus: processingStatus,
+                        debugStatus: "Retried",
+                        customVocabulary: item.customVocabulary,
+                        audioFileName: item.audioFileName
+                    )
+                    do {
+                        try pipelineHistoryStore.update(updatedItem)
+                        pipelineHistory = pipelineHistoryStore.loadAllHistory()
+                    } catch {
+                        errorMessage = "Failed to save retry result: \(error.localizedDescription)"
+                    }
+                    retryingItemIDs.remove(item.id)
+                }
+            } catch {
+                await MainActor.run {
+                    let updatedItem = PipelineHistoryItem(
+                        id: item.id,
+                        timestamp: item.timestamp,
+                        rawTranscript: item.rawTranscript,
+                        postProcessedTranscript: item.postProcessedTranscript,
+                        postProcessingPrompt: item.postProcessingPrompt,
+                        contextSummary: item.contextSummary,
+                        contextPrompt: item.contextPrompt,
+                        contextScreenshotDataURL: item.contextScreenshotDataURL,
+                        contextScreenshotStatus: item.contextScreenshotStatus,
+                        postProcessingStatus: "Error: \(error.localizedDescription)",
+                        debugStatus: "Retry failed",
+                        customVocabulary: item.customVocabulary,
+                        audioFileName: item.audioFileName
+                    )
+                    do {
+                        try pipelineHistoryStore.update(updatedItem)
+                        pipelineHistory = pipelineHistoryStore.loadAllHistory()
+                    } catch {}
+                    retryingItemIDs.remove(item.id)
+                }
+            }
         }
     }
 

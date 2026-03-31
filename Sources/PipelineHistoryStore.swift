@@ -79,6 +79,28 @@ final class PipelineHistoryStore {
         return try trim(to: maxCount)
     }
 
+    func update(_ item: PipelineHistoryItem) throws {
+        guard isStoreLoaded else { return }
+
+        var thrownError: Error?
+        container.viewContext.performAndWait {
+            do {
+                let request = pipelineHistoryRequest()
+                request.predicate = NSPredicate(format: "id == %@", item.id as CVarArg)
+                guard let entity = try container.viewContext.fetch(request).first else { return }
+                entity.rawTranscript = item.rawTranscript
+                entity.postProcessedTranscript = item.postProcessedTranscript
+                entity.postProcessingPrompt = item.postProcessingPrompt
+                entity.postProcessingStatus = item.postProcessingStatus
+                entity.debugStatus = item.debugStatus
+                try saveContext()
+            } catch {
+                thrownError = error
+            }
+        }
+        if let thrownError { throw thrownError }
+    }
+
     func delete(id: UUID) throws -> String? {
         guard isStoreLoaded else { return nil }
 
