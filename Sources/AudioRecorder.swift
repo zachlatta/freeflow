@@ -127,9 +127,15 @@ class AudioRecorder: NSObject, ObservableObject {
     private let audioFileQueue = DispatchQueue(label: "com.zachlatta.freeflow.audiofile")
     private var recordingStartTime: CFAbsoluteTime = 0
     private var firstBufferLogged = false
-    private var bufferCount: Int = 0
+    private let _bufferCount = OSAllocatedUnfairLock(initialState: 0)
     private var currentDeviceUID: String?
     private var storedInputFormat: AVAudioFormat?
+
+    private var configChangeObserver: NSObjectProtocol?
+    private var watchdogTimer: DispatchSourceTimer?
+    private var rebuildAttempt = 0
+    private static let maxRebuildAttempts = 2
+    private static let watchdogTimeout: TimeInterval = 2.0
 
     @Published var isRecording = false
     /// Thread-safe flag read from the audio tap callback.
@@ -141,12 +147,209 @@ class AudioRecorder: NSObject, ObservableObject {
     var onRecordingReady: (() -> Void)?
     private var readyFired = false
 
+    override init() {
+        super.init()
+        configChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: nil,
+            queue: nil
+        ) { [weak self] notification in
+            self?.handleEngineConfigChange(notification)
+        }
+    }
+
+    deinit {
+        if let observer = configChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        cancelWatchdog()
+    }
+
+    // MARK: - Engine lifecycle
+
+    private func invalidateEngine() {
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine?.stop()
+        audioEngine = nil
+        storedInputFormat = nil
+    }
+
+    private func buildAndStartEngine(deviceUID: String?) throws {
+        invalidateEngine()
+
+        let t0 = CFAbsoluteTimeGetCurrent()
+        let engine = AVAudioEngine()
+        os_log(.info, log: recordingLog, "AVAudioEngine created: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+
+        // Set specific input device if requested
+        if let uid = deviceUID, !uid.isEmpty, uid != "default",
+           let deviceID = AudioDevice.deviceID(forUID: uid) {
+            os_log(.info, log: recordingLog, "device lookup resolved to %d: %.3fms", deviceID, (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+            let inputUnit = engine.inputNode.audioUnit!
+            var id = deviceID
+            AudioUnitSetProperty(
+                inputUnit,
+                kAudioOutputUnitProperty_CurrentDevice,
+                kAudioUnitScope_Global,
+                0,
+                &id,
+                UInt32(MemoryLayout<AudioDeviceID>.size)
+            )
+        }
+
+        let inputNode = engine.inputNode
+        os_log(.info, log: recordingLog, "inputNode accessed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        os_log(.info, log: recordingLog, "inputFormat retrieved (rate=%.0f, ch=%d): %.3fms", inputFormat.sampleRate, inputFormat.channelCount, (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        guard inputFormat.sampleRate > 0 else {
+            throw AudioRecorderError.invalidInputFormat("Invalid sample rate: \(inputFormat.sampleRate)")
+        }
+        guard inputFormat.channelCount > 0 else {
+            throw AudioRecorderError.invalidInputFormat("No input channels available")
+        }
+
+        storedInputFormat = inputFormat
+        _bufferCount.withLock { $0 = 0 }
+        readyFired = false
+
+        // Install tap — checks isRecording and audioFile dynamically
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            guard let self, self._recording.withLock({ $0 }) else { return }
+
+            let count = self._bufferCount.withLock { val -> Int in
+                val += 1
+                return val
+            }
+
+            // Check if this buffer has real audio
+            var rms: Float = 0
+            let frames = Int(buffer.frameLength)
+            if frames > 0, let channelData = buffer.floatChannelData {
+                let samples = channelData[0]
+                var sum: Float = 0
+                for i in 0..<frames { sum += samples[i] * samples[i] }
+                rms = sqrtf(sum / Float(frames))
+            }
+
+            if count <= 40 {
+                let elapsed = (CFAbsoluteTimeGetCurrent() - self.recordingStartTime) * 1000
+                os_log(.info, log: recordingLog, "buffer #%d at %.3fms, frames=%d, rms=%.6f", count, elapsed, buffer.frameLength, rms)
+            }
+
+            // Fire ready callback on first non-silent buffer
+            if !self.readyFired && rms > 0 {
+                self.readyFired = true
+                let elapsed = (CFAbsoluteTimeGetCurrent() - self.recordingStartTime) * 1000
+                os_log(.info, log: recordingLog, "FIRST non-silent buffer at %.3fms — recording ready", elapsed)
+                self.onRecordingReady?()
+            }
+
+            self.audioFileQueue.sync {
+                if let file = self.audioFile {
+                    do {
+                        try file.write(from: buffer)
+                    } catch {
+                        self.audioFile = nil
+                    }
+                }
+            }
+            self.computeAudioLevel(from: buffer)
+        }
+        os_log(.info, log: recordingLog, "tap installed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+
+        engine.prepare()
+        os_log(.info, log: recordingLog, "engine prepared: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+
+        self.audioEngine = engine
+        self.currentDeviceUID = deviceUID
+
+        try engine.start()
+        os_log(.info, log: recordingLog, "engine started: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+    }
+
+    // MARK: - Configuration change handling
+
+    private func handleEngineConfigChange(_ notification: Notification) {
+        guard let engine = notification.object as? AVAudioEngine,
+              engine === self.audioEngine else { return }
+
+        os_log(.info, log: recordingLog, "AVAudioEngineConfigurationChange — invalidating engine")
+        invalidateEngine()
+
+        if _recording.withLock({ $0 }) {
+            os_log(.info, log: recordingLog, "was recording — attempting transparent restart")
+            restartRecording()
+        }
+    }
+
+    private func restartRecording() {
+        rebuildAttempt += 1
+        if rebuildAttempt > Self.maxRebuildAttempts {
+            os_log(.error, log: recordingLog, "exceeded max rebuild attempts (%d) — giving up", Self.maxRebuildAttempts)
+            _recording.withLock { $0 = false }
+            DispatchQueue.main.async { self.isRecording = false }
+            return
+        }
+
+        // On second attempt, fall back to system default device
+        let deviceToUse: String?
+        if rebuildAttempt >= Self.maxRebuildAttempts {
+            os_log(.info, log: recordingLog, "rebuild attempt %d — falling back to system default device", rebuildAttempt)
+            deviceToUse = nil
+        } else {
+            deviceToUse = currentDeviceUID
+        }
+
+        do {
+            try buildAndStartEngine(deviceUID: deviceToUse)
+            startBufferWatchdog()
+            os_log(.info, log: recordingLog, "transparent restart succeeded (attempt %d)", rebuildAttempt)
+        } catch {
+            os_log(.error, log: recordingLog, "transparent restart failed: %{public}@", error.localizedDescription)
+            _recording.withLock { $0 = false }
+            DispatchQueue.main.async { self.isRecording = false }
+        }
+    }
+
+    // MARK: - Buffer watchdog
+
+    private func startBufferWatchdog() {
+        cancelWatchdog()
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+        timer.schedule(deadline: .now() + Self.watchdogTimeout)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            guard self._recording.withLock({ $0 }) else { return }
+
+            let count = self._bufferCount.withLock { $0 }
+            if count == 0 {
+                os_log(.error, log: recordingLog,
+                       "watchdog: 0 buffers after %.1fs (attempt %d) — rebuilding engine",
+                       Self.watchdogTimeout, self.rebuildAttempt)
+                self.restartRecording()
+            } else {
+                os_log(.info, log: recordingLog, "watchdog: %d buffers after %.1fs — healthy, resetting rebuild counter", count, Self.watchdogTimeout)
+                self.rebuildAttempt = 0
+            }
+        }
+        timer.resume()
+        watchdogTimer = timer
+    }
+
+    private func cancelWatchdog() {
+        watchdogTimer?.cancel()
+        watchdogTimer = nil
+    }
+
+    // MARK: - Public API
+
     func startRecording(deviceUID: String? = nil) throws {
         let t0 = CFAbsoluteTimeGetCurrent()
         recordingStartTime = t0
         firstBufferLogged = false
-        bufferCount = 0
+        _bufferCount.withLock { $0 = 0 }
         readyFired = false
+        rebuildAttempt = 0
 
         os_log(.info, log: recordingLog, "startRecording() entered")
 
@@ -158,97 +361,10 @@ class AudioRecorder: NSObject, ObservableObject {
         let engineNeedsRebuild = audioEngine == nil || currentDeviceUID != deviceUID || !(audioEngine?.isRunning ?? false)
 
         if engineNeedsRebuild {
-            if audioEngine != nil {
-                audioEngine?.inputNode.removeTap(onBus: 0)
-                audioEngine?.stop()
-                audioEngine = nil
-            }
-
-            let engine = AVAudioEngine()
-            os_log(.info, log: recordingLog, "AVAudioEngine created: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-
-            // Set specific input device if requested
-            if let uid = deviceUID, !uid.isEmpty, uid != "default",
-               let deviceID = AudioDevice.deviceID(forUID: uid) {
-                os_log(.info, log: recordingLog, "device lookup resolved to %d: %.3fms", deviceID, (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-                let inputUnit = engine.inputNode.audioUnit!
-                var id = deviceID
-                AudioUnitSetProperty(
-                    inputUnit,
-                    kAudioOutputUnitProperty_CurrentDevice,
-                    kAudioUnitScope_Global,
-                    0,
-                    &id,
-                    UInt32(MemoryLayout<AudioDeviceID>.size)
-                )
-            }
-
-            let inputNode = engine.inputNode
-            os_log(.info, log: recordingLog, "inputNode accessed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-            let inputFormat = inputNode.outputFormat(forBus: 0)
-            os_log(.info, log: recordingLog, "inputFormat retrieved (rate=%.0f, ch=%d): %.3fms", inputFormat.sampleRate, inputFormat.channelCount, (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-            guard inputFormat.sampleRate > 0 else {
-                throw AudioRecorderError.invalidInputFormat("Invalid sample rate: \(inputFormat.sampleRate)")
-            }
-            guard inputFormat.channelCount > 0 else {
-                throw AudioRecorderError.invalidInputFormat("No input channels available")
-            }
-
-            storedInputFormat = inputFormat
-
-            // Install tap — checks isRecording and audioFile dynamically
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-                guard let self, self._recording.withLock({ $0 }) else { return }
-
-                self.bufferCount += 1
-
-                // Check if this buffer has real audio
-                var rms: Float = 0
-                let frames = Int(buffer.frameLength)
-                if frames > 0, let channelData = buffer.floatChannelData {
-                    let samples = channelData[0]
-                    var sum: Float = 0
-                    for i in 0..<frames { sum += samples[i] * samples[i] }
-                    rms = sqrtf(sum / Float(frames))
-                }
-
-                if self.bufferCount <= 40 {
-                    let elapsed = (CFAbsoluteTimeGetCurrent() - self.recordingStartTime) * 1000
-                    os_log(.info, log: recordingLog, "buffer #%d at %.3fms, frames=%d, rms=%.6f", self.bufferCount, elapsed, buffer.frameLength, rms)
-                }
-
-                // Fire ready callback on first non-silent buffer
-                if !self.readyFired && rms > 0 {
-                    self.readyFired = true
-                    let elapsed = (CFAbsoluteTimeGetCurrent() - self.recordingStartTime) * 1000
-                    os_log(.info, log: recordingLog, "FIRST non-silent buffer at %.3fms — recording ready", elapsed)
-                    self.onRecordingReady?()
-                }
-
-                self.audioFileQueue.sync {
-                    if let file = self.audioFile {
-                        do {
-                            try file.write(from: buffer)
-                        } catch {
-                            self.audioFile = nil
-                        }
-                    }
-                }
-                self.computeAudioLevel(from: buffer)
-            }
-            os_log(.info, log: recordingLog, "tap installed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-
-            engine.prepare()
-            os_log(.info, log: recordingLog, "engine prepared: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-
-            self.audioEngine = engine
-            self.currentDeviceUID = deviceUID
-        }
-
-        // Start engine if not already running
-        if let engine = audioEngine, !engine.isRunning {
+            try buildAndStartEngine(deviceUID: deviceUID)
+        } else if let engine = audioEngine, !engine.isRunning {
             try engine.start()
-            os_log(.info, log: recordingLog, "engine started: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+            os_log(.info, log: recordingLog, "engine restarted: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
         }
 
         guard let inputFormat = storedInputFormat else {
@@ -286,13 +402,18 @@ class AudioRecorder: NSObject, ObservableObject {
         audioFileQueue.sync { self.audioFile = newAudioFile }
         _recording.withLock { $0 = true }
         self.isRecording = true
+
+        startBufferWatchdog()
+
         os_log(.info, log: recordingLog, "startRecording() complete: %.3fms total", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
     }
 
     func stopRecording() -> URL? {
+        let count = _bufferCount.withLock { $0 }
         let elapsed = (CFAbsoluteTimeGetCurrent() - recordingStartTime) * 1000
-        os_log(.info, log: recordingLog, "stopRecording() called: %.3fms after start, %d buffers received", elapsed, bufferCount)
+        os_log(.info, log: recordingLog, "stopRecording() called: %.3fms after start, %d buffers received", elapsed, count)
 
+        cancelWatchdog()
         _recording.withLock { $0 = false }
         audioFileQueue.sync { audioFile = nil }
         isRecording = false
