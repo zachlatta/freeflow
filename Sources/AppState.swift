@@ -993,8 +993,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         guard !normalizedTranscript.isEmpty else { return nil }
 
         return precomputedMacros.first {
-            normalizedTranscript == $0.normalizedCommand ||
-            normalizedTranscript.contains($0.normalizedCommand)
+            normalizedTranscript == $0.normalizedCommand
         }?.original
     }
 
