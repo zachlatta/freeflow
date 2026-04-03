@@ -35,6 +35,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        guard appState.hasCompletedSetup else { return true }
+        if !flag {
+            showSettingsWindow()
+        }
+        return true
+    }
+
     @objc func handleShowSetup() {
         appState.hasCompletedSetup = false
         appState.stopAccessibilityPolling()
@@ -47,6 +55,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showSettingsWindow() {
+        NSApp.setActivationPolicy(.regular)
+
         if let settingsWindow, settingsWindow.isVisible {
             settingsWindow.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -86,6 +96,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: window,
             queue: .main
         ) { [weak self] _ in
+            if self?.setupWindow == nil {
+                NSApp.setActivationPolicy(.accessory)
+            }
             self?.settingsWindow = nil
         }
     }

@@ -91,6 +91,7 @@ struct SettingsView: View {
 struct GeneralSettingsView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.openURL) private var openURL
+    @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
     @State private var isValidatingKey = false
@@ -222,7 +223,7 @@ struct GeneralSettingsView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 4)
 
-                SettingsCard("Startup", icon: "power") {
+                SettingsCard("App", icon: "power") {
                     startupSection
                 }
                 SettingsCard("Updates", icon: "arrow.triangle.2.circlepath") {
@@ -267,6 +268,7 @@ struct GeneralSettingsView: View {
     private var startupSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Launch FreeFlow at login", isOn: $appState.launchAtLogin)
+            Toggle("Show menu bar icon", isOn: $showMenuBarIcon)
 
             if SMAppService.mainApp.status == .requiresApproval {
                 HStack(spacing: 6) {

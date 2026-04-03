@@ -3,9 +3,10 @@ import SwiftUI
 @main
 struct FreeFlowApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
 
     var body: some Scene {
-        MenuBarExtra {
+        MenuBarExtra(isInserted: $showMenuBarIcon) {
             MenuBarView()
                 .environmentObject(appDelegate.appState)
         } label: {
