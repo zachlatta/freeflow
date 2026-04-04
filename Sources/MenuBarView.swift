@@ -91,7 +91,9 @@ struct MenuBarView: View {
 
             if !appState.lastTranscript.isEmpty && !appState.isRecording && !appState.isTranscribing {
                 Divider()
-                Text(appState.lastTranscript)
+                Text(appState.lastTranscript.count > 35
+                    ? String(appState.lastTranscript.prefix(35)) + "…"
+                    : appState.lastTranscript)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)
