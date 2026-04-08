@@ -1,0 +1,250 @@
+{
+  "cases": [
+    {
+      "id": "wispr-name-spelling-context",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Hiring debrief - Camille Fournier",
+        "selected_text": ""
+      },
+      "raw_transcript": "thanks camille i agree with marissa's feedback on the backend role",
+      "custom_vocabulary": [
+        "Camille Fournier",
+        "Marisa"
+      ],
+      "expected_context_summary": "The user is replying to an email. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Thanks Camille, I agree with Marisa's feedback on the backend role.",
+      "required_output_terms": [
+        "Camille",
+        "Marisa",
+        "backend role"
+      ],
+      "forbidden_output_terms": [
+        "marissa",
+        "Camille Fournier"
+      ]
+    },
+    {
+      "id": "wispr-backtrack-english",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Alex Rivera | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "let's ship this friday actually monday morning",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying in Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Let's ship this Monday morning.",
+      "required_output_terms": [
+        "Monday morning"
+      ],
+      "forbidden_output_terms": [
+        "Friday",
+        "actually"
+      ]
+    },
+    {
+      "id": "wispr-backtrack-romanian",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Andrei Popescu | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "ne vedem joi ba nu vineri dimineata",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying in Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Ne vedem vineri dimineață.",
+      "required_output_terms": [
+        "vineri",
+        "dimineață"
+      ],
+      "forbidden_output_terms": [
+        "joi",
+        "ba nu"
+      ]
+    },
+    {
+      "id": "wispr-remove-fillers",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#design | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "um i think we should probably ship the lighter version first",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is writing in Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "I think we should probably ship the lighter version first.",
+      "required_output_terms": [
+        "lighter version first"
+      ],
+      "forbidden_output_terms": [
+        "um"
+      ]
+    },
+    {
+      "id": "wispr-numbered-list-prose",
+      "metadata": {
+        "app_name": "ChatGPT",
+        "bundle_identifier": "com.openai.chat",
+        "window_title": "Prompt draft",
+        "selected_text": ""
+      },
+      "raw_transcript": "going to the store for one apples two bananas three oranges",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is dictating list-like prose into a prompt-writing app. The destination is prose unless explicit list formatting is spoken.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Going to the store for one, apples; two, bananas; three, oranges.",
+      "required_output_terms": [
+        "apples",
+        "bananas",
+        "oranges"
+      ],
+      "forbidden_output_terms": [
+        "1.",
+        "2.",
+        "3."
+      ]
+    },
+    {
+      "id": "wispr-dictated-punctuation",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Launch checklist",
+        "selected_text": ""
+      },
+      "raw_transcript": "yes comma that works for me period i'll send the final version tonight",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying to an email. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Yes, that works for me. I'll send the final version tonight.",
+      "required_output_terms": [
+        "Yes,",
+        "works for me",
+        "final version tonight"
+      ],
+      "forbidden_output_terms": [
+        "comma",
+        "period"
+      ]
+    },
+    {
+      "id": "wispr-camel-snake-acronym",
+      "metadata": {
+        "app_name": "Cursor",
+        "bundle_identifier": "com.todesktop.230313mzl4w4u92",
+        "window_title": "auth.ts",
+        "selected_text": ""
+      },
+      "raw_transcript": "please rename user id to user underscore id and keep OAuth capitalized",
+      "custom_vocabulary": [
+        "user_id",
+        "OAuth"
+      ],
+      "expected_context_summary": "The user is dictating in a code editor. The destination is developer text, so technical identifiers should be preserved exactly.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Please rename user id to user_id and keep OAuth capitalized.",
+      "required_output_terms": [
+        "user_id",
+        "OAuth"
+      ],
+      "forbidden_output_terms": [
+        "user underscore id",
+        "Oauth"
+      ]
+    },
+    {
+      "id": "wispr-cli-command-preservation",
+      "metadata": {
+        "app_name": "Terminal",
+        "bundle_identifier": "com.apple.Terminal",
+        "window_title": "freeflow — zsh",
+        "selected_text": ""
+      },
+      "raw_transcript": "run pnpm lint dash dash fix",
+      "custom_vocabulary": [
+        "pnpm",
+        "lint",
+        "--fix"
+      ],
+      "expected_context_summary": "The user is dictating a terminal command. The destination is a terminal or code context, so technical strings should be preserved exactly.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Run pnpm lint --fix.",
+      "required_output_terms": [
+        "Run",
+        "pnpm",
+        "lint",
+        "--fix"
+      ],
+      "forbidden_output_terms": [
+        "fix mode",
+        "lint fix"
+      ]
+    },
+    {
+      "id": "wispr-romanian-mixed-language",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#eng | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "am facut merge la feature branch dar mai verific deployment logs",
+      "custom_vocabulary": [
+        "feature branch",
+        "deployment logs"
+      ],
+      "expected_context_summary": "The user is writing in Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Am făcut merge la feature branch, dar mai verific deployment logs.",
+      "required_output_terms": [
+        "feature branch",
+        "deployment logs"
+      ],
+      "forbidden_output_terms": [
+        "branch de feature",
+        "jurnalele de deployment"
+      ]
+    },
+    {
+      "id": "wispr-whisper-quiet-short",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Design sync | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "yeah looks good to me",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying in Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Yeah, looks good to me.",
+      "required_output_terms": [
+        "Yeah",
+        "looks good to me"
+      ],
+      "forbidden_output_terms": [
+        "Yes",
+        "I think"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,791 @@
+{
+  "cases": [
+    {
+      "id": "en-slack-self-correction-day",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Alex Rivera | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "let's meet thursday no actually wednesday after lunch",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying in Slack to Alex Rivera. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Let's meet Wednesday after lunch.",
+      "required_output_terms": [
+        "Wednesday",
+        "after lunch"
+      ],
+      "forbidden_output_terms": [
+        "Thursday",
+        "no actually"
+      ]
+    },
+    {
+      "id": "en-email-formal-confirmation",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Budget review",
+        "selected_text": ""
+      },
+      "raw_transcript": "yes that works for me i'll send the revised draft tonight",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying to an email about a budget review. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Yes, that works for me. I'll send the revised draft tonight.",
+      "required_output_terms": [
+        "works for me",
+        "revised draft tonight"
+      ],
+      "forbidden_output_terms": [
+        "yeah",
+        "!"
+      ]
+    },
+    {
+      "id": "en-no-context-name-insertion",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Contract review - Samuel Lee",
+        "selected_text": ""
+      },
+      "raw_transcript": "sounds good i'll follow up once i hear back from legal",
+      "custom_vocabulary": [
+        "Samuel Lee"
+      ],
+      "expected_context_summary": "The user is replying to an email thread with Samuel Lee about contract review. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Sounds good, I'll follow up once I hear back from legal.",
+      "required_output_terms": [
+        "follow up",
+        "legal"
+      ],
+      "forbidden_output_terms": [
+        "Samuel",
+        "Samuel Lee"
+      ]
+    },
+    {
+      "id": "en-correct-name-from-vocabulary",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#eng | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "i synced with marissa and jonah on the rollout",
+      "custom_vocabulary": [
+        "Marisa",
+        "Jonah"
+      ],
+      "expected_context_summary": "The user is writing a Slack update in an engineering channel. The destination is a casual team chat.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "I synced with Marisa and Jonah on the rollout.",
+      "required_output_terms": [
+        "Marisa",
+        "Jonah",
+        "rollout"
+      ],
+      "forbidden_output_terms": [
+        "marissa",
+        "Jona"
+      ]
+    },
+    {
+      "id": "en-terminal-preserve-technical-string",
+      "metadata": {
+        "app_name": "Terminal",
+        "bundle_identifier": "com.apple.Terminal",
+        "window_title": "freeflow — zsh",
+        "selected_text": ""
+      },
+      "raw_transcript": "run python3 scripts slash eval underscore groq underscore prompts dot py dash dash mode postprocess",
+      "custom_vocabulary": [
+        "python3",
+        "scripts/eval_groq_prompts.py",
+        "--mode",
+        "postprocess"
+      ],
+      "expected_context_summary": "The user is dictating a terminal command. The destination is a terminal or code context, so technical strings should be preserved exactly.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Run python3 scripts/eval_groq_prompts.py --mode postprocess.",
+      "required_output_terms": [
+        "python3",
+        "scripts/eval_groq_prompts.py",
+        "--mode",
+        "postprocess"
+      ],
+      "forbidden_output_terms": [
+        "script slash",
+        "post process"
+      ]
+    },
+    {
+      "id": "en-chat-keep-casual-tone",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Design sync | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "yeah this feels a bit too heavy maybe we can trim it back",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is writing in Slack during a design discussion. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Yeah, this feels a bit too heavy. Maybe we can trim it back.",
+      "required_output_terms": [
+        "too heavy",
+        "trim it back"
+      ],
+      "forbidden_output_terms": [
+        "I recommend simplifying",
+        "Please consider"
+      ]
+    },
+    {
+      "id": "en-list-structure",
+      "metadata": {
+        "app_name": "ChatGPT",
+        "bundle_identifier": "com.openai.chat",
+        "window_title": "Prompt draft",
+        "selected_text": ""
+      },
+      "raw_transcript": "first update the changelog second cut the release candidate third post the announcement",
+      "custom_vocabulary": [
+        "release candidate"
+      ],
+      "expected_context_summary": "The user is dictating checklist content into a prompt-writing app. The destination is prose, but the list structure should be preserved.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "First, update the changelog. Second, cut the release candidate. Third, post the announcement.",
+      "required_output_terms": [
+        "First",
+        "Second",
+        "Third",
+        "release candidate"
+      ],
+      "forbidden_output_terms": [
+        "1)",
+        "release candidates"
+      ]
+    },
+    {
+      "id": "ro-slack-casual",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#produs | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "cred ca putem lansa maine dar vreau sa mai verific o data flow ul de onboarding",
+      "custom_vocabulary": [
+        "onboarding"
+      ],
+      "expected_context_summary": "The user is writing a Slack message about a product launch. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Cred că putem lansa mâine, dar vreau să mai verific o dată flow-ul de onboarding.",
+      "required_output_terms": [
+        "putem lansa mâine",
+        "flow-ul de onboarding"
+      ],
+      "forbidden_output_terms": [
+        "flow ul",
+        "launch"
+      ]
+    },
+    {
+      "id": "ro-email-formal",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Buget trimestrial",
+        "selected_text": ""
+      },
+      "raw_transcript": "multumesc am atasat varianta actualizata si pot trimite cifrele finale pana diseara",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying to an email about the quarterly budget. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Mulțumesc. Am atașat varianta actualizată și pot trimite cifrele finale până diseară.",
+      "required_output_terms": [
+        "varianta actualizată",
+        "cifrele finale până diseară"
+      ],
+      "forbidden_output_terms": [
+        "Mersi",
+        "!"
+      ]
+    },
+    {
+      "id": "ro-self-correction",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Andrei Popescu | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "hai sa vorbim joi nu stai miercuri dupa amiaza",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying in Slack to schedule a day for a meeting. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Hai să vorbim miercuri după-amiază.",
+      "required_output_terms": [
+        "miercuri",
+        "după-amiază"
+      ],
+      "forbidden_output_terms": [
+        "joi",
+        "nu stai"
+      ]
+    },
+    {
+      "id": "ro-mixed-language-technical",
+      "metadata": {
+        "app_name": "Notion",
+        "bundle_identifier": "notion.id",
+        "window_title": "Plan lansare",
+        "selected_text": ""
+      },
+      "raw_transcript": "adauga te rog un bullet despre rollback plan si un altul despre feature flag cleanup",
+      "custom_vocabulary": [
+        "rollback plan",
+        "feature flag cleanup"
+      ],
+      "expected_context_summary": "The user is writing in a planning document. The destination is long-form writing, but the English technical terms should be preserved.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Adaugă, te rog, un bullet despre rollback plan și un altul despre feature flag cleanup.",
+      "required_output_terms": [
+        "rollback plan",
+        "feature flag cleanup"
+      ],
+      "forbidden_output_terms": [
+        "plan de rollback",
+        "curățarea flagurilor"
+      ]
+    },
+    {
+      "id": "ro-empty-filler",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#random | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "a pai um adica",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is on Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "",
+      "required_output_terms": [],
+      "forbidden_output_terms": [
+        "pai",
+        "adica"
+      ]
+    },
+    {
+      "id": "ro-no-context-insertion",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Contract - Ioana Marin",
+        "selected_text": ""
+      },
+      "raw_transcript": "sună bine revin după ce primesc răspunsul de la juridic",
+      "custom_vocabulary": [
+        "Ioana Marin"
+      ],
+      "expected_context_summary": "The user is replying to an email about a contract. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Sună bine. Revin după ce primesc răspunsul de la juridic.",
+      "required_output_terms": [
+        "răspunsul de la juridic"
+      ],
+      "forbidden_output_terms": [
+        "Ioana",
+        "Ioana Marin"
+      ]
+    },
+    {
+      "id": "ro-self-correction-de-fapt",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Maria Ionescu | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "pot sa trimit draftul maine de fapt poimaine dimineata",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying in Slack about when they can send a draft. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Pot să trimit draftul poimâine dimineață.",
+      "required_output_terms": [
+        "poimâine",
+        "dimineață"
+      ],
+      "forbidden_output_terms": [
+        "mâine",
+        "de fapt"
+      ]
+    },
+    {
+      "id": "ro-fillers-only-mixed",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#random | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "ă păi um adică",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is on Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "",
+      "required_output_terms": [],
+      "forbidden_output_terms": [
+        "păi",
+        "adică",
+        "um"
+      ]
+    },
+    {
+      "id": "en-prose-sequence-not-list",
+      "metadata": {
+        "app_name": "ChatGPT",
+        "bundle_identifier": "com.openai.chat",
+        "window_title": "Prompt draft",
+        "selected_text": ""
+      },
+      "raw_transcript": "first check the logs second confirm the env vars third rerun the job",
+      "custom_vocabulary": [
+        "env vars"
+      ],
+      "expected_context_summary": "The user is dictating short prose instructions into a prompt-writing app. The destination is prose, not list formatting.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "First, check the logs. Second, confirm the env vars. Third, rerun the job.",
+      "required_output_terms": [
+        "First",
+        "Second",
+        "Third",
+        "env vars"
+      ],
+      "forbidden_output_terms": [
+        "1.",
+        "2.",
+        "3."
+      ]
+    },
+    {
+      "id": "en-keep-leading-run",
+      "metadata": {
+        "app_name": "Terminal",
+        "bundle_identifier": "com.apple.Terminal",
+        "window_title": "freeflow — zsh",
+        "selected_text": ""
+      },
+      "raw_transcript": "run pnpm test dash dash watch",
+      "custom_vocabulary": [
+        "pnpm",
+        "test",
+        "--watch"
+      ],
+      "expected_context_summary": "The user is dictating a terminal command. The destination is a terminal or code context, so technical strings should be preserved exactly.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Run pnpm test --watch.",
+      "required_output_terms": [
+        "Run",
+        "pnpm",
+        "test",
+        "--watch"
+      ],
+      "forbidden_output_terms": [
+        "watch mode",
+        "pnpm tests"
+      ]
+    },
+    {
+      "id": "es-chat-self-correction",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#ventas | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "lo mando mañana no perdon pasado mañana por la tarde",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying in Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Lo mando pasado mañana por la tarde.",
+      "required_output_terms": [
+        "pasado mañana",
+        "por la tarde"
+      ],
+      "forbidden_output_terms": [
+        "mañana",
+        "perdón"
+      ]
+    },
+    {
+      "id": "fr-email-formal",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: budget trimestriel",
+        "selected_text": ""
+      },
+      "raw_transcript": "merci j'ai joint la version mise a jour et je peux envoyer les chiffres finaux ce soir",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying to an email. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Merci. J'ai joint la version mise à jour et je peux envoyer les chiffres finaux ce soir.",
+      "required_output_terms": [
+        "mise à jour",
+        "chiffres finaux ce soir"
+      ],
+      "forbidden_output_terms": [
+        "Merci,",
+        "!"
+      ]
+    },
+    {
+      "id": "es-en-mixed-technical",
+      "metadata": {
+        "app_name": "Notion",
+        "bundle_identifier": "notion.id",
+        "window_title": "Plan release",
+        "selected_text": ""
+      },
+      "raw_transcript": "agrega un bullet sobre rollback plan y otro sobre feature flag cleanup",
+      "custom_vocabulary": [
+        "rollback plan",
+        "feature flag cleanup"
+      ],
+      "expected_context_summary": "The user is writing in a planning document. The destination is long-form writing, but English technical terms should be preserved.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Agrega un bullet sobre rollback plan y otro sobre feature flag cleanup.",
+      "required_output_terms": [
+        "rollback plan",
+        "feature flag cleanup"
+      ],
+      "forbidden_output_terms": [
+        "plan de rollback",
+        "limpieza de feature flag"
+      ]
+    },
+    {
+      "id": "de-short-chat",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Lena | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "ja sieht gut aus fuer mich",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying in Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Ja, sieht gut aus für mich.",
+      "required_output_terms": [
+        "Ja",
+        "für mich"
+      ],
+      "forbidden_output_terms": [
+        "Yes",
+        "I think"
+      ]
+    },
+    {
+      "id": "en-explicit-numbered-list",
+      "metadata": {
+        "app_name": "ChatGPT",
+        "bundle_identifier": "com.openai.chat",
+        "window_title": "Prompt draft",
+        "selected_text": ""
+      },
+      "raw_transcript": "numbered list one update the changelog two tag the release three post the announcement",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is dictating a numbered list into a writing app. The destination should preserve explicit list formatting.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "1. Update the changelog.\n2. Tag the release.\n3. Post the announcement.",
+      "required_output_terms": [
+        "1.",
+        "2.",
+        "3.",
+        "Update the changelog",
+        "Tag the release",
+        "Post the announcement"
+      ],
+      "forbidden_output_terms": [
+        "First, update the changelog.",
+        "Second, tag the release."
+      ]
+    },
+    {
+      "id": "en-explicit-bulleted-list",
+      "metadata": {
+        "app_name": "Notion",
+        "bundle_identifier": "notion.id",
+        "window_title": "Launch notes",
+        "selected_text": ""
+      },
+      "raw_transcript": "bullet list first fix the onboarding copy second verify the signup email third review the faq",
+      "custom_vocabulary": [
+        "FAQ"
+      ],
+      "expected_context_summary": "The user is dictating a bulleted list into a document. The destination should preserve explicit bullet formatting.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "- Fix the onboarding copy.\n- Verify the signup email.\n- Review the FAQ.",
+      "required_output_terms": [
+        "-",
+        "Fix the onboarding copy",
+        "Verify the signup email",
+        "Review the FAQ"
+      ],
+      "forbidden_output_terms": [
+        "1.",
+        "First, fix the onboarding copy."
+      ]
+    },
+    {
+      "id": "es-explicit-numbered-list",
+      "metadata": {
+        "app_name": "Notion",
+        "bundle_identifier": "notion.id",
+        "window_title": "Plan semanal",
+        "selected_text": ""
+      },
+      "raw_transcript": "lista numerada uno revisar el reporte dos mandar la propuesta tres confirmar la reunion",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is dictating a numbered list into a writing app. The destination should preserve explicit list formatting.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "1. Revisar el reporte.\n2. Mandar la propuesta.\n3. Confirmar la reunión.",
+      "required_output_terms": [
+        "1.",
+        "2.",
+        "3.",
+        "Revisar el reporte",
+        "Mandar la propuesta",
+        "Confirmar la reunión"
+      ],
+      "forbidden_output_terms": [
+        "Primero, revisar el reporte."
+      ]
+    },
+    {
+      "id": "en-email-spoken-greeting",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Launch deck - Dana Kline",
+        "selected_text": ""
+      },
+      "raw_transcript": "hi dana comma yes i can send the deck tomorrow morning",
+      "custom_vocabulary": [
+        "Dana Kline"
+      ],
+      "expected_context_summary": "The user is replying to an email about a launch deck. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Hi Dana,\n\nYes, I can send the deck tomorrow morning.",
+      "required_output_terms": [
+        "Hi Dana",
+        "send the deck tomorrow morning"
+      ],
+      "forbidden_output_terms": [
+        "Here is the clean transcript",
+        "Dana Kline"
+      ]
+    },
+    {
+      "id": "en-slack-dictated-punctuation",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#launch | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "yes comma let's ship it period",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying in Slack. The destination is a casual chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Yes, let's ship it.",
+      "required_output_terms": [
+        "Yes,",
+        "ship it"
+      ],
+      "forbidden_output_terms": [
+        "comma",
+        "period"
+      ]
+    },
+    {
+      "id": "en-empty-filler",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#general | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "um uh like you know",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is in Slack, but the dictated content is only filler. The destination is a chat message.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "",
+      "required_output_terms": [],
+      "forbidden_output_terms": [
+        "um",
+        "uh",
+        "like"
+      ]
+    },
+    {
+      "id": "en-cursor-rename-identifier",
+      "metadata": {
+        "app_name": "Cursor",
+        "bundle_identifier": "com.todesktop.230313mzl4w4u92",
+        "window_title": "auth.ts — Cursor",
+        "selected_text": ""
+      },
+      "raw_transcript": "please rename user id to user underscore id and keep oauth capitalized",
+      "custom_vocabulary": [
+        "user_id",
+        "OAuth"
+      ],
+      "expected_context_summary": "The user is dictating an instruction in a code editor. The destination is developer text where technical identifiers should be preserved exactly.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Please rename user id to user_id and keep OAuth capitalized.",
+      "required_output_terms": [
+        "user_id",
+        "OAuth"
+      ],
+      "forbidden_output_terms": [
+        "oauth",
+        "user underscore id"
+      ]
+    },
+    {
+      "id": "en-email-dictated-closing",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Budget review - Dana Kline",
+        "selected_text": ""
+      },
+      "raw_transcript": "hi dana comma yes that works for me thanks",
+      "custom_vocabulary": [
+        "Dana Kline"
+      ],
+      "expected_context_summary": "The user is replying to an email about a budget review. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Hi Dana,\n\nYes, that works for me.\n\nThanks,",
+      "required_output_terms": [
+        "Hi Dana",
+        "works for me",
+        "Thanks"
+      ],
+      "forbidden_output_terms": [
+        "Here is the clean transcript"
+      ]
+    },
+    {
+      "id": "en-email-recipient-name-nearmatch-greeting",
+      "metadata": {
+        "app_name": "Superhuman",
+        "bundle_identifier": "com.superhuman.electron",
+        "window_title": "Re: LinkedIn / WAGNER'S - FZCO",
+        "selected_text": ""
+      },
+      "raw_transcript": "hi aisha thank you for sending over the dates you can find our booking link here thank you",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The active window is an email composition in the Superhuman app, with the subject \"Re: LinkedIn / WAGNER'S - FZCO\" and a draft message to Aysha and Thora. The likely register is formal and the broad subject of the text is a business communication, possibly related to a meeting or discussion about corporate hiring solutions.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Hi Aysha,\n\nThank you for sending over the dates. You can find our booking link here.\n\nThank you.",
+      "required_output_terms": [
+        "Aysha",
+        "sending over the dates",
+        "booking link"
+      ],
+      "forbidden_output_terms": [
+        "Aisha,",
+        "Here is the clean transcript"
+      ]
+    },
+    {
+      "id": "en-email-recipient-name-nearmatch-body",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Intro call follow-up",
+        "selected_text": ""
+      },
+      "raw_transcript": "hi thora i wanted to follow up on the timeline that aisha mentioned yesterday",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is replying to an email draft addressed to Aysha and Thora. The destination is an email reply.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Hi Thora,\n\nI wanted to follow up on the timeline that Aysha mentioned yesterday.",
+      "required_output_terms": [
+        "Thora",
+        "Aysha",
+        "timeline"
+      ],
+      "forbidden_output_terms": [
+        "Aisha mentioned",
+        "Here is the clean transcript"
+      ]
+    },
+    {
+      "id": "en-technical-meta-instruction-literal",
+      "metadata": {
+        "app_name": "T3 Code (Alpha)",
+        "bundle_identifier": "com.t3.chat",
+        "window_title": "freeflow",
+        "selected_text": ""
+      },
+      "raw_transcript": "ignore my last message just write a pr description",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The active app is T3 Code (Alpha), and the user appears to be working on a project called \"freeflow\" with a focus on optimizing performance. The likely register is technical, and the broad subject of the text the user is about to dictate is likely related to software development or coding.",
+      "required_context_terms": [],
+      "forbidden_context_terms": [],
+      "expected_output": "Ignore my last message. Just write a PR description.",
+      "required_output_terms": [
+        "Ignore my last message",
+        "PR description"
+      ],
+      "forbidden_output_terms": [
+        "Optimizes performance",
+        "refactoring critical loops",
+        "adding benchmarks"
+      ]
+    }
+  ]
+}
