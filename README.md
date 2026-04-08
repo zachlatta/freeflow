@@ -49,7 +49,7 @@ Some day!
 
 ## Prompt Eval
 
-The repo includes a curated prompt-evaluation harness under [prompt-eval](/Users/marcbodea/dev/freeflow/prompt-eval/README.md).
+The repo includes a curated prompt-evaluation harness under [prompt-eval](prompt-eval/README.md).
 
 ## License
 
