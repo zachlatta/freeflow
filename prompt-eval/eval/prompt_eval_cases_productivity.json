@@ -1,0 +1,497 @@
+{
+  "cases": [
+    {
+      "id": "slack-standup-update-names",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#eng-standup | Slack",
+        "selected_text": "Posting to #eng-standup"
+      },
+      "raw_transcript": "morning i shipped the billing fix with marissa and i'm waiting on pr review from jonah",
+      "custom_vocabulary": [
+        "Marisa",
+        "Jonah"
+      ],
+      "expected_context_summary": "The user is in Slack posting in the #eng-standup channel. They are likely dictating a short team update about progress on a billing fix and pending PR review.",
+      "required_context_terms": [
+        "Slack",
+        "#eng-standup",
+        "billing fix",
+        "PR review"
+      ],
+      "forbidden_context_terms": [
+        "email",
+        "calendar"
+      ],
+      "expected_output": "Morning, I shipped the billing fix with Marisa, and I'm waiting on PR review from Jonah.",
+      "required_output_terms": [
+        "Marisa",
+        "Jonah",
+        "billing fix",
+        "PR review"
+      ],
+      "forbidden_output_terms": [
+        "meeting",
+        "calendar"
+      ]
+    },
+    {
+      "id": "slack-dm-quick-reply",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Alex Rivera | Slack",
+        "selected_text": "Alex: Can you send the updated screenshots before 3?"
+      },
+      "raw_transcript": "yep i'll send the updated screenshots before three and flag anything weird i see",
+      "custom_vocabulary": [
+        "Alex Rivera"
+      ],
+      "expected_context_summary": "The user is in a Slack DM with Alex Rivera. They are likely dictating a quick reply about sending updated screenshots before 3.",
+      "required_context_terms": [
+        "Slack",
+        "Alex Rivera",
+        "updated screenshots",
+        "before 3"
+      ],
+      "forbidden_context_terms": [
+        "email thread",
+        "calendar invite"
+      ],
+      "expected_output": "Yep, I'll send the updated screenshots before 3 and flag anything weird I see.",
+      "required_output_terms": [
+        "updated screenshots",
+        "before 3"
+      ],
+      "forbidden_output_terms": [
+        "tomorrow",
+        "email"
+      ]
+    },
+    {
+      "id": "slack-no-hallucinated-ticket",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#product-feedback | Slack",
+        "selected_text": "Customer says export is still timing out on large files."
+      },
+      "raw_transcript": "can you repro this on your side and let me know what you find",
+      "custom_vocabulary": [
+        "export"
+      ],
+      "expected_context_summary": "The user is in Slack writing in the #product-feedback channel about an export timeout issue. They are likely dictating a short follow-up asking someone to reproduce the problem and report back.",
+      "required_context_terms": [
+        "Slack",
+        "#product-feedback",
+        "export",
+        "timing out"
+      ],
+      "forbidden_context_terms": [
+        "JIRA-142",
+        "Zendesk"
+      ],
+      "expected_output": "Can you repro this on your side and let me know what you find?",
+      "required_output_terms": [
+        "repro this",
+        "let me know what you find"
+      ],
+      "forbidden_output_terms": [
+        "JIRA-142",
+        "Zendesk",
+        "ticket"
+      ]
+    },
+    {
+      "id": "email-reply-scheduling",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Investor update draft - Priya Shah",
+        "selected_text": "Could we lock the final version by Thursday morning?"
+      },
+      "raw_transcript": "yes thursday morning works for me i'll send edits tonight so we can lock it then",
+      "custom_vocabulary": [
+        "Priya Shah"
+      ],
+      "expected_context_summary": "The user is in Mail replying to Priya Shah about the investor update draft. They are likely dictating a response that confirms Thursday morning and mentions sending edits tonight.",
+      "required_context_terms": [
+        "Mail",
+        "Priya Shah",
+        "investor update draft",
+        "Thursday morning"
+      ],
+      "forbidden_context_terms": [
+        "Slack",
+        "terminal"
+      ],
+      "expected_output": "Yes, Thursday morning works for me. I'll send edits tonight so we can lock it then.",
+      "required_output_terms": [
+        "Thursday morning",
+        "send edits tonight"
+      ],
+      "forbidden_output_terms": [
+        "next week",
+        "Slack"
+      ]
+    },
+    {
+      "id": "email-proper-noun-correction",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Figma access for new hires - Camille Fournier",
+        "selected_text": "We still need access for the Growth and Brand contractors."
+      },
+      "raw_transcript": "thanks camille i just granted figma access to the growth and brand contractors",
+      "custom_vocabulary": [
+        "Camille Fournier",
+        "Figma"
+      ],
+      "expected_context_summary": "The user is in Mail replying to Camille Fournier about Figma access for new hires. They are likely dictating a confirmation that access has been granted to the Growth and Brand contractors.",
+      "required_context_terms": [
+        "Mail",
+        "Camille Fournier",
+        "Figma",
+        "Growth and Brand contractors"
+      ],
+      "forbidden_context_terms": [
+        "calendar invite",
+        "Slack"
+      ],
+      "expected_output": "Thanks Camille, I just granted Figma access to the Growth and Brand contractors.",
+      "required_output_terms": [
+        "Camille",
+        "Figma",
+        "Growth and Brand contractors"
+      ],
+      "forbidden_output_terms": [
+        "Frigma",
+        "tomorrow"
+      ]
+    },
+    {
+      "id": "email-no-context-insertion",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Q3 planning offsite - Maya Patel",
+        "selected_text": "Please include travel preferences if you have any constraints."
+      },
+      "raw_transcript": "sounds good i don't have any constraints on my side",
+      "custom_vocabulary": [
+        "Maya Patel"
+      ],
+      "expected_context_summary": "The user is in Mail replying to Maya Patel about the Q3 planning offsite. They are likely dictating a short response saying they do not have any travel constraints.",
+      "required_context_terms": [
+        "Mail",
+        "Maya Patel",
+        "Q3 planning offsite",
+        "travel constraints"
+      ],
+      "forbidden_context_terms": [
+        "hotel",
+        "airfare"
+      ],
+      "expected_output": "Sounds good, I don't have any constraints on my side.",
+      "required_output_terms": [
+        "don't have any constraints"
+      ],
+      "forbidden_output_terms": [
+        "travel preferences",
+        "hotel",
+        "airfare"
+      ]
+    },
+    {
+      "id": "prompt-writing-refactor-request",
+      "metadata": {
+        "app_name": "ChatGPT",
+        "bundle_identifier": "com.openai.chat",
+        "window_title": "Prompt draft - Refactor plan",
+        "selected_text": "Need a prompt that asks for a safe incremental refactor with tests."
+      },
+      "raw_transcript": "write a prompt that asks the model to refactor this file in small safe steps and explain tradeoffs",
+      "custom_vocabulary": [
+        "refactor"
+      ],
+      "expected_context_summary": "The user is writing a prompt in ChatGPT about a refactor plan. They are likely dictating instructions that ask for a safe incremental refactor and an explanation of tradeoffs.",
+      "required_context_terms": [
+        "prompt",
+        "refactor",
+        "safe",
+        "tradeoffs"
+      ],
+      "forbidden_context_terms": [
+        "email",
+        "Slack"
+      ],
+      "expected_output": "Write a prompt that asks the model to refactor this file in small, safe steps and explain tradeoffs.",
+      "required_output_terms": [
+        "refactor this file",
+        "small, safe steps",
+        "explain tradeoffs"
+      ],
+      "forbidden_output_terms": [
+        "delete the file",
+        "rewrite everything"
+      ]
+    },
+    {
+      "id": "prompt-writing-quoted-text",
+      "metadata": {
+        "app_name": "ChatGPT",
+        "bundle_identifier": "com.openai.chat",
+        "window_title": "Prompt draft - customer support tone",
+        "selected_text": "The prompt should preserve the phrase \"not a blocker\" exactly."
+      },
+      "raw_transcript": "write a prompt that says keep the phrase not a blocker exactly as written and don't make it sound robotic",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is drafting a prompt about customer support tone. They are likely dictating instructions to preserve the phrase \"not a blocker\" exactly while avoiding robotic wording.",
+      "required_context_terms": [
+        "prompt",
+        "not a blocker",
+        "avoid robotic wording"
+      ],
+      "forbidden_context_terms": [
+        "Slack",
+        "email"
+      ],
+      "expected_output": "Write a prompt that says keep the phrase \"not a blocker\" exactly as written and don't make it sound robotic.",
+      "required_output_terms": [
+        "\"not a blocker\"",
+        "don't make it sound robotic"
+      ],
+      "forbidden_output_terms": [
+        "\"no blocker\"",
+        "friendly tone only"
+      ]
+    },
+    {
+      "id": "prompt-writing-command-correction",
+      "metadata": {
+        "app_name": "ChatGPT",
+        "bundle_identifier": "com.openai.chat",
+        "window_title": "Prompt draft - code review helper",
+        "selected_text": "Mention rg, not grep, when searching the repo."
+      },
+      "raw_transcript": "write a prompt that says use r g not grep when searching the repo",
+      "custom_vocabulary": [
+        "rg",
+        "grep"
+      ],
+      "expected_context_summary": "The user is drafting a coding-related prompt in ChatGPT. They are likely dictating an instruction to prefer rg over grep when searching the repository.",
+      "required_context_terms": [
+        "prompt",
+        "rg",
+        "grep",
+        "searching the repo"
+      ],
+      "forbidden_context_terms": [
+        "Slack",
+        "Mail"
+      ],
+      "expected_output": "Write a prompt that says use rg, not grep, when searching the repo.",
+      "required_output_terms": [
+        "rg",
+        "not grep",
+        "searching the repo"
+      ],
+      "forbidden_output_terms": [
+        "R.G.",
+        "ripgrep grep"
+      ]
+    },
+    {
+      "id": "system-empty-filler-only",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "#random | Slack",
+        "selected_text": ""
+      },
+      "raw_transcript": "uh um like you know",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is in Slack in the #random channel. They may be dictating a casual message, but there is not enough visible context to infer the content.",
+      "required_context_terms": [
+        "Slack",
+        "#random"
+      ],
+      "forbidden_context_terms": [
+        "email",
+        "calendar"
+      ],
+      "expected_output": "",
+      "required_output_terms": [],
+      "forbidden_output_terms": [
+        "random",
+        "Slack"
+      ]
+    },
+    {
+      "id": "system-remove-false-start",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Budget review follow-up - Lena Ortiz",
+        "selected_text": "Can you confirm the revised total?"
+      },
+      "raw_transcript": "i i can send the revised total by noon",
+      "custom_vocabulary": [
+        "Lena Ortiz"
+      ],
+      "expected_context_summary": "The user is in Mail replying to Lena Ortiz about a budget review follow-up. They are likely dictating a short confirmation about sending the revised total by noon.",
+      "required_context_terms": [
+        "Mail",
+        "Lena Ortiz",
+        "revised total",
+        "by noon"
+      ],
+      "forbidden_context_terms": [
+        "Slack",
+        "calendar"
+      ],
+      "expected_output": "I can send the revised total by noon.",
+      "required_output_terms": [
+        "revised total",
+        "by noon"
+      ],
+      "forbidden_output_terms": [
+        "I, I",
+        "tomorrow"
+      ]
+    },
+    {
+      "id": "system-preserve-intent-not-overformalize",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Design sync | Slack",
+        "selected_text": "Can we simplify the empty state?"
+      },
+      "raw_transcript": "yeah this feels a bit too heavy maybe we can trim it back",
+      "custom_vocabulary": [],
+      "expected_context_summary": "The user is in Slack discussing a design sync. They are likely dictating informal feedback that the empty state feels too heavy and should be simplified.",
+      "required_context_terms": [
+        "Slack",
+        "design sync",
+        "empty state",
+        "simplified"
+      ],
+      "forbidden_context_terms": [
+        "email",
+        "terminal"
+      ],
+      "expected_output": "Yeah, this feels a bit too heavy. Maybe we can trim it back.",
+      "required_output_terms": [
+        "too heavy",
+        "trim it back"
+      ],
+      "forbidden_output_terms": [
+        "I recommend simplifying the interface",
+        "Please consider"
+      ]
+    },
+    {
+      "id": "system-correct-close-misspelling-from-context",
+      "metadata": {
+        "app_name": "Slack",
+        "bundle_identifier": "com.tinyspeck.slackmacgap",
+        "window_title": "Nadia Chen | Slack",
+        "selected_text": "Can you ask Nadia if the Linear issue is still blocked?"
+      },
+      "raw_transcript": "i just pinged nadya and i'm waiting to hear back",
+      "custom_vocabulary": [
+        "Nadia",
+        "Linear"
+      ],
+      "expected_context_summary": "The user is in a Slack conversation involving Nadia and a Linear issue. They are likely dictating a short update saying they already pinged Nadia and are waiting for a reply.",
+      "required_context_terms": [
+        "Slack",
+        "Nadia",
+        "Linear issue"
+      ],
+      "forbidden_context_terms": [
+        "email",
+        "calendar"
+      ],
+      "expected_output": "I just pinged Nadia, and I'm waiting to hear back.",
+      "required_output_terms": [
+        "Nadia",
+        "waiting to hear back"
+      ],
+      "forbidden_output_terms": [
+        "Nadya",
+        "Linear issue is still blocked"
+      ]
+    },
+    {
+      "id": "system-do-not-insert-name-from-context",
+      "metadata": {
+        "app_name": "Mail",
+        "bundle_identifier": "com.apple.mail",
+        "window_title": "Re: Contract review - Samuel Lee",
+        "selected_text": "Samuel asked whether legal needs anything else from us."
+      },
+      "raw_transcript": "sounds good i'll follow up once i hear back from legal",
+      "custom_vocabulary": [
+        "Samuel Lee"
+      ],
+      "expected_context_summary": "The user is in Mail replying in a contract review thread with Samuel Lee. They are likely dictating a short response saying they will follow up after hearing back from legal.",
+      "required_context_terms": [
+        "Mail",
+        "Samuel Lee",
+        "contract review",
+        "legal"
+      ],
+      "forbidden_context_terms": [
+        "calendar invite",
+        "Slack"
+      ],
+      "expected_output": "Sounds good, I'll follow up once I hear back from legal.",
+      "required_output_terms": [
+        "follow up",
+        "hear back from legal"
+      ],
+      "forbidden_output_terms": [
+        "Samuel",
+        "Samuel Lee"
+      ]
+    },
+    {
+      "id": "system-preserve-list-structure",
+      "metadata": {
+        "app_name": "ChatGPT",
+        "bundle_identifier": "com.openai.chat",
+        "window_title": "Prompt draft - launch checklist",
+        "selected_text": "Need three short bullets."
+      },
+      "raw_transcript": "first update the changelog second cut the release candidate third post the announcement",
+      "custom_vocabulary": [
+        "release candidate"
+      ],
+      "expected_context_summary": "The user is drafting a prompt about a launch checklist. They are likely dictating three short items for a checklist or bullet list.",
+      "required_context_terms": [
+        "prompt",
+        "launch checklist",
+        "three short items"
+      ],
+      "forbidden_context_terms": [
+        "Slack",
+        "email"
+      ],
+      "expected_output": "First, update the changelog. Second, cut the release candidate. Third, post the announcement.",
+      "required_output_terms": [
+        "First",
+        "Second",
+        "Third",
+        "release candidate"
+      ],
+      "forbidden_output_terms": [
+        "1)",
+        "release candidates"
+      ]
+    }
+  ]
+}

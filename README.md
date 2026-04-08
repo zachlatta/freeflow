@@ -35,6 +35,18 @@ One of the cool features is that it's context aware. If you're replying to an em
 
 An added bonus is that there's no FreeFlow server, so no data is stored or retained - making it more privacy friendly than the SaaS apps. The only information that leaves your computer are the API calls to Groq's transcription and LLM API (LLM is for post-processing the transcription to adapt to context).
 
+## Prompt Eval
+
+The repo includes a curated prompt-evaluation harness under [prompt-eval](/Users/marcbodea/dev/freeflow/prompt-eval/README.md).
+
+It contains:
+
+- the standalone Python runner used to compare prompt variants
+- the main fixture suites and prompt variant definitions
+- two representative saved result sets for `v24` vs the older baseline prompts and `openai/gpt-oss-20b` vs `meta-llama/llama-4-scout` on `v24`
+
+It does not include the full historical results archive from the separate eval repo.
+
 ### FAQ
 
 **Why does this use Groq instead of a local transcription model?**
