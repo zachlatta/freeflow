@@ -88,8 +88,7 @@ Output hygiene:
 
     private let apiKey: String
     private let baseURL: String
-    private let defaultModel = "openai/gpt-oss-20b"
-    private let fallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    private let defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
     init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
@@ -111,9 +110,10 @@ Output hygiene:
                 guard let self else {
                     throw PostProcessingError.invalidResponse("Post-processing service deallocated")
                 }
-                return try await self.processWithFallback(
+                return try await self.process(
                     transcript: transcript,
                     contextSummary: context.contextSummary,
+                    model: defaultModel,
                     customVocabulary: vocabularyTerms,
                     customSystemPrompt: customSystemPrompt
                 )
@@ -135,35 +135,6 @@ Output hygiene:
                 throw error
             }
         }
-    }
-
-    private func processWithFallback(
-        transcript: String,
-        contextSummary: String,
-        customVocabulary: [String],
-        customSystemPrompt: String = ""
-    ) async throws -> PostProcessingResult {
-        do {
-            return try await process(
-                transcript: transcript,
-                contextSummary: contextSummary,
-                model: defaultModel,
-                customVocabulary: customVocabulary,
-                customSystemPrompt: customSystemPrompt
-            )
-        } catch let error as PostProcessingError {
-            guard case .requestFailed(let statusCode, _) = error, statusCode == 429 else {
-                throw error
-            }
-        }
-
-        return try await process(
-            transcript: transcript,
-            contextSummary: contextSummary,
-            model: fallbackModel,
-            customVocabulary: customVocabulary,
-            customSystemPrompt: customSystemPrompt
-        )
     }
 
     private func process(
