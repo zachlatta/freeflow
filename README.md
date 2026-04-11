@@ -35,10 +35,10 @@ One of the cool features is that it's context aware. If you're replying to an em
 
 An added bonus is that there's no FreeFlow server, so no data is stored or retained - making it more privacy friendly than the SaaS apps. The only information that leaves your computer are the API calls to Groq's transcription and LLM API (LLM is for post-processing the transcription to adapt to context).
 
-If you prefer less context fitting, you can paste the original prompt from `main` into the custom system prompt setting:
+If you'd rather keep cleanup more literal and less context-aware, you can paste this simpler prompt into the custom system prompt setting:
 
 <details>
-  <summary>If you prefer less context fitting</summary>
+  <summary>Simple post-processing prompt</summary>
 
   <pre><code>You are a dictation post-processor. You receive raw speech-to-text output and return clean text ready to be typed into an application.
 
