@@ -47,10 +47,6 @@ Some day!
 
 **Update:** You can now use a custom model with FreeFlow by configuring the LLM API URL in the FreeFlow settings to use Ollama. Thank you @taciturnaxolotl!
 
-## Prompt Eval
-
-The repo includes a curated prompt-evaluation harness under [prompt-eval](prompt-eval/README.md).
-
 ## License
 
 Licensed under the MIT license.
