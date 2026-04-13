@@ -587,9 +587,7 @@ struct GeneralSettingsView: View {
 
     private var soundVolumeSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Adjust the volume of feedback sounds.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Toggle("Play alert sounds", isOn: $appState.alertSoundsEnabled)
 
             HStack(spacing: 12) {
                 Image(systemName: "speaker.fill")
@@ -604,11 +602,14 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 36, alignment: .trailing)
             }
+            .disabled(!appState.alertSoundsEnabled)
+            .opacity(appState.alertSoundsEnabled ? 1 : 0.5)
 
             Button("Preview") {
-                let s = NSSound(named: "Tink"); s?.volume = appState.soundVolume; s?.play()
+                appState.playAlertSound(named: "Tink")
             }
             .font(.caption)
+            .disabled(!appState.alertSoundsEnabled)
         }
     }
 
