@@ -40,6 +40,7 @@ struct SetupView: View {
     @State private var fetchedBedrockModels: [BedrockModel] = []
     @State private var isFetchingModels = false
     @State private var fetchModelsError: String? = nil
+    @State private var fetchModelsTask: Task<Void, Never>? = nil
     @StateObject private var githubCache = GitHubMetadataCache.shared
 
     // Test transcription state
@@ -453,7 +454,12 @@ struct SetupView: View {
     private func fetchBedrockModelsIfReady() {
         guard let aws = appState.awsConfig,
               !aws.accessKeyId.isEmpty, !aws.secretAccessKey.isEmpty, !aws.region.isEmpty else { return }
-        fetchBedrockModels()
+        fetchModelsTask?.cancel()
+        fetchModelsTask = Task {
+            try? await Task.sleep(nanoseconds: 800_000_000) // 0.8s debounce
+            guard !Task.isCancelled else { return }
+            fetchBedrockModels()
+        }
     }
 
     private func fetchBedrockModels() {

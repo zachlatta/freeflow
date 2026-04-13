@@ -717,6 +717,7 @@ struct ProvidersSettingsView: View {
     @State private var fetchedBedrockModels: [BedrockModel] = []
     @State private var isFetchingModels = false
     @State private var fetchModelsError: String? = nil
+    @State private var fetchModelsTask: Task<Void, Never>? = nil
 
     // Transcribe
     @State private var transcribeLanguageInput: String = ""
@@ -967,10 +968,14 @@ struct ProvidersSettingsView: View {
     }
 
     private func fetchBedrockModelsIfReady() {
-        guard let aws = appState.awsConfig else { return }
-        // Only auto-fetch when all three required fields are non-empty
-        guard !aws.accessKeyId.isEmpty, !aws.secretAccessKey.isEmpty, !aws.region.isEmpty else { return }
-        fetchBedrockModels()
+        guard let aws = appState.awsConfig,
+              !aws.accessKeyId.isEmpty, !aws.secretAccessKey.isEmpty, !aws.region.isEmpty else { return }
+        fetchModelsTask?.cancel()
+        fetchModelsTask = Task {
+            try? await Task.sleep(nanoseconds: 800_000_000) // 0.8s debounce
+            guard !Task.isCancelled else { return }
+            fetchBedrockModels()
+        }
     }
 
     // MARK: Bedrock model picker (embedded in LLM section)
