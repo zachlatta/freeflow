@@ -1012,6 +1012,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.playAlertSound(named: "Tink")
             }
         }
+        audioRecorder.onRecordingFailure = { [weak self] error in
+            guard let self else { return }
+            initTimer.cancel()
+            self.handleRecordingFailure(error)
+        }
 
         // Start engine on background thread so UI isn't blocked
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -1031,15 +1036,27 @@ final class AppState: ObservableObject, @unchecked Sendable {
             } catch {
                 DispatchQueue.main.async {
                     initTimer.cancel()
-                    self.isRecording = false
-                    self.activeRecordingTriggerMode = nil
-                    self.shortcutSessionController.reset()
-                    self.errorMessage = self.formattedRecordingStartError(error)
-                    self.statusText = "Error"
-                    self.overlayManager.dismiss()
+                    self.handleRecordingFailure(error)
                 }
             }
         }
+    }
+
+    private func handleRecordingFailure(_ error: Error) {
+        audioRecorder.onRecordingReady = nil
+        audioRecorder.onRecordingFailure = nil
+        audioLevelCancellable?.cancel()
+        audioLevelCancellable = nil
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        capturedContext = nil
+        audioRecorder.cleanup()
+        isRecording = false
+        activeRecordingTriggerMode = nil
+        shortcutSessionController.reset()
+        errorMessage = formattedRecordingStartError(error)
+        statusText = "Error"
+        overlayManager.dismiss()
     }
 
     private func formattedRecordingStartError(_ error: Error) -> String {
@@ -1155,6 +1172,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         cancelPendingShortcutStart()
         shortcutSessionController.reset()
         activeRecordingTriggerMode = nil
+        audioRecorder.onRecordingReady = nil
+        audioRecorder.onRecordingFailure = nil
         audioLevelCancellable?.cancel()
         audioLevelCancellable = nil
         debugStatusMessage = "Preparing audio"
@@ -1169,151 +1188,154 @@ final class AppState: ObservableObject, @unchecked Sendable {
         lastPostProcessingPrompt = ""
         lastContextScreenshotDataURL = nil
         lastContextScreenshotStatus = "No screenshot"
-
-        guard let fileURL = audioRecorder.stopRecording() else {
-            audioRecorder.cleanup()
-            errorMessage = "No audio recorded"
-            isRecording = false
-            statusText = "Error"
-            overlayManager.dismiss()
-            return
-        }
-        let savedAudioFile = Self.saveAudioFile(from: fileURL)
-        let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
         isRecording = false
-        isTranscribing = true
-        statusText = "Transcribing..."
-        debugStatusMessage = "Transcribing audio"
+        statusText = "Preparing audio..."
         errorMessage = nil
         playAlertSound(named: "Pop")
         overlayManager.slideUpToNotch { }
+        audioRecorder.stopRecording { [weak self] fileURL in
+            guard let self else { return }
+            guard let fileURL else {
+                self.audioRecorder.cleanup()
+                self.errorMessage = "No audio recorded"
+                self.statusText = "Error"
+                self.overlayManager.dismiss()
+                return
+            }
 
-        transcribingIndicatorTask?.cancel()
-        let indicatorDelay = transcribingIndicatorDelay
-        transcribingIndicatorTask = Task { [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: UInt64(indicatorDelay * 1_000_000_000))
-                let shouldShowTranscribing = self?.isTranscribing ?? false
-                guard shouldShowTranscribing else { return }
-                await MainActor.run { [weak self] in
-                    self?.overlayManager.showTranscribing()
-                }
-            } catch {}
-        }
+            let savedAudioFile = Self.saveAudioFile(from: fileURL)
+            let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
+            self.isTranscribing = true
+            self.statusText = "Transcribing..."
+            self.debugStatusMessage = "Transcribing audio"
 
-        let transcriptionService = TranscriptionService(
-            apiKey: apiKey,
-            baseURL: apiBaseURL,
-            forceHTTP2: forceHTTP2Transcription
-        )
-        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+            self.transcribingIndicatorTask?.cancel()
+            let indicatorDelay = self.transcribingIndicatorDelay
+            self.transcribingIndicatorTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(indicatorDelay * 1_000_000_000))
+                    let shouldShowTranscribing = self?.isTranscribing ?? false
+                    guard shouldShowTranscribing else { return }
+                    await MainActor.run { [weak self] in
+                        self?.overlayManager.showTranscribing()
+                    }
+                } catch {}
+            }
 
-        Task {
-            do {
-                async let transcript = transcriptionService.transcribe(fileURL: transcriptionFileURL)
-                let rawTranscript = try await transcript
-                let appContext: AppContext
-                if let sessionContext {
-                    appContext = sessionContext
-                } else if let inFlightContext = await inFlightContextTask?.value {
-                    appContext = inFlightContext
-                } else {
-                    appContext = fallbackContextAtStop()
-                }
-                await MainActor.run { [weak self] in
-                    self?.debugStatusMessage = "Running post-processing"
-                }
-                let (finalTranscript, processingStatus, postProcessingPrompt) = await processTranscript(
-                    rawTranscript,
-                    context: appContext,
-                    postProcessingService: postProcessingService,
-                    customVocabulary: customVocabulary,
-                    customSystemPrompt: customSystemPrompt
-                )
+            let transcriptionService = TranscriptionService(
+                apiKey: self.apiKey,
+                baseURL: self.apiBaseURL,
+                forceHTTP2: self.forceHTTP2Transcription
+            )
+            let postProcessingService = PostProcessingService(apiKey: self.apiKey, baseURL: self.apiBaseURL)
 
-                await MainActor.run {
-                    self.lastContextSummary = appContext.contextSummary
-                    self.lastContextScreenshotDataURL = appContext.screenshotDataURL
-                    self.lastContextScreenshotStatus = appContext.screenshotError
-                        ?? "available (\(appContext.screenshotMimeType ?? "image"))"
-                    let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let trimmedFinalTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    self.lastPostProcessingPrompt = postProcessingPrompt
-                    self.lastRawTranscript = trimmedRawTranscript
-                    self.lastPostProcessedTranscript = trimmedFinalTranscript
-                    self.lastPostProcessingStatus = processingStatus
-                    self.recordPipelineHistoryEntry(
-                        rawTranscript: trimmedRawTranscript,
-                        postProcessedTranscript: trimmedFinalTranscript,
-                        postProcessingPrompt: postProcessingPrompt,
-                        context: appContext,
-                        processingStatus: processingStatus,
-                        audioFileName: savedAudioFile?.fileName
-                    )
-                    self.transcribingIndicatorTask?.cancel()
-                    self.transcribingIndicatorTask = nil
-                    self.lastTranscript = trimmedFinalTranscript
-                    self.isTranscribing = false
-                    self.debugStatusMessage = "Done"
-                    let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
-
-                    if trimmedFinalTranscript.isEmpty {
-                        self.statusText = "Nothing to transcribe"
-                        self.overlayManager.dismiss()
+            Task {
+                do {
+                    async let transcript = transcriptionService.transcribe(fileURL: transcriptionFileURL)
+                    let rawTranscript = try await transcript
+                    let appContext: AppContext
+                    if let sessionContext {
+                        appContext = sessionContext
+                    } else if let inFlightContext = await inFlightContextTask?.value {
+                        appContext = inFlightContext
                     } else {
-                        self.statusText = completionStatusText
-                        self.overlayManager.showDone()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                            self.overlayManager.dismiss()
-                        }
-
-                        let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
-                        self.pasteAtCursorWhenShortcutReleased {
-                            self.restoreClipboardIfNeeded(pendingClipboardRestore)
-                        }
+                        appContext = self.fallbackContextAtStop()
                     }
-
-                    self.audioRecorder.cleanup()
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        if self.statusText == completionStatusText || self.statusText == "Nothing to transcribe" {
-                            self.statusText = "Ready"
-                        }
+                    await MainActor.run { [weak self] in
+                        self?.debugStatusMessage = "Running post-processing"
                     }
-                }
-            } catch {
-                let resolvedContext: AppContext
-                if let sessionContext {
-                    resolvedContext = sessionContext
-                } else if let inFlightContext = await inFlightContextTask?.value {
-                    resolvedContext = inFlightContext
-                } else {
-                    resolvedContext = fallbackContextAtStop()
-                }
-                await MainActor.run {
-                    self.transcribingIndicatorTask?.cancel()
-                    self.transcribingIndicatorTask = nil
-                    self.errorMessage = error.localizedDescription
-                    self.isTranscribing = false
-                    self.statusText = "Error"
-                    self.audioRecorder.cleanup()
-                    self.overlayManager.dismiss()
-                    self.lastPostProcessedTranscript = ""
-                    self.lastRawTranscript = ""
-                    self.lastContextSummary = ""
-                    self.lastPostProcessingStatus = "Error: \(error.localizedDescription)"
-                    self.lastPostProcessingPrompt = ""
-                    self.lastContextScreenshotDataURL = resolvedContext.screenshotDataURL
-                    self.lastContextScreenshotStatus = resolvedContext.screenshotError
-                        ?? "available (\(resolvedContext.screenshotMimeType ?? "image"))"
-                    self.recordPipelineHistoryEntry(
-                        rawTranscript: "",
-                        postProcessedTranscript: "",
-                        postProcessingPrompt: "",
-                        context: resolvedContext,
-                        processingStatus: "Error: \(error.localizedDescription)",
-                        audioFileName: savedAudioFile?.fileName
+                    let (finalTranscript, processingStatus, postProcessingPrompt) = await self.processTranscript(
+                        rawTranscript,
+                        context: appContext,
+                        postProcessingService: postProcessingService,
+                        customVocabulary: self.customVocabulary,
+                        customSystemPrompt: self.customSystemPrompt
                     )
+
+                    await MainActor.run {
+                        self.lastContextSummary = appContext.contextSummary
+                        self.lastContextScreenshotDataURL = appContext.screenshotDataURL
+                        self.lastContextScreenshotStatus = appContext.screenshotError
+                            ?? "available (\(appContext.screenshotMimeType ?? "image"))"
+                        let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let trimmedFinalTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        self.lastPostProcessingPrompt = postProcessingPrompt
+                        self.lastRawTranscript = trimmedRawTranscript
+                        self.lastPostProcessedTranscript = trimmedFinalTranscript
+                        self.lastPostProcessingStatus = processingStatus
+                        self.recordPipelineHistoryEntry(
+                            rawTranscript: trimmedRawTranscript,
+                            postProcessedTranscript: trimmedFinalTranscript,
+                            postProcessingPrompt: postProcessingPrompt,
+                            context: appContext,
+                            processingStatus: processingStatus,
+                            audioFileName: savedAudioFile?.fileName
+                        )
+                        self.transcribingIndicatorTask?.cancel()
+                        self.transcribingIndicatorTask = nil
+                        self.lastTranscript = trimmedFinalTranscript
+                        self.isTranscribing = false
+                        self.debugStatusMessage = "Done"
+                        let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
+
+                        if trimmedFinalTranscript.isEmpty {
+                            self.statusText = "Nothing to transcribe"
+                            self.overlayManager.dismiss()
+                        } else {
+                            self.statusText = completionStatusText
+                            self.overlayManager.showDone()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                                self.overlayManager.dismiss()
+                            }
+
+                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
+                            self.pasteAtCursorWhenShortcutReleased {
+                                self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                            }
+                        }
+
+                        self.audioRecorder.cleanup()
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            if self.statusText == completionStatusText || self.statusText == "Nothing to transcribe" {
+                                self.statusText = "Ready"
+                            }
+                        }
+                    }
+                } catch {
+                    let resolvedContext: AppContext
+                    if let sessionContext {
+                        resolvedContext = sessionContext
+                    } else if let inFlightContext = await inFlightContextTask?.value {
+                        resolvedContext = inFlightContext
+                    } else {
+                        resolvedContext = self.fallbackContextAtStop()
+                    }
+                    await MainActor.run {
+                        self.transcribingIndicatorTask?.cancel()
+                        self.transcribingIndicatorTask = nil
+                        self.errorMessage = error.localizedDescription
+                        self.isTranscribing = false
+                        self.statusText = "Error"
+                        self.audioRecorder.cleanup()
+                        self.overlayManager.dismiss()
+                        self.lastPostProcessedTranscript = ""
+                        self.lastRawTranscript = ""
+                        self.lastContextSummary = ""
+                        self.lastPostProcessingStatus = "Error: \(error.localizedDescription)"
+                        self.lastPostProcessingPrompt = ""
+                        self.lastContextScreenshotDataURL = resolvedContext.screenshotDataURL
+                        self.lastContextScreenshotStatus = resolvedContext.screenshotError
+                            ?? "available (\(resolvedContext.screenshotMimeType ?? "image"))"
+                        self.recordPipelineHistoryEntry(
+                            rawTranscript: "",
+                            postProcessedTranscript: "",
+                            postProcessingPrompt: "",
+                            context: resolvedContext,
+                            processingStatus: "Error: \(error.localizedDescription)",
+                            audioFileName: savedAudioFile?.fileName
+                        )
+                    }
                 }
             }
         }
@@ -1448,7 +1470,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             hasShownScreenshotPermissionAlert = true
 
             // Permission errors are fatal — stop recording
-            _ = audioRecorder.stopRecording()
+            audioRecorder.cancelRecording()
             audioRecorder.cleanup()
             audioLevelCancellable?.cancel()
             audioLevelCancellable = nil
