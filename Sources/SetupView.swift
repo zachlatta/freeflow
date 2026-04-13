@@ -32,6 +32,14 @@ struct SetupView: View {
     @State private var accessibilityTimer: Timer?
     @State private var screenRecordingTimer: Timer?
     @State private var customVocabularyInput: String = ""
+    @State private var awsAccessKeyInput: String = ""
+    @State private var awsSecretKeyInput: String = ""
+    @State private var awsSessionTokenInput: String = ""
+    @State private var awsRegionInput: String = ""
+    @State private var bedrockModelInput: String = ""
+    @State private var fetchedBedrockModels: [BedrockModel] = []
+    @State private var isFetchingModels = false
+    @State private var fetchModelsError: String? = nil
     @StateObject private var githubCache = GitHubMetadataCache.shared
 
     // Test transcription state
@@ -90,7 +98,7 @@ struct SetupView: View {
                                     validateAndContinue()
                                 }
                                 .keyboardShortcut(.defaultAction)
-                                .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
+                                .disabled(credentialsStepContinueDisabled)
                             } else if currentStep == .vocabulary {
                                 Button("Continue") {
                                     saveCustomVocabularyAndContinue()
@@ -141,6 +149,12 @@ struct SetupView: View {
         .onAppear {
             apiKeyInput = appState.apiKey
             customVocabularyInput = appState.customVocabulary
+            awsAccessKeyInput = appState.awsAccessKeyId
+            awsSecretKeyInput = appState.awsSecretAccessKey
+            awsSessionTokenInput = appState.awsSessionToken
+            awsRegionInput = appState.awsRegion
+            bedrockModelInput = appState.bedrockModelId
+            if appState.awsConfig != nil { fetchBedrockModels() }
             checkMicPermission()
             checkAccessibility()
             Task {
@@ -310,56 +324,155 @@ struct SetupView: View {
     }
 
     var apiKeyStep: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.blue)
+        ScrollView {
+            VStack(spacing: 16) {
+                VStack(spacing: 8) {
+                    Image(systemName: "server.rack")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.blue)
+                    Text("Choose Providers")
+                        .font(.title)
+                        .fontWeight(.bold)
+                    Text("Pick where FreeFlow sends audio and which model cleans up the result.")
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.bottom, 4)
 
-            Text("Groq API Key")
-                .font(.title)
-                .fontWeight(.bold)
-
-            Text("FreeFlow uses Groq for fast, high-accuracy transcription.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("How to get a free API key:")
-                        .font(.subheadline.weight(.semibold))
-                    VStack(alignment: .leading, spacing: 2) {
-                        instructionRow(number: "1", text: "Go to [console.groq.com/keys](https://console.groq.com/keys)")
-                        instructionRow(number: "2", text: "Create a free account (if you don't have one)")
-                        instructionRow(number: "3", text: "Click **Create API Key** and copy it")
+                SettingsCard("Groq", icon: "bolt.fill") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SecureField("API key", text: $apiKeyInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .disabled(isValidatingKey)
+                            .onChange(of: apiKeyInput) { _ in keyValidationError = nil }
+                        Text("Free key at [console.groq.com/keys](https://console.groq.com/keys)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .tint(.blue)
+                        if let error = keyValidationError {
+                            Label(error, systemImage: "xmark.circle.fill")
+                                .foregroundStyle(.red)
+                                .font(.caption)
+                        }
                     }
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.blue.opacity(0.06))
-                )
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("API Key")
-                        .font(.headline)
-                    SecureField("Paste your Groq API key", text: $apiKeyInput)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                        .disabled(isValidatingKey)
-                        .onChange(of: apiKeyInput) { _ in
-                            keyValidationError = nil
+                SettingsCard("AWS", icon: "server.rack") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField("Access Key ID (AKIA...)", text: $awsAccessKeyInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .onChange(of: awsAccessKeyInput) { newValue in
+                                appState.awsAccessKeyId = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                                fetchBedrockModelsIfReady()
+                            }
+                        SecureField("Secret Access Key", text: $awsSecretKeyInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .onChange(of: awsSecretKeyInput) { newValue in
+                                appState.awsSecretAccessKey = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                                fetchBedrockModelsIfReady()
+                            }
+                        SecureField("Session Token (optional)", text: $awsSessionTokenInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .onChange(of: awsSessionTokenInput) { newValue in
+                                appState.awsSessionToken = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                            }
+                        TextField("Region (e.g. us-east-1)", text: $awsRegionInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .onChange(of: awsRegionInput) { newValue in
+                                appState.awsRegion = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                                fetchBedrockModelsIfReady()
+                            }
+                        if let error = fetchModelsError {
+                            Label(error, systemImage: "xmark.circle.fill")
+                                .foregroundStyle(.red)
+                                .font(.caption)
                         }
+                    }
+                }
 
-                    if let error = keyValidationError {
-                        Label(error, systemImage: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                            .font(.caption)
+                Divider()
+
+                SettingsCard("Transcription", icon: "waveform") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("", selection: $appState.transcriptionProvider) {
+                            ForEach(TranscriptionProvider.allCases) { p in
+                                Text(p.displayName).tag(p)
+                            }
+                        }
+                        .pickerStyle(.radioGroup)
+                        .labelsHidden()
+                        if appState.transcriptionProvider == .awsTranscribe {
+                            TextField("Language code (e.g. en-US)", text: Binding(
+                                get: { appState.transcribeLanguageCode },
+                                set: { appState.transcribeLanguageCode = $0 }
+                            ))
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 200)
+                        }
+                    }
+                }
+
+                SettingsCard("Post-processing", icon: "brain") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("", selection: $appState.llmProvider) {
+                            ForEach(LLMProvider.allCases) { p in
+                                Text(p.displayName).tag(p)
+                            }
+                        }
+                        .pickerStyle(.radioGroup)
+                        .labelsHidden()
+                        if appState.llmProvider == .awsBedrock {
+                            BedrockModelCombobox(
+                                modelInput: $bedrockModelInput,
+                                fetchedModels: fetchedBedrockModels,
+                                isFetching: isFetchingModels
+                            ) { model in
+                                bedrockModelInput = model.id
+                                appState.bedrockModelId = model.id
+                            }
+                            .onChange(of: bedrockModelInput) { newValue in
+                                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !trimmed.isEmpty { appState.bedrockModelId = trimmed }
+                            }
+                        }
                     }
                 }
             }
+            .padding(.vertical, 4)
+        }
+    }
 
+    private func fetchBedrockModelsIfReady() {
+        guard let aws = appState.awsConfig,
+              !aws.accessKeyId.isEmpty, !aws.secretAccessKey.isEmpty, !aws.region.isEmpty else { return }
+        fetchBedrockModels()
+    }
+
+    private func fetchBedrockModels() {
+        guard let aws = appState.awsConfig else { return }
+        isFetchingModels = true
+        fetchModelsError = nil
+        Task {
+            do {
+                let models = try await BedrockModel.fetch(aws: aws)
+                await MainActor.run {
+                    fetchedBedrockModels = models
+                    isFetchingModels = false
+                }
+            } catch {
+                await MainActor.run {
+                    fetchModelsError = error.localizedDescription
+                    isFetchingModels = false
+                }
+            }
         }
     }
 
@@ -820,6 +933,19 @@ struct SetupView: View {
         }
     }
 
+    private var credentialsStepContinueDisabled: Bool {
+        if isValidatingKey { return true }
+        if appState.transcriptionProvider == .groq || appState.llmProvider == .groq {
+            if apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        }
+        if appState.transcriptionProvider == .awsTranscribe || appState.llmProvider == .awsBedrock {
+            if awsAccessKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+            if awsSecretKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+            if awsRegionInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        }
+        return false
+    }
+
     private var canContinueFromCurrentStep: Bool {
         switch currentStep {
         case .micPermission:
@@ -869,6 +995,12 @@ struct SetupView: View {
     // MARK: - Actions
 
     func validateAndContinue() {
+        guard appState.transcriptionProvider == .groq || appState.llmProvider == .groq else {
+            // Pure AWS path — no Groq validation needed
+            withAnimation { currentStep = nextStep(currentStep) }
+            return
+        }
+
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         isValidatingKey = true
         keyValidationError = nil
@@ -879,11 +1011,9 @@ struct SetupView: View {
                 isValidatingKey = false
                 if valid {
                     appState.apiKey = key
-                    withAnimation {
-                        currentStep = nextStep(currentStep)
-                    }
+                    withAnimation { currentStep = nextStep(currentStep) }
                 } else {
-                    keyValidationError = "Invalid API key. Please check and try again."
+                    keyValidationError = "Invalid Groq API key. Please check and try again."
                 }
             }
         }
@@ -1025,8 +1155,11 @@ struct SetupView: View {
                     Task {
                         do {
                             let service = TranscriptionService(
+                                transcriptionProvider: appState.transcriptionProvider,
                                 apiKey: appState.apiKey,
                                 baseURL: appState.apiBaseURL,
+                                awsConfig: appState.awsConfig,
+                                transcribeLanguageCode: appState.transcribeLanguageCode
                             )
                             let transcript = try await service.transcribe(fileURL: url)
                             await MainActor.run {

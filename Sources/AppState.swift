@@ -19,8 +19,44 @@ struct PrecomputedMacro {
     let normalizedCommand: String
 }
 
+enum TranscriptionProvider: String, CaseIterable, Identifiable {
+    case groq
+    case awsTranscribe
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .groq: return "Groq"
+        case .awsTranscribe: return "Amazon Transcribe"
+        }
+    }
+}
+
+enum LLMProvider: String, CaseIterable, Identifiable {
+    case groq
+    case awsBedrock
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .groq: return "Groq"
+        case .awsBedrock: return "AWS Bedrock"
+        }
+    }
+}
+
+struct AWSConfig {
+    let accessKeyId: String
+    let secretAccessKey: String
+    let region: String
+    let sessionToken: String?
+}
+
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
+    case providers
     case prompts
     case macros
     case runLog
@@ -30,6 +66,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return "General"
+        case .providers: return "Providers"
         case .prompts: return "Prompts"
         case .macros: return "Voice Macros"
         case .runLog: return "Run Log"
@@ -39,6 +76,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "gearshape"
+        case .providers: return "server.rack"
         case .prompts: return "text.bubble"
         case .macros: return "music.mic"
         case .runLog: return "clock.arrow.circlepath"
@@ -128,6 +166,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
     private let soundVolumeStorageKey = "sound_volume"
     private let voiceMacrosStorageKey = "voice_macros"
+    private let transcriptionProviderStorageKey = "transcription_provider"
+    private let llmProviderStorageKey = "llm_provider"
+    private let awsAccessKeyIdStorageKey = "aws_access_key_id"
+    private let awsSecretAccessKeyStorageKey = "aws_secret_access_key"
+    private let awsSessionTokenStorageKey = "aws_session_token"
+    private let awsRegionStorageKey = "aws_region"
+    private let bedrockModelIdStorageKey = "bedrock_model_id"
+    private let transcribeLanguageCodeStorageKey = "transcribe_language_code"
     private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let clipboardRestoreDelay: TimeInterval = 0.15
     let maxPipelineHistoryCount = 20
@@ -233,6 +279,48 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var transcriptionProvider: TranscriptionProvider {
+        didSet {
+            UserDefaults.standard.set(transcriptionProvider.rawValue, forKey: transcriptionProviderStorageKey)
+        }
+    }
+
+    @Published var llmProvider: LLMProvider {
+        didSet {
+            UserDefaults.standard.set(llmProvider.rawValue, forKey: llmProviderStorageKey)
+        }
+    }
+
+    @Published var awsAccessKeyId: String {
+        didSet { persistAWSCredential(awsAccessKeyId, account: awsAccessKeyIdStorageKey) }
+    }
+
+    @Published var awsSecretAccessKey: String {
+        didSet { persistAWSCredential(awsSecretAccessKey, account: awsSecretAccessKeyStorageKey) }
+    }
+
+    @Published var awsSessionToken: String {
+        didSet { persistAWSCredential(awsSessionToken, account: awsSessionTokenStorageKey) }
+    }
+
+    @Published var awsRegion: String {
+        didSet {
+            UserDefaults.standard.set(awsRegion, forKey: awsRegionStorageKey)
+        }
+    }
+
+    @Published var bedrockModelId: String {
+        didSet {
+            UserDefaults.standard.set(bedrockModelId, forKey: bedrockModelIdStorageKey)
+        }
+    }
+
+    @Published var transcribeLanguageCode: String {
+        didSet {
+            UserDefaults.standard.set(transcribeLanguageCode, forKey: transcribeLanguageCodeStorageKey)
+        }
+    }
+
     private var precomputedMacros: [PrecomputedMacro] = []
 
     @Published var voiceMacros: [VoiceMacro] = [] {
@@ -325,7 +413,22 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let alertSoundsEnabled = UserDefaults.standard.object(forKey: alertSoundsEnabledStorageKey) != nil
             ? UserDefaults.standard.bool(forKey: alertSoundsEnabledStorageKey)
             : soundVolume > 0
-        
+
+        let transcriptionProvider = TranscriptionProvider(
+            rawValue: UserDefaults.standard.string(forKey: transcriptionProviderStorageKey) ?? ""
+        ) ?? .groq
+        let llmProvider = LLMProvider(
+            rawValue: UserDefaults.standard.string(forKey: llmProviderStorageKey) ?? ""
+        ) ?? .groq
+        let awsAccessKeyId = Self.loadStoredAPIKey(account: awsAccessKeyIdStorageKey)
+        let awsSecretAccessKey = Self.loadStoredAPIKey(account: awsSecretAccessKeyStorageKey)
+        let awsSessionToken = Self.loadStoredAPIKey(account: awsSessionTokenStorageKey)
+        let awsRegion = UserDefaults.standard.string(forKey: awsRegionStorageKey) ?? "us-east-1"
+        let bedrockModelId = UserDefaults.standard.string(forKey: bedrockModelIdStorageKey)
+            ?? "anthropic.claude-3-5-sonnet-20241022-v2:0"
+        let transcribeLanguageCode = UserDefaults.standard.string(forKey: transcribeLanguageCodeStorageKey) ?? "en-US"
+
+
         let initialMacros: [VoiceMacro]
         if let data = UserDefaults.standard.data(forKey: "voice_macros"),
            let decoded = try? JSONDecoder().decode([VoiceMacro].self, from: data) {
@@ -366,6 +469,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.preserveClipboard = preserveClipboard
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
+        self.transcriptionProvider = transcriptionProvider
+        self.llmProvider = llmProvider
+        self.awsAccessKeyId = awsAccessKeyId
+        self.awsSecretAccessKey = awsSecretAccessKey
+        self.awsSessionToken = awsSessionToken
+        self.awsRegion = awsRegion
+        self.bedrockModelId = bedrockModelId
+        self.transcribeLanguageCode = transcribeLanguageCode
         self.voiceMacros = initialMacros
         self.pipelineHistory = savedHistory
         self.hasAccessibility = initialAccessibility
@@ -417,6 +528,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
         } else {
             AppSettingsStorage.save(trimmed, account: apiKeyStorageKey)
         }
+    }
+
+    private func persistAWSCredential(_ value: String, account: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            AppSettingsStorage.delete(account: account)
+        } else {
+            AppSettingsStorage.save(trimmed, account: account)
+        }
+    }
+
+    var awsConfig: AWSConfig? {
+        let key = awsAccessKeyId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let secret = awsSecretAccessKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let region = awsRegion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !secret.isEmpty, !region.isEmpty else { return nil }
+        let token = awsSessionToken.trimmingCharacters(in: .whitespacesAndNewlines)
+        return AWSConfig(accessKeyId: key, secretAccessKey: secret, region: region, sessionToken: token.isEmpty ? nil : token)
     }
 
     private static let defaultAPIBaseURL = "https://api.groq.com/openai/v1"
@@ -558,10 +687,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
 
         let transcriptionService = TranscriptionService(
+            transcriptionProvider: transcriptionProvider,
             apiKey: apiKey,
-            baseURL: apiBaseURL
+            baseURL: apiBaseURL,
+            awsConfig: awsConfig,
+            transcribeLanguageCode: transcribeLanguageCode
         )
-        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+        let postProcessingService = PostProcessingService(
+            llmProvider: llmProvider,
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            awsConfig: awsConfig,
+            bedrockModelId: bedrockModelId
+        )
         let capturedCustomVocabulary = customVocabulary
         let capturedCustomSystemPrompt = customSystemPrompt
 
@@ -1348,10 +1486,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
 
         let transcriptionService = TranscriptionService(
+            transcriptionProvider: transcriptionProvider,
             apiKey: apiKey,
-            baseURL: apiBaseURL
+            baseURL: apiBaseURL,
+            awsConfig: awsConfig,
+            transcribeLanguageCode: transcribeLanguageCode
         )
-        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+        let postProcessingService = PostProcessingService(
+            llmProvider: llmProvider,
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            awsConfig: awsConfig,
+            bedrockModelId: bedrockModelId
+        )
 
             self.transcriptionTask?.cancel()
             self.transcriptionTask = Task {

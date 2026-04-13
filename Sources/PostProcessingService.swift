@@ -25,6 +25,15 @@ struct PostProcessingResult {
     let prompt: String
 }
 
+// Injected by AppState; keeps PostProcessingService decoupled from AppState.
+struct PostProcessingConfig {
+    var llmProvider: LLMProvider = .groq
+    var groqAPIKey: String = ""
+    var groqBaseURL: String = "https://api.groq.com/openai/v1"
+    var awsConfig: AWSConfig? = nil
+    var bedrockModelId: String = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+}
+
 final class PostProcessingService {
     static let defaultSystemPrompt = """
 You are a literal dictation cleanup layer for short messages, email replies, prompts, and commands.
@@ -89,16 +98,28 @@ Output hygiene:
 """
     static let defaultSystemPromptDate = "2026-04-08"
 
-    private let apiKey: String
-    private let baseURL: String
+    private let config: PostProcessingConfig
+    private var apiKey: String { config.groqAPIKey }
+    private var baseURL: String { config.groqBaseURL }
     private let defaultModel = "openai/gpt-oss-20b"
     private let fallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let postProcessingMaxCompletionTokens = 4096
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
-        self.apiKey = apiKey
-        self.baseURL = baseURL
+    init(
+        llmProvider: LLMProvider = .groq,
+        apiKey: String,
+        baseURL: String = "https://api.groq.com/openai/v1",
+        awsConfig: AWSConfig? = nil,
+        bedrockModelId: String = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    ) {
+        self.config = PostProcessingConfig(
+            llmProvider: llmProvider,
+            groqAPIKey: apiKey,
+            groqBaseURL: baseURL,
+            awsConfig: awsConfig,
+            bedrockModelId: bedrockModelId
+        )
     }
 
     func postProcess(
@@ -147,6 +168,19 @@ Output hygiene:
         customVocabulary: [String],
         customSystemPrompt: String = ""
     ) async throws -> PostProcessingResult {
+        switch config.llmProvider {
+        case .awsBedrock:
+            return try await processBedrock(
+                transcript: transcript,
+                contextSummary: contextSummary,
+                customVocabulary: customVocabulary,
+                customSystemPrompt: customSystemPrompt
+            )
+        case .groq:
+            break
+        }
+
+        // Groq path with fallback
         do {
             return try await process(
                 transcript: transcript,
@@ -178,6 +212,107 @@ Output hygiene:
             customVocabulary: customVocabulary,
             customSystemPrompt: customSystemPrompt
         )
+    }
+
+    // MARK: - Bedrock
+
+    private func processBedrock(
+        transcript: String,
+        contextSummary: String,
+        customVocabulary: [String],
+        customSystemPrompt: String
+    ) async throws -> PostProcessingResult {
+        guard let aws = config.awsConfig else {
+            throw PostProcessingError.invalidResponse("AWS credentials not configured")
+        }
+
+        let model = config.bedrockModelId
+        let region = aws.region
+        let endpointURL = URL(string: "https://bedrock-runtime.\(region).amazonaws.com/v1/chat/completions")!
+
+        let normalizedVocabulary = normalizedVocabularyText(customVocabulary)
+        let vocabularyPrompt = normalizedVocabulary.isEmpty ? "" : """
+The following vocabulary must be treated as high-priority terms while rewriting.
+Use these spellings exactly in the output when relevant:
+\(normalizedVocabulary)
+"""
+
+        var systemPrompt = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? Self.defaultSystemPrompt
+            : customSystemPrompt
+        if !vocabularyPrompt.isEmpty {
+            systemPrompt += "\n\n" + vocabularyPrompt
+        }
+
+        let userMessage = """
+Instructions: Clean up RAW_TRANSCRIPTION and return only the cleaned transcript text without surrounding quotes. Return EMPTY if there should be no result.
+
+CONTEXT: "\(contextSummary)"
+
+RAW_TRANSCRIPTION: "\(transcript)"
+"""
+
+        let promptForDisplay = """
+Model: \(model) [Bedrock]
+
+[System]
+\(systemPrompt)
+
+[User]
+\(userMessage)
+"""
+
+        let payload: [String: Any] = [
+            "model": model,
+            "temperature": 0.0,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userMessage]
+            ]
+        ]
+
+        let body = try JSONSerialization.data(withJSONObject: payload)
+
+        var request = URLRequest(url: endpointURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = postProcessingTimeoutSeconds
+
+        let sigHeaders = AWSSignature.sign(
+            method: "POST",
+            url: endpointURL,
+            headers: ["content-type": "application/json"],
+            body: body,
+            service: "bedrock",
+            region: region,
+            accessKeyId: aws.accessKeyId,
+            secretAccessKey: aws.secretAccessKey,
+            sessionToken: aws.sessionToken
+        )
+        for (k, v) in sigHeaders { request.setValue(v, forHTTPHeaderField: k) }
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw PostProcessingError.invalidResponse("No HTTP response")
+        }
+        guard httpResponse.statusCode == 200 else {
+            let message = String(data: data, encoding: .utf8) ?? ""
+            throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
+        }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
+        }
+
+        let sanitized = sanitizePostProcessedTranscript(content)
+        guard !sanitized.isEmpty else { throw PostProcessingError.emptyOutput }
+
+        return PostProcessingResult(transcript: sanitized, prompt: promptForDisplay)
     }
 
     private func process(

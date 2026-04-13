@@ -150,11 +150,14 @@ final class HotkeyManager {
         )
 
         if ShortcutBinding.modifierKeyCodes.contains(event.keyCode) {
+            // Use actual modifier flags from the event rather than toggling, to avoid
+            // state desync when macOS intercepts fn+media key combos.
+            let isNowPressed = modifierKeyIsPressed(keyCode: event.keyCode, flags: event.modifierFlags)
             var updatedModifierKeyCodes = pressedModifierKeyCodes
-            if updatedModifierKeyCodes.contains(event.keyCode) {
-                updatedModifierKeyCodes.remove(event.keyCode)
-            } else {
+            if isNowPressed {
                 updatedModifierKeyCodes.insert(event.keyCode)
+            } else {
+                updatedModifierKeyCodes.remove(event.keyCode)
             }
             pressedModifierKeyCodes = updatedModifierKeyCodes
         }
@@ -166,6 +169,17 @@ final class HotkeyManager {
         )
         evaluateActiveBindings()
         return shouldConsumeBefore || shouldConsumeAfter
+    }
+
+    private func modifierKeyIsPressed(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> Bool {
+        switch keyCode {
+        case 54, 55: return flags.contains(.command)
+        case 59, 62: return flags.contains(.control)
+        case 58, 61: return flags.contains(.option)
+        case 56, 60: return flags.contains(.shift)
+        case 63:     return flags.contains(.function)
+        default:     return false
+        }
     }
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {

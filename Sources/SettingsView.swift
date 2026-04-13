@@ -4,7 +4,7 @@ import ServiceManagement
 
 // MARK: - Shared Helpers
 
-private struct SettingsCard<Content: View>: View {
+struct SettingsCard<Content: View>: View {
     let title: String
     let icon: String
     let content: Content
@@ -37,6 +37,87 @@ private let iso8601DayFormatter: DateFormatter = {
     formatter.dateFormat = "yyyy-MM-dd"
     return formatter
 }()
+
+// MARK: - Bedrock Model List
+
+struct BedrockModel: Identifiable {
+    let id: String   // Bedrock model ID
+    let label: String
+
+    /// Fetch text-output foundation models from Bedrock in the given region.
+    static func fetch(aws: AWSConfig) async throws -> [BedrockModel] {
+        let url = URL(string: "https://bedrock.\(aws.region).amazonaws.com/foundation-models?byOutputModality=TEXT")!
+        let sigHeaders = AWSSignature.sign(
+            method: "GET",
+            url: url,
+            headers: [:],
+            body: Data(),
+            service: "bedrock",
+            region: aws.region,
+            accessKeyId: aws.accessKeyId,
+            secretAccessKey: aws.secretAccessKey,
+            sessionToken: aws.sessionToken
+        )
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        for (k, v) in sigHeaders { request.setValue(v, forHTTPHeaderField: k) }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "Bedrock \(status): \(body)"])
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let summaries = json["modelSummaries"] as? [[String: Any]] else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        return summaries.compactMap { s -> BedrockModel? in
+            guard let modelId = s["modelId"] as? String,
+                  let modelName = s["modelName"] as? String else { return nil }
+            let provider = s["providerName"] as? String ?? ""
+            let label = provider.isEmpty ? modelName : "\(provider) — \(modelName)"
+            return BedrockModel(id: modelId, label: label)
+        }.sorted { $0.label < $1.label }
+    }
+}
+
+// MARK: - Shared Provider Components
+
+/// Text field with an optional chevron dropdown that populates the field from a fetched model list.
+struct BedrockModelCombobox: View {
+    @Binding var modelInput: String
+    let fetchedModels: [BedrockModel]
+    let isFetching: Bool
+    let onSelect: (BedrockModel) -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            TextField("anthropic.claude-…", text: $modelInput)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+            if !fetchedModels.isEmpty {
+                Menu {
+                    ForEach(fetchedModels) { model in
+                        Button(model.label) { onSelect(model) }
+                    }
+                } label: {
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            } else if isFetching {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .padding(.horizontal, 6)
+            }
+        }
+    }
+}
 
 // MARK: - Settings
 
@@ -75,6 +156,8 @@ struct SettingsView: View {
                 switch appState.selectedSettingsTab {
                 case .general, .none:
                     GeneralSettingsView()
+                case .providers:
+                    ProvidersSettingsView()
                 case .prompts:
                     PromptsSettingsView()
                 case .macros:
@@ -94,11 +177,6 @@ struct GeneralSettingsView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
-    @State private var apiKeyInput: String = ""
-    @State private var apiBaseURLInput: String = ""
-    @State private var isValidatingKey = false
-    @State private var keyValidationError: String?
-    @State private var keyValidationSuccess = false
     @State private var customVocabularyInput: String = ""
     @State private var micPermissionGranted = false
     @StateObject private var githubCache = GitHubMetadataCache.shared
@@ -231,9 +309,6 @@ struct GeneralSettingsView: View {
                 SettingsCard("Updates", icon: "arrow.triangle.2.circlepath") {
                     updatesSection
                 }
-                SettingsCard("API Key", icon: "key.fill") {
-                    apiKeySection
-                }
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
@@ -256,8 +331,6 @@ struct GeneralSettingsView: View {
             .padding(24)
         }
         .onAppear {
-            apiKeyInput = appState.apiKey
-            apiBaseURLInput = appState.apiBaseURL
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             appState.refreshLaunchAtLoginStatus()
@@ -400,90 +473,6 @@ struct GeneralSettingsView: View {
                 .padding(10)
                 .background(Color.blue.opacity(0.1))
                 .cornerRadius(6)
-            }
-        }
-    }
-
-    // MARK: API Key
-
-    private var apiKeySection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("FreeFlow uses Groq's whisper-large-v3 model for transcription.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .disabled(isValidatingKey)
-                    .onChange(of: apiKeyInput) { _ in
-                        keyValidationError = nil
-                        keyValidationSuccess = false
-                    }
-
-                Button(isValidatingKey ? "Validating..." : "Save") {
-                    validateAndSaveKey()
-                }
-                .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
-            }
-
-            if let error = keyValidationError {
-                Label(error, systemImage: "xmark.circle.fill")
-                    .foregroundStyle(.red)
-                    .font(.caption)
-            } else if keyValidationSuccess {
-                Label("API key saved", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.caption)
-            }
-
-            Divider()
-
-            Text("API Base URL")
-                .font(.caption.weight(.semibold))
-
-            Text("Change this to use a different OpenAI-compatible API provider.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onChange(of: apiBaseURLInput) { newValue in
-                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
-                            appState.apiBaseURL = trimmed
-                        }
-                    }
-
-                Button("Reset to Default") {
-                    apiBaseURLInput = "https://api.groq.com/openai/v1"
-                    appState.apiBaseURL = "https://api.groq.com/openai/v1"
-                }
-                .font(.caption)
-            }
-        }
-    }
-
-    private func validateAndSaveKey() {
-        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        isValidatingKey = true
-        keyValidationError = nil
-        keyValidationSuccess = false
-
-        Task {
-            let valid = await TranscriptionService.validateAPIKey(key, baseURL: baseURL.isEmpty ? "https://api.groq.com/openai/v1" : baseURL)
-            await MainActor.run {
-                isValidatingKey = false
-                if valid {
-                    appState.apiKey = key
-                    keyValidationSuccess = true
-                } else {
-                    keyValidationError = "Invalid API key. Please check and try again."
-                }
             }
         }
     }
@@ -714,6 +703,332 @@ struct MicrophoneOptionRow: View {
         }
         .buttonStyle(.plain)
     }
+}
+
+// MARK: - Providers Settings
+
+struct ProvidersSettingsView: View {
+    @EnvironmentObject var appState: AppState
+
+    // Groq
+    @State private var apiKeyInput: String = ""
+    @State private var apiBaseURLInput: String = ""
+    @State private var isValidatingKey = false
+    @State private var keyValidationError: String?
+    @State private var keyValidationSuccess = false
+
+    // AWS
+    @State private var awsAccessKeyInput: String = ""
+    @State private var awsSecretKeyInput: String = ""
+    @State private var awsSessionTokenInput: String = ""
+    @State private var awsRegionInput: String = ""
+
+    // Bedrock model picker
+    @State private var bedrockModelInput: String = ""
+    @State private var fetchedBedrockModels: [BedrockModel] = []
+    @State private var isFetchingModels = false
+    @State private var fetchModelsError: String? = nil
+
+    // Transcribe
+    @State private var transcribeLanguageInput: String = ""
+
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                SettingsCard("Groq", icon: "bolt.fill") {
+                    groqSection
+                }
+                SettingsCard("AWS", icon: "server.rack") {
+                    awsSection
+                }
+                Divider()
+                SettingsCard("Transcription", icon: "waveform") {
+                    transcriptionSection
+                }
+                SettingsCard("Post-processing", icon: "brain") {
+                    llmSection
+                }
+            }
+            .padding(24)
+        }
+        .onAppear {
+            apiKeyInput = appState.apiKey
+            apiBaseURLInput = appState.apiBaseURL
+            awsAccessKeyInput = appState.awsAccessKeyId
+            awsSecretKeyInput = appState.awsSecretAccessKey
+            awsSessionTokenInput = appState.awsSessionToken
+            awsRegionInput = appState.awsRegion
+            bedrockModelInput = appState.bedrockModelId
+            transcribeLanguageInput = appState.transcribeLanguageCode
+            if appState.awsConfig != nil {
+                fetchBedrockModels()
+            }
+        }
+    }
+
+    // MARK: Groq
+
+    private var groqSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("API key for Groq transcription and post-processing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                SecureField("Enter your Groq API key", text: $apiKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .disabled(isValidatingKey)
+                    .onChange(of: apiKeyInput) { _ in
+                        keyValidationError = nil
+                        keyValidationSuccess = false
+                    }
+                Button(isValidatingKey ? "Validating..." : "Save") {
+                    validateAndSaveGroqKey()
+                }
+                .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
+            }
+
+            if let error = keyValidationError {
+                Label(error, systemImage: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            } else if keyValidationSuccess {
+                Label("API key saved", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            }
+
+            Divider()
+
+            Text("API Base URL")
+                .font(.caption.weight(.semibold))
+            Text("Change this to use a different OpenAI-compatible provider.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onChange(of: apiBaseURLInput) { newValue in
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty { appState.apiBaseURL = trimmed }
+                    }
+                Button("Reset") {
+                    apiBaseURLInput = "https://api.groq.com/openai/v1"
+                    appState.apiBaseURL = "https://api.groq.com/openai/v1"
+                }
+                .font(.caption)
+            }
+
+            Divider()
+
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Force HTTP/2 for Transcription")
+                        .font(.caption.weight(.semibold))
+                    Text("Uses curl --http2 for audio uploads. Leave off unless the default transport is failing.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Toggle("", isOn: $appState.forceHTTP2Transcription)
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+            }
+        }
+    }
+
+    private func validateAndSaveGroqKey() {
+        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        isValidatingKey = true
+        keyValidationError = nil
+        keyValidationSuccess = false
+        Task {
+            let valid = await TranscriptionService.validateAPIKey(
+                key,
+                baseURL: baseURL.isEmpty ? "https://api.groq.com/openai/v1" : baseURL
+            )
+            await MainActor.run {
+                isValidatingKey = false
+                if valid {
+                    appState.apiKey = key
+                    keyValidationSuccess = true
+                } else {
+                    keyValidationError = "Invalid API key."
+                }
+            }
+        }
+    }
+
+    // MARK: Transcription
+
+    private var transcriptionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Choose which service transcribes your audio.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("", selection: $appState.transcriptionProvider) {
+                ForEach(TranscriptionProvider.allCases) { provider in
+                    Text(provider.displayName).tag(provider)
+                }
+            }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
+
+            if appState.transcriptionProvider == .awsTranscribe {
+                Divider()
+                Text("Language code (BCP-47, e.g. en-US)")
+                    .font(.caption.weight(.semibold))
+                TextField("en-US", text: $transcribeLanguageInput)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 120)
+                    .onChange(of: transcribeLanguageInput) { newValue in
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty { appState.transcribeLanguageCode = trimmed }
+                    }
+            }
+        }
+    }
+
+    // MARK: LLM
+
+    private var llmSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Choose which model post-processes your transcript.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("", selection: $appState.llmProvider) {
+                ForEach(LLMProvider.allCases) { provider in
+                    Text(provider.displayName).tag(provider)
+                }
+            }
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
+
+            if appState.llmProvider == .awsBedrock {
+                bedrockModelPicker
+            }
+        }
+    }
+
+    // MARK: AWS Credentials
+
+    private var awsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Shared credentials for Amazon Transcribe and AWS Bedrock.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                Text("Access Key ID")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 120, alignment: .leading)
+                TextField("AKIA...", text: $awsAccessKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onChange(of: awsAccessKeyInput) { newValue in
+                        appState.awsAccessKeyId = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        fetchBedrockModelsIfReady()
+                    }
+            }
+            HStack(spacing: 8) {
+                Text("Secret Access Key")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 120, alignment: .leading)
+                SecureField("", text: $awsSecretKeyInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onChange(of: awsSecretKeyInput) { newValue in
+                        appState.awsSecretAccessKey = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        fetchBedrockModelsIfReady()
+                    }
+            }
+            HStack(spacing: 8) {
+                Text("Session Token")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 120, alignment: .leading)
+                SecureField("Optional — for temporary credentials", text: $awsSessionTokenInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onChange(of: awsSessionTokenInput) { newValue in
+                        appState.awsSessionToken = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+            }
+            HStack(spacing: 8) {
+                Text("Region")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 120, alignment: .leading)
+                TextField("us-east-1", text: $awsRegionInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(maxWidth: 160)
+                    .onChange(of: awsRegionInput) { newValue in
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        appState.awsRegion = trimmed
+                        fetchBedrockModelsIfReady()
+                    }
+            }
+        }
+    }
+
+    private func fetchBedrockModelsIfReady() {
+        guard let aws = appState.awsConfig else { return }
+        // Only auto-fetch when all three required fields are non-empty
+        guard !aws.accessKeyId.isEmpty, !aws.secretAccessKey.isEmpty, !aws.region.isEmpty else { return }
+        fetchBedrockModels()
+    }
+
+    // MARK: Bedrock model picker (embedded in LLM section)
+
+    private var bedrockModelPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            BedrockModelCombobox(
+                modelInput: $bedrockModelInput,
+                fetchedModels: fetchedBedrockModels,
+                isFetching: isFetchingModels
+            ) { model in
+                bedrockModelInput = model.id
+                appState.bedrockModelId = model.id
+            }
+            .onChange(of: bedrockModelInput) { newValue in
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { appState.bedrockModelId = trimmed }
+            }
+
+            if let error = fetchModelsError {
+                Label(error, systemImage: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+        }
+    }
+
+    private func fetchBedrockModels() {
+        guard let aws = appState.awsConfig else { return }
+        isFetchingModels = true
+        fetchModelsError = nil
+        Task {
+            do {
+                let models = try await BedrockModel.fetch(aws: aws)
+                await MainActor.run {
+                    fetchedBedrockModels = models
+                    isFetchingModels = false
+                }
+            } catch {
+                await MainActor.run {
+                    fetchModelsError = error.localizedDescription
+                    isFetchingModels = false
+                }
+            }
+        }
+    }
+
 }
 
 // MARK: - Prompts Settings
