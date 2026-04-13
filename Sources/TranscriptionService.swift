@@ -1,4 +1,6 @@
 import AVFoundation
+import AWSTranscribeStreaming
+import SmithyIdentity
 import Foundation
 import os.log
 
@@ -230,128 +232,77 @@ class TranscriptionService {
     // MARK: - Amazon Transcribe
 
     private func transcribeWithAmazon(fileURL: URL, aws: AWSConfig) async throws -> String {
-        // 1. Extract raw PCM from the WAV file
+        // Prepare audio as 16 kHz mono PCM WAV
         let preparedAudio = try prepareAudioForUpload(from: fileURL)
         defer { preparedAudio.cleanup() }
-
         let pcmData = try extractPCMData(from: preparedAudio.fileURL)
 
-        // Debug: save WAV copy
-        try? FileManager.default.copyItem(at: preparedAudio.fileURL, to: URL(fileURLWithPath: "/tmp/freeflow-test.wav"))
+        // Build SDK client with static credentials
+        let credentials = AWSCredentialIdentity(
+            accessKey: aws.accessKeyId,
+            secret: aws.secretAccessKey,
+            sessionToken: aws.sessionToken.flatMap { $0.isEmpty ? nil : $0 }
+        )
+        let credResolver = StaticAWSCredentialIdentityResolver(credentials)
+        let config = try await TranscribeStreamingClient.TranscribeStreamingClientConfiguration(
+            awsCredentialIdentityResolver: credResolver,
+            region: aws.region
+        )
+        let client = TranscribeStreamingClient(config: config)
 
-        // Debug: log WAV file info and PCM bytes
-        if let audioFile = try? AVAudioFile(forReading: preparedAudio.fileURL) {
-            let fmt = audioFile.fileFormat
-            var info = "WAV: rate=\(fmt.sampleRate) ch=\(fmt.channelCount) fmt=\(fmt.commonFormat.rawValue) pcmBytes=\(pcmData.count)"
-            // First 16 bytes of PCM in hex
-            let preview = pcmData.prefix(16).map { String(format: "%02x", $0) }.joined(separator: " ")
-            info += "\nPCM[0..15]: \(preview)"
-            try? info.write(to: URL(fileURLWithPath: "/tmp/freeflow-audio-debug.txt"), atomically: true, encoding: .utf8)
+        // Stream PCM audio in 32 KB chunks
+        let chunkSize = 32 * 1024
+        let audioStream = AsyncThrowingStream<TranscribeStreamingClientTypes.AudioStream, Swift.Error> { continuation in
+            var offset = 0
+            while offset < pcmData.count {
+                let end = min(offset + chunkSize, pcmData.count)
+                let chunk = Data(pcmData[offset..<end])
+                let event = TranscribeStreamingClientTypes.AudioEvent(audioChunk: chunk)
+                continuation.yield(.audioevent(event))
+                offset = end
+            }
+            continuation.finish()
         }
 
-        // 2. Sign the HTTP request (body hash = empty — Transcribe streaming requires this)
-        let langCode = transcribeLanguageCode
-        let endpointURL = URL(string: "https://transcribestreaming.\(aws.region).amazonaws.com/stream-transcription")!
-
-        let extraHeaders: [String: String] = [
-            "content-type": "application/vnd.amazon.eventstream",
-            "x-amzn-transcribe-language-code": langCode,
-            "x-amzn-transcribe-media-encoding": "pcm",
-            "x-amzn-transcribe-sample-rate": "16000"
-        ]
-
-        let signed = AWSSignature.signRequest(
-            method: "POST",
-            url: endpointURL,
-            headers: extraHeaders,
-            body: Data(), // streaming: body hash is hash of empty string
-            service: "transcribe",
-            region: aws.region,
-            accessKeyId: aws.accessKeyId,
-            secretAccessKey: aws.secretAccessKey,
-            sessionToken: aws.sessionToken
+        let langCode = TranscribeStreamingClientTypes.LanguageCode(rawValue: transcribeLanguageCode)
+        let input = StartStreamTranscriptionInput(
+            audioStream: audioStream,
+            languageCode: langCode,
+            mediaEncoding: .pcm,
+            mediaSampleRateHertz: 16000
         )
 
-        // 3. Build event stream body with per-frame chunk signatures
-        let chunkSize = 8 * 1024
-        var body = Data()
-        var priorSig = signed.signatureBytes
-        var chunkOffset = 0
-        while chunkOffset < pcmData.count {
-            let end = min(chunkOffset + chunkSize, pcmData.count)
-            let chunk = Data(pcmData[chunkOffset..<end])
-            let (frame, newSig) = EventStream.signedAudioFrame(
-                audio: chunk,
-                priorSignature: priorSig,
-                signingKey: signed.signingKey,
-                credentialScope: signed.credentialScope
-            )
-            body.append(frame)
-            priorSig = newSig
-            chunkOffset = end
-        }
-        // Empty audio frame signals end of audio stream ("empty frame" per AWS protocol)
-        let (emptyFrame, emptySig) = EventStream.signedAudioFrame(
-            audio: Data(),
-            priorSignature: priorSig,
-            signingKey: signed.signingKey,
-            credentialScope: signed.credentialScope
-        )
-        body.append(emptyFrame)
-        priorSig = emptySig
-        // Terminal "complete signal" frame (signed outer frame with empty payload)
-        body.append(EventStream.signedTerminalFrame(
-            priorSignature: priorSig,
-            signingKey: signed.signingKey,
-            credentialScope: signed.credentialScope
-        ))
+        let output = try await client.startStreamTranscription(input: input)
 
-        // Debug: dump first frame
-        if let firstFrameEnd = body.indices.first.map({ _ in
-            let totalLen = Int((UInt32(body[0]) << 24) | (UInt32(body[1]) << 16) | (UInt32(body[2]) << 8) | UInt32(body[3]))
-            return totalLen
-        }) {
-            let firstFrame = body.prefix(min(firstFrameEnd, 300))
-            let hex = firstFrame.map { String(format: "%02x", $0) }.joined(separator: " ")
-            try? ("First frame (\(firstFrameEnd) bytes):\n" + hex).write(to: URL(fileURLWithPath: "/tmp/freeflow-frame-debug.txt"), atomically: true, encoding: .utf8)
+        guard let transcriptStream = output.transcriptResultStream else {
+            throw TranscriptionError.transcriptionFailed("No transcript stream in response")
         }
 
-        // 4. Build request
-        var request = URLRequest(url: endpointURL)
-        request.httpMethod = "POST"
-        request.timeoutInterval = transcriptionTimeoutSeconds
-        for (k, v) in extraHeaders { request.setValue(v, forHTTPHeaderField: k) }
-        for (k, v) in signed.headers { request.setValue(v, forHTTPHeaderField: k) }
+        var finalSegments: [String] = []
+        var partialSegments: [String] = []
 
-        // 5. Send and receive (body supplied via upload(for:from:), not request.httpBody)
-        let (responseData, response): (Data, URLResponse)
-        do {
-            (responseData, response) = try await URLSession.shared.upload(for: request, from: body)
-        } catch {
-            os_log(.error, log: transcriptionLog, "Transcribe request failed: %{public}@", error.localizedDescription)
-            throw TranscriptionError.submissionFailed(error.localizedDescription)
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw TranscriptionError.submissionFailed("No HTTP response from Transcribe")
-        }
-        guard httpResponse.statusCode == 200 else {
-            let msg = String(data: responseData, encoding: .utf8) ?? ""
-            os_log(.error, log: transcriptionLog, "Transcribe HTTP %ld: %{public}@", httpResponse.statusCode, msg)
-            throw TranscriptionError.submissionFailed("Transcribe status \(httpResponse.statusCode): \(msg)")
+        for try await event in transcriptStream {
+            guard case .transcriptevent(let te) = event,
+                  let results = te.transcript?.results else { continue }
+            for result in results {
+                let isPartial = result.isPartial
+                guard let alts = result.alternatives,
+                      let first = alts.first,
+                      let text = first.transcript,
+                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if isPartial { partialSegments.append(trimmed) }
+                else { finalSegments.append(trimmed) }
+            }
         }
 
-        // 5. Parse response event stream
-        let debugFrames = EventStream.decodeFrames(from: responseData)
-        var debugLog = "Transcribe response: \(responseData.count) bytes, \(debugFrames.count) frames\n"
-        for (i, frame) in debugFrames.enumerated() {
-            let eventType = frame.headers[":event-type"] ?? frame.headers[":exception-type"] ?? "(none)"
-            let msgType = frame.headers[":message-type"] ?? "(none)"
-            let payloadStr = String(data: frame.payload.prefix(512), encoding: .utf8) ?? "(binary)"
-            debugLog += "Frame[\(i)] msg-type=\(msgType) event-type=\(eventType) payload=\(payloadStr)\n"
+        // Prefer final results; fall back to partials (common for short recordings)
+        let segments = finalSegments.isEmpty ? partialSegments : finalSegments
+        let combined = segments.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !combined.isEmpty else {
+            throw TranscriptionError.transcriptionFailed("Transcribe returned no transcript")
         }
-        try? debugLog.write(to: URL(fileURLWithPath: "/tmp/freeflow-transcribe-debug.txt"), atomically: true, encoding: .utf8)
-        return try parseTranscribeEventStream(responseData)
+        return combined
     }
 
     /// Extract raw PCM bytes from a WAV file by scanning for the "data" chunk.
@@ -378,48 +329,6 @@ class TranscriptionService {
             if chunkSize & 1 != 0 { offset += 1 } // WAV chunks are word-aligned
         }
         throw TranscriptionError.audioPreparationFailed("Could not find PCM data chunk in WAV file")
-    }
-
-    /// Parse a Transcribe streaming response (event stream) and return the full transcript.
-    private func parseTranscribeEventStream(_ data: Data) throws -> String {
-        let frames = EventStream.decodeFrames(from: data)
-        var finalSegments: [String] = []
-        var partialSegments: [String] = []
-
-        for frame in frames {
-            guard frame.headers[":event-type"] == "TranscriptEvent" else { continue }
-            guard !frame.payload.isEmpty else { continue }
-
-            guard let json = try? JSONSerialization.jsonObject(with: frame.payload) as? [String: Any],
-                  let outerTranscript = json["Transcript"] as? [String: Any],
-                  let results = outerTranscript["Results"] as? [[String: Any]] else {
-                continue
-            }
-
-            for result in results {
-                let isPartial = result["IsPartial"] as? Bool ?? true
-                guard let alternatives = result["Alternatives"] as? [[String: Any]],
-                      let first = alternatives.first,
-                      let text = first["Transcript"] as? String,
-                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                    continue
-                }
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if isPartial {
-                    partialSegments.append(trimmed)
-                } else {
-                    finalSegments.append(trimmed)
-                }
-            }
-        }
-
-        // Prefer final results; fall back to partials (common for short recordings)
-        let segments = finalSegments.isEmpty ? partialSegments : finalSegments
-        let combined = segments.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !combined.isEmpty else {
-            throw TranscriptionError.transcriptionFailed("Transcribe returned no transcript")
-        }
-        return combined
     }
 
     private func parseTranscript(from data: Data) throws -> String {

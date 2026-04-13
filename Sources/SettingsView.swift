@@ -1,6 +1,8 @@
-import SwiftUI
+import AWSBedrock
 import AVFoundation
+import SmithyIdentity
 import ServiceManagement
+import SwiftUI
 
 // MARK: - Shared Helpers
 
@@ -46,38 +48,25 @@ struct BedrockModel: Identifiable {
 
     /// Fetch text-output foundation models from Bedrock in the given region.
     static func fetch(aws: AWSConfig) async throws -> [BedrockModel] {
-        let url = URL(string: "https://bedrock.\(aws.region).amazonaws.com/foundation-models?byOutputModality=TEXT")!
-        let sigHeaders = AWSSignature.sign(
-            method: "GET",
-            url: url,
-            headers: [:],
-            body: Data(),
-            service: "bedrock",
-            region: aws.region,
-            accessKeyId: aws.accessKeyId,
-            secretAccessKey: aws.secretAccessKey,
-            sessionToken: aws.sessionToken
+        let credentials = AWSCredentialIdentity(
+            accessKey: aws.accessKeyId,
+            secret: aws.secretAccessKey,
+            sessionToken: aws.sessionToken.flatMap { $0.isEmpty ? nil : $0 }
         )
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        for (k, v) in sigHeaders { request.setValue(v, forHTTPHeaderField: k) }
+        let credResolver = StaticAWSCredentialIdentityResolver(credentials)
+        let config = try await BedrockClient.BedrockClientConfiguration(
+            awsCredentialIdentityResolver: credResolver,
+            region: aws.region
+        )
+        let client = BedrockClient(config: config)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "Bedrock \(status): \(body)"])
-        }
+        let input = ListFoundationModelsInput(byOutputModality: .text)
+        let output = try await client.listFoundationModels(input: input)
 
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let summaries = json["modelSummaries"] as? [[String: Any]] else {
-            throw URLError(.cannotParseResponse)
-        }
-
-        return summaries.compactMap { s -> BedrockModel? in
-            guard let modelId = s["modelId"] as? String,
-                  let modelName = s["modelName"] as? String else { return nil }
-            let provider = s["providerName"] as? String ?? ""
+        return (output.modelSummaries ?? []).compactMap { s -> BedrockModel? in
+            guard let modelId = s.modelId else { return nil }
+            let modelName = s.modelName ?? modelId
+            let provider = s.providerName ?? ""
             let label = provider.isEmpty ? modelName : "\(provider) — \(modelName)"
             return BedrockModel(id: modelId, label: label)
         }.sorted { $0.label < $1.label }

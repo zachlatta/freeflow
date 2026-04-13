@@ -1,4 +1,6 @@
+import AWSBedrockRuntime
 import Foundation
+import SmithyIdentity
 
 enum PostProcessingError: LocalizedError {
     case requestFailed(Int, String)
@@ -227,8 +229,6 @@ Output hygiene:
         }
 
         let model = config.bedrockModelId
-        let region = aws.region
-        let endpointURL = URL(string: "https://bedrock-runtime.\(region).amazonaws.com/v1/chat/completions")!
 
         let normalizedVocabulary = normalizedVocabularyText(customVocabulary)
         let vocabularyPrompt = normalizedVocabulary.isEmpty ? "" : """
@@ -262,52 +262,44 @@ Model: \(model) [Bedrock]
 \(userMessage)
 """
 
-        let payload: [String: Any] = [
-            "model": model,
-            "temperature": 0.0,
-            "messages": [
-                ["role": "system", "content": systemPrompt],
-                ["role": "user", "content": userMessage]
-            ]
-        ]
-
-        let body = try JSONSerialization.data(withJSONObject: payload)
-
-        var request = URLRequest(url: endpointURL)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = postProcessingTimeoutSeconds
-
-        let sigHeaders = AWSSignature.sign(
-            method: "POST",
-            url: endpointURL,
-            headers: ["content-type": "application/json"],
-            body: body,
-            service: "bedrock",
-            region: region,
-            accessKeyId: aws.accessKeyId,
-            secretAccessKey: aws.secretAccessKey,
-            sessionToken: aws.sessionToken
+        // Build SDK client with static credentials
+        let credentials = AWSCredentialIdentity(
+            accessKey: aws.accessKeyId,
+            secret: aws.secretAccessKey,
+            sessionToken: aws.sessionToken.flatMap { $0.isEmpty ? nil : $0 }
         )
-        for (k, v) in sigHeaders { request.setValue(v, forHTTPHeaderField: k) }
-        request.httpBody = body
+        let credResolver = StaticAWSCredentialIdentityResolver(credentials)
+        let clientConfig = try await BedrockRuntimeClient.BedrockRuntimeClientConfiguration(
+            awsCredentialIdentityResolver: credResolver,
+            region: aws.region
+        )
+        let client = BedrockRuntimeClient(config: clientConfig)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw PostProcessingError.invalidResponse("No HTTP response")
-        }
-        guard httpResponse.statusCode == 200 else {
-            let message = String(data: data, encoding: .utf8) ?? ""
-            throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
+        let messages = [BedrockRuntimeClientTypes.Message(
+            content: [.text(userMessage)],
+            role: .user
+        )]
+        let systemContent = [BedrockRuntimeClientTypes.SystemContentBlock.text(systemPrompt)]
+        let inferenceConfig = BedrockRuntimeClientTypes.InferenceConfiguration(temperature: 0.0)
+
+        let converseInput = ConverseInput(
+            inferenceConfig: inferenceConfig,
+            messages: messages,
+            modelId: model,
+            system: systemContent
+        )
+
+        let response = try await client.converse(input: converseInput)
+
+        guard let outputEnum = response.output,
+              case .message(let responseMessage) = outputEnum else {
+            throw PostProcessingError.invalidResponse("Unexpected Bedrock output type")
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let firstChoice = choices.first,
-              let message = firstChoice["message"] as? [String: Any],
-              let content = message["content"] as? String else {
-            throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
-        }
+        let content = responseMessage.content?.compactMap { block -> String? in
+            guard case .text(let t) = block else { return nil }
+            return t
+        }.joined() ?? ""
 
         let sanitized = sanitizePostProcessedTranscript(content)
         guard !sanitized.isEmpty else { throw PostProcessingError.emptyOutput }
