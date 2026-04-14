@@ -36,6 +36,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     private let maxScreenshotDataURILength = 500_000
     private let screenshotCompressionPrimary = 0.5
     private let screenshotMaxDimension: CGFloat = 1024
+    private let contextRequestTimeoutSeconds: TimeInterval = 20
 
     init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1", customContextPrompt: String = "") {
         self.apiKey = apiKey
@@ -155,6 +156,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         do {
             var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
             request.httpMethod = "POST"
+            request.timeoutInterval = contextRequestTimeoutSeconds
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -205,7 +207,7 @@ Selected text: \(selectedText ?? "None")
             ]
 
             request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await LLMAPITransport.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
                 return nil
             }

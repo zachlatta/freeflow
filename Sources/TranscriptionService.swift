@@ -7,17 +7,15 @@ private let transcriptionLog = OSLog(subsystem: "com.zachlatta.freeflow", catego
 class TranscriptionService {
     private let apiKey: String
     private let baseURL: String
-    private let forceHTTP2: Bool
     private let transcriptionModel = "whisper-large-v3"
     private let transcriptionResponseFormat = "verbose_json"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
     private let uploadSampleRate = 16_000.0
     private let uploadChannelCount: AVAudioChannelCount = 1
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1", forceHTTP2: Bool = false) {
+    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
         self.apiKey = apiKey
         self.baseURL = baseURL
-        self.forceHTTP2 = forceHTTP2
     }
 
     // Validate API key by hitting a lightweight endpoint
@@ -26,10 +24,11 @@ class TranscriptionService {
         guard !trimmed.isEmpty else { return false }
 
         var request = URLRequest(url: URL(string: "\(baseURL)/models")!)
+        request.timeoutInterval = 10
         request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
 
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (_, response) = try await LLMAPITransport.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             return status == 200
         } catch {
@@ -39,24 +38,14 @@ class TranscriptionService {
 
     // Upload audio file, submit for transcription, poll until done, return text
     func transcribe(fileURL: URL) async throws -> String {
-        return try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask { [weak self] in
-                guard let self else {
-                    throw TranscriptionError.submissionFailed("Service deallocated")
-                }
-                return try await self.transcribeAudio(fileURL: fileURL)
-            }
+        guard !Task.isCancelled else {
+            throw CancellationError()
+        }
 
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(self.transcriptionTimeoutSeconds * 1_000_000_000))
-                throw TranscriptionError.transcriptionTimedOut(self.transcriptionTimeoutSeconds)
-            }
-
-            guard let result = try await group.next() else {
-                throw TranscriptionError.submissionFailed("No transcription result")
-            }
-            group.cancelAll()
-            return result
+        do {
+            return try await transcribeAudio(fileURL: fileURL)
+        } catch let urlError as URLError where urlError.code == .timedOut {
+            throw TranscriptionError.transcriptionTimedOut(transcriptionTimeoutSeconds)
         }
     }
 
@@ -65,9 +54,6 @@ class TranscriptionService {
         let preparedAudio = try prepareAudioForUpload(from: fileURL)
         defer { preparedAudio.cleanup() }
 
-        if forceHTTP2 {
-            return try await transcribeAudioWithCurl(fileURL: preparedAudio.fileURL)
-        }
         return try await transcribeAudioWithURLSession(fileURL: preparedAudio.fileURL)
     }
 
@@ -75,6 +61,7 @@ class TranscriptionService {
         let url = URL(string: "\(baseURL)/audio/transcriptions")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = transcriptionTimeoutSeconds
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         let boundary = UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -88,18 +75,17 @@ class TranscriptionService {
             boundary: boundary
         )
 
-        let data: Data
-        let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.upload(for: request, from: body)
+            let (data, response) = try await LLMAPITransport.upload(for: request, from: body)
+            return try validateTranscriptionResponse(data: data, response: response, fileURL: fileURL)
         } catch {
             let nsError = error as NSError
             os_log(
                 .error,
                 log: transcriptionLog,
-                "URLSession upload failed for %{public}@ (transport=%{public}@, bytes=%{public}lld): domain=%{public}@ code=%ld desc=%{public}@",
+                "URLSession upload failed for %{public}@ after %ld attempt(s) (bytes=%{public}lld): domain=%{public}@ code=%ld desc=%{public}@",
                 fileURL.lastPathComponent,
-                "urlsession-default",
+                LLMAPITransport.defaultMaxAttempts,
                 fileSizeBytes(for: fileURL),
                 nsError.domain,
                 nsError.code,
@@ -107,7 +93,9 @@ class TranscriptionService {
             )
             throw error
         }
+    }
 
+    private func validateTranscriptionResponse(data: Data, response: URLResponse, fileURL: URL) throws -> String {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw TranscriptionError.submissionFailed("No response from server")
         }
@@ -117,10 +105,9 @@ class TranscriptionService {
             os_log(
                 .error,
                 log: transcriptionLog,
-                "URLSession upload returned HTTP %ld for %{public}@ (transport=%{public}@, bytes=%{public}lld)",
+                "URLSession upload returned HTTP %ld for %{public}@ (bytes=%{public}lld)",
                 httpResponse.statusCode,
                 fileURL.lastPathComponent,
-                "urlsession-default",
                 fileSizeBytes(for: fileURL)
             )
             throw TranscriptionError.submissionFailed("Status \(httpResponse.statusCode): \(responseBody)")
@@ -128,57 +115,6 @@ class TranscriptionService {
 
         return try parseTranscript(from: data)
     }
-
-    private func transcribeAudioWithCurl(fileURL: URL) async throws -> String {
-        try await Task.detached(priority: .userInitiated) { [apiKey, transcriptionModel, transcriptionResponseFormat] in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-            process.arguments = [
-                "--silent",
-                "--show-error",
-                "--fail",
-                "--http2",
-                "--max-time", String(Int(self.transcriptionTimeoutSeconds)),
-                "\(self.baseURL)/audio/transcriptions",
-                "-H", "Authorization: Bearer \(apiKey)",
-                "-F", "model=\(transcriptionModel)",
-                "-F", "response_format=\(transcriptionResponseFormat)",
-                "-F", "file=@\(fileURL.path);type=\(self.audioContentType(for: fileURL.lastPathComponent))"
-            ]
-
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
-
-            try process.run()
-            process.waitUntilExit()
-
-            let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-            let errorText = String(data: errorData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            guard process.terminationStatus == 0 else {
-                os_log(
-                    .error,
-                    log: transcriptionLog,
-                    "curl upload failed for %{public}@ (transport=%{public}@, bytes=%{public}lld): exit=%d%{public}@",
-                    fileURL.lastPathComponent,
-                    "http2-curl",
-                    self.fileSizeBytes(for: fileURL),
-                    process.terminationStatus,
-                    errorText.isEmpty ? "" : " stderr=\(errorText)"
-                )
-                throw TranscriptionError.submissionFailed(
-                    "curl transport failed with exit \(process.terminationStatus): \(errorText)"
-                )
-            }
-
-            return try self.parseTranscript(from: outputData)
-        }.value
-    }
-
     private func audioContentType(for fileName: String) -> String {
         if fileName.lowercased().hasSuffix(".wav") {
             return "audio/wav"
