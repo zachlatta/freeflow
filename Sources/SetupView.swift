@@ -962,7 +962,8 @@ struct SetupView: View {
                 }
                 do {
                     let recorder = AudioRecorder()
-                    recorder.onRecordingFailure = { error in
+                    recorder.onRecordingFailure = { [weak recorder] error in
+                        guard let recorder else { return }
                         testAudioLevelCancellable?.cancel()
                         testAudioLevelCancellable = nil
                         testAudioLevel = 0.0
