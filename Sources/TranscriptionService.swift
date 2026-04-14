@@ -9,6 +9,7 @@ class TranscriptionService {
     private let baseURL: String
     private let forceHTTP2: Bool
     private let transcriptionModel = "whisper-large-v3"
+    private let transcriptionResponseFormat = "verbose_json"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
     private let uploadSampleRate = 16_000.0
     private let uploadChannelCount: AVAudioChannelCount = 1
@@ -83,6 +84,7 @@ class TranscriptionService {
             audioData: audioData,
             fileName: fileURL.lastPathComponent,
             model: transcriptionModel,
+            responseFormat: transcriptionResponseFormat,
             boundary: boundary
         )
 
@@ -128,7 +130,7 @@ class TranscriptionService {
     }
 
     private func transcribeAudioWithCurl(fileURL: URL) async throws -> String {
-        try await Task.detached(priority: .userInitiated) { [apiKey, transcriptionModel] in
+        try await Task.detached(priority: .userInitiated) { [apiKey, transcriptionModel, transcriptionResponseFormat] in
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
             process.arguments = [
@@ -140,6 +142,7 @@ class TranscriptionService {
                 "\(self.baseURL)/audio/transcriptions",
                 "-H", "Authorization: Bearer \(apiKey)",
                 "-F", "model=\(transcriptionModel)",
+                "-F", "response_format=\(transcriptionResponseFormat)",
                 "-F", "file=@\(fileURL.path);type=\(self.audioContentType(for: fileURL.lastPathComponent))"
             ]
 
@@ -194,7 +197,13 @@ class TranscriptionService {
         return (attributes?[.size] as? NSNumber)?.int64Value ?? -1
     }
 
-    private func makeMultipartBody(audioData: Data, fileName: String, model: String, boundary: String) -> Data {
+    private func makeMultipartBody(
+        audioData: Data,
+        fileName: String,
+        model: String,
+        responseFormat: String,
+        boundary: String
+    ) -> Data {
         var body = Data()
 
         func append(_ value: String) {
@@ -204,6 +213,10 @@ class TranscriptionService {
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"model\"\r\n\r\n")
         append("\(model)\r\n")
+
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n")
+        append("\(responseFormat)\r\n")
 
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
@@ -240,9 +253,26 @@ class TranscriptionService {
             && format.commonFormat == .pcmFormatInt16
     }
 
+    // Whisper-large-v3 hallucinates common short phrases on silence/background
+    // noise. Drop them when whisper itself reports a high no_speech_prob.
+    // Add a new (phrase, minNoSpeechProb) pair here to filter more hallucinations.
+    //
+    // Thresholds tuned on ~500 samples from quiet and noisy environments, including
+    // both positive cases (real "thank you" speech) and empty-audio cases. Kept
+    // conservative to minimize false positives (filtering real user speech).
+    // Normal speech included audios have very low no_speech_prob.
+    private let hallucinationPhrases: [(phrase: String, minNoSpeechProb: Double)] = [
+        ("thank you", 0.06),
+        ("thank you very much", 0.06),
+        ("thank you so much", 0.06)
+    ]
+
     private func parseTranscript(from data: Data) throws -> String {
         if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
            let text = json["text"] as? String {
+            if isHallucination(text: text, json: json) {
+                return ""
+            }
             return text
         }
 
@@ -256,6 +286,20 @@ class TranscriptionService {
         }
 
         return text
+    }
+
+    private func isHallucination(text: String, json: [String: Any]) -> Bool {
+        let normalized = text
+            .lowercased()
+            .trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines))
+        guard let match = hallucinationPhrases.first(where: { $0.phrase == normalized }) else {
+            return false
+        }
+        guard let segments = json["segments"] as? [[String: Any]],
+              let noSpeechProb = segments.first?["no_speech_prob"] as? Double else {
+            return false
+        }
+        return noSpeechProb >= match.minNoSpeechProb
     }
 }
 
