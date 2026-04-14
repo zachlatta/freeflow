@@ -12,9 +12,27 @@ struct AppContext {
     let screenshotDataURL: String?
     let screenshotMimeType: String?
     let screenshotError: String?
+    let inferenceError: String?
 
     var contextSummary: String {
         currentActivity
+    }
+}
+
+enum AppContextInferenceError: LocalizedError {
+    case transportFailed(String)
+    case requestFailed(Int, String)
+    case invalidResponse(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .transportFailed(let details):
+            return "Context inference transport failed: \(details)"
+        case .requestFailed(let statusCode, let details):
+            return "Context inference failed with status \(statusCode): \(details)"
+        case .invalidResponse(let details):
+            return "Context inference returned an invalid response: \(details)"
+        }
     }
 }
 
@@ -62,7 +80,8 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 contextPrompt: nil,
                 screenshotDataURL: nil,
                 screenshotMimeType: nil,
-                screenshotError: "No frontmost application"
+                screenshotError: "No frontmost application",
+                inferenceError: nil
             )
         }
 
@@ -79,17 +98,31 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         )
         let currentActivity: String
         let contextPrompt: String?
+        let inferenceError: String?
         if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if let result = await inferActivityWithLLM(
-                appName: appName,
-                bundleIdentifier: bundleIdentifier,
-                windowTitle: windowTitle,
-                selectedText: selectedText,
-                screenshotDataURL: screenshot.dataURL
-            ) {
-                currentActivity = result.activity
-                contextPrompt = result.prompt
-            } else {
+            do {
+                if let result = try await inferActivityWithLLM(
+                    appName: appName,
+                    bundleIdentifier: bundleIdentifier,
+                    windowTitle: windowTitle,
+                    selectedText: selectedText,
+                    screenshotDataURL: screenshot.dataURL
+                ) {
+                    currentActivity = result.activity
+                    contextPrompt = result.prompt
+                    inferenceError = nil
+                } else {
+                    currentActivity = fallbackCurrentActivity(
+                        appName: appName,
+                        bundleIdentifier: bundleIdentifier,
+                        selectedText: selectedText,
+                        windowTitle: windowTitle,
+                        screenshotAvailable: screenshot.dataURL != nil
+                    )
+                    contextPrompt = nil
+                    inferenceError = nil
+                }
+            } catch {
                 currentActivity = fallbackCurrentActivity(
                     appName: appName,
                     bundleIdentifier: bundleIdentifier,
@@ -98,6 +131,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                     screenshotAvailable: screenshot.dataURL != nil
                 )
                 contextPrompt = nil
+                inferenceError = error.localizedDescription
             }
         } else {
             currentActivity = fallbackCurrentActivity(
@@ -108,6 +142,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 screenshotAvailable: screenshot.dataURL != nil
             )
             contextPrompt = nil
+            inferenceError = nil
         }
 
         return AppContext(
@@ -119,7 +154,8 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             contextPrompt: contextPrompt,
             screenshotDataURL: screenshot.dataURL,
             screenshotMimeType: screenshot.mimeType,
-            screenshotError: screenshot.error
+            screenshotError: screenshot.error,
+            inferenceError: inferenceError
         )
     }
 
@@ -129,26 +165,32 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         windowTitle: String?,
         selectedText: String?,
         screenshotDataURL: String?
-    ) async -> (activity: String, prompt: String)? {
+    ) async throws -> (activity: String, prompt: String)? {
         let modelsToTry = [
             screenshotDataURL != nil ? visionModel : fallbackTextModel,
             fallbackTextModel
         ]
+        var lastError: Error?
 
         for model in modelsToTry {
             let screenshotPayload = model == visionModel ? screenshotDataURL : nil
-            if let inferred = await inferActivityWithLLM(
-                appName: appName,
-                bundleIdentifier: bundleIdentifier,
-                windowTitle: windowTitle,
-                selectedText: selectedText,
-                screenshotDataURL: screenshotPayload,
-                model: model
-            ) {
-                return inferred
+            do {
+                return try await inferActivityWithLLM(
+                    appName: appName,
+                    bundleIdentifier: bundleIdentifier,
+                    windowTitle: windowTitle,
+                    selectedText: selectedText,
+                    screenshotDataURL: screenshotPayload,
+                    model: model
+                )
+            } catch {
+                lastError = error
             }
         }
 
+        if let lastError {
+            throw lastError
+        }
         return nil
     }
 
@@ -159,102 +201,113 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         selectedText: String?,
         screenshotDataURL: String?,
         model: String
-    ) async -> (activity: String, prompt: String)? {
-        do {
-            var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.timeoutInterval = requestTimeoutSeconds
+    ) async throws -> (activity: String, prompt: String) {
+        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = requestTimeoutSeconds
 
-            let metadata = """
+        let metadata = """
 App: \(appName ?? "Unknown")
 Bundle ID: \(bundleIdentifier ?? "Unknown")
 Window: \(windowTitle ?? "Unknown")
 Selected text: \(selectedText ?? "None")
 """
 
-            let systemPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? Self.defaultContextPrompt
-                : customContextPrompt
+        let systemPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? Self.defaultContextPrompt
+            : customContextPrompt
 
-            let textOnlyPrompt = "Analyze the context and infer the user's current activity in exactly two sentences.\n\n\(metadata)"
-            var userMessageDescription: String
-            var userMessage: Any = textOnlyPrompt
+        let textOnlyPrompt = "Analyze the context and infer the user's current activity in exactly two sentences.\n\n\(metadata)"
+        var userMessageDescription: String
+        var userMessage: Any = textOnlyPrompt
 
-            if let screenshotDataURL {
-                userMessageDescription = "[screenshot attached]\nAnalyze the screenshot plus metadata to infer current activity.\n\(metadata)"
-                userMessage = [
-                    [
-                        "type": "text",
-                        "text": "Analyze the screenshot plus metadata to infer current activity."
-                    ],
-                    [
-                        "type": "text",
-                        "text": metadata
-                    ],
-                    [
-                        "type": "image_url",
-                        "image_url": ["url": screenshotDataURL]
-                    ]
-                ]
-            } else {
-                userMessageDescription = textOnlyPrompt
-            }
-
-            let fullPrompt = "Model: \(model)\n\n[System]\n\(systemPrompt)\n[User]\n\(userMessageDescription)"
-
-            let payload: [String: Any] = [
-                "model": model,
-                "temperature": 0.2,
-                "messages": [
-                    ["role": "system", "content": systemPrompt],
-                    ["role": "user", "content": userMessage]
+        if let screenshotDataURL {
+            userMessageDescription = "[screenshot attached]\nAnalyze the screenshot plus metadata to infer current activity.\n\(metadata)"
+            userMessage = [
+                [
+                    "type": "text",
+                    "text": "Analyze the screenshot plus metadata to infer current activity."
+                ],
+                [
+                    "type": "text",
+                    "text": metadata
+                ],
+                [
+                    "type": "image_url",
+                    "image_url": ["url": screenshotDataURL]
                 ]
             ]
+        } else {
+            userMessageDescription = textOnlyPrompt
+        }
 
-            let requestBody = try JSONSerialization.data(withJSONObject: payload, options: [])
-            request.httpBody = requestBody
+        let fullPrompt = "Model: \(model)\n\n[System]\n\(systemPrompt)\n[User]\n\(userMessageDescription)"
 
-            let data: Data
-            if forceHTTP2 {
-                let response = try await HTTP2CurlTransport.sendJSONRequest(
-                    url: request.url!.absoluteString,
-                    headers: [
-                        "Authorization: Bearer \(apiKey)",
-                        "Content-Type: application/json"
-                    ],
-                    body: requestBody,
-                    timeoutSeconds: requestTimeoutSeconds
+        let payload: [String: Any] = [
+            "model": model,
+            "temperature": 0.2,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userMessage]
+            ]
+        ]
+
+        let requestBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        request.httpBody = requestBody
+
+        let data: Data
+        if forceHTTP2 {
+            let response = try await HTTP2CurlTransport.sendJSONRequest(
+                url: request.url!.absoluteString,
+                headers: [
+                    "Authorization: Bearer \(apiKey)",
+                    "Content-Type: application/json"
+                ],
+                body: requestBody,
+                timeoutSeconds: requestTimeoutSeconds
+            )
+            guard response.statusCode == 200 else {
+                throw AppContextInferenceError.requestFailed(
+                    response.statusCode,
+                    responseBodyDescription(from: response.data)
                 )
-                guard response.statusCode == 200 else {
-                    return nil
-                }
-                data = response.data
-            } else {
+            }
+            data = response.data
+        } else {
+            do {
                 let (responseData, response) = try await URLSession.shared.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
-                    return nil
+                    throw AppContextInferenceError.invalidResponse("No HTTP response")
                 }
                 guard httpResponse.statusCode == 200 else {
-                    return nil
+                    throw AppContextInferenceError.requestFailed(
+                        httpResponse.statusCode,
+                        responseBodyDescription(from: responseData)
+                    )
                 }
                 data = responseData
+            } catch let error as AppContextInferenceError {
+                throw error
+            } catch {
+                throw AppContextInferenceError.transportFailed(error.localizedDescription)
             }
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = json["choices"] as? [[String: Any]],
-                  let firstChoice = choices.first,
-                  let message = firstChoice["message"] as? [String: Any],
-                  let content = message["content"] as? String else {
-                return nil
-            }
-
-            let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !cleaned.isEmpty else { return nil }
-            return (activity: normalizedActivitySummary(cleaned), prompt: fullPrompt)
-        } catch {
-            return nil
         }
+
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            throw AppContextInferenceError.invalidResponse("Missing choices[0].message.content")
+        }
+
+        let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else {
+            throw AppContextInferenceError.invalidResponse("Model returned empty content")
+        }
+        return (activity: normalizedActivitySummary(cleaned), prompt: fullPrompt)
     }
 
     private func normalizedActivitySummary(_ value: String) -> String {
@@ -269,6 +322,12 @@ Selected text: \(selectedText ?? "None")
 
         let firstTwo = sentences.prefix(2)
         return firstTwo.joined(separator: ". ") + "."
+    }
+
+    private func responseBodyDescription(from data: Data) -> String {
+        let responseText = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return responseText.isEmpty ? "<empty response body>" : responseText
     }
 
     private func fallbackCurrentActivity(

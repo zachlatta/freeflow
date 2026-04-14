@@ -582,7 +582,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             contextPrompt: item.contextPrompt,
             screenshotDataURL: item.contextScreenshotDataURL,
             screenshotMimeType: item.contextScreenshotDataURL != nil ? "image/jpeg" : nil,
-            screenshotError: nil
+            screenshotError: nil,
+            inferenceError: nil
         )
 
         let transcriptionService = TranscriptionService(
@@ -1393,7 +1394,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.lastContextScreenshotDataURL = context.screenshotDataURL
                 self.lastContextScreenshotStatus = context.screenshotError
                     ?? "available (\(context.screenshotMimeType ?? "image"))"
-                self.lastPostProcessingStatus = "App context captured"
+                self.lastPostProcessingStatus = context.inferenceError.map {
+                    "App context fallback used: \($0)"
+                } ?? "App context captured"
                 self.handleScreenshotCaptureIssue(context.screenshotError)
             }
             return context
@@ -1412,7 +1415,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,
-            screenshotError: "No app context captured before stop"
+            screenshotError: "No app context captured before stop",
+            inferenceError: nil
         )
     }
 

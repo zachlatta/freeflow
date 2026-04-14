@@ -978,7 +978,8 @@ struct PromptsSettingsView: View {
             contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,
-            screenshotError: nil
+            screenshotError: nil,
+            inferenceError: nil
         )
 
         Task {
@@ -1191,7 +1192,8 @@ struct PromptsSettingsView: View {
                     contextTestOutput = context.contextSummary
                     contextTestPrompt = prompt
                 } else {
-                    contextTestError = "Context inference returned no result. This may be a permissions issue or the API could not be reached."
+                    contextTestError = context.inferenceError
+                        ?? "Context inference returned no result. This may be a permissions issue or the API could not be reached."
                     contextTestOutput = context.contextSummary
                 }
                 contextTestRunning = false

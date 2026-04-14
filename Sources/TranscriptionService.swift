@@ -41,24 +41,27 @@ private final class PipeDataBuffer: @unchecked Sendable {
 }
 
 enum HTTP2CurlTransport {
+    private static let httpStatusMarker = "FREEFLOW_HTTP_STATUS:"
+
     private static func runProcessAndCollectOutput(
         _ process: Process,
+        stdinData: Data? = nil,
         stdout: Pipe,
         stderr: Pipe
-    ) throws -> (terminationStatus: Int32, statusData: Data, errorData: Data) {
-        let statusDataBuffer = PipeDataBuffer()
+    ) throws -> (terminationStatus: Int32, outputData: Data, errorData: Data) {
+        let outputDataBuffer = PipeDataBuffer()
         let errorDataBuffer = PipeDataBuffer()
-        let statusEOF = DispatchSemaphore(value: 0)
+        let outputEOF = DispatchSemaphore(value: 0)
         let errorEOF = DispatchSemaphore(value: 0)
 
         stdout.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
             if chunk.isEmpty {
                 handle.readabilityHandler = nil
-                statusEOF.signal()
+                outputEOF.signal()
                 return
             }
-            statusDataBuffer.append(chunk)
+            outputDataBuffer.append(chunk)
         }
 
         stderr.fileHandleForReading.readabilityHandler = { handle in
@@ -77,16 +80,40 @@ enum HTTP2CurlTransport {
         }
 
         try process.run()
+        if let stdinPipe = process.standardInput as? Pipe, let stdinData {
+            defer { stdinPipe.fileHandleForWriting.closeFile() }
+            do {
+                try stdinPipe.fileHandleForWriting.write(contentsOf: stdinData)
+            } catch {
+                throw HTTP2CurlTransportError.executionFailed(
+                    -1,
+                    "Failed to write request body: \(error.localizedDescription)"
+                )
+            }
+        }
         process.waitUntilExit()
 
-        statusEOF.wait()
+        outputEOF.wait()
         errorEOF.wait()
 
         return (
             terminationStatus: process.terminationStatus,
-            statusData: statusDataBuffer.snapshot(),
+            outputData: outputDataBuffer.snapshot(),
             errorData: errorDataBuffer.snapshot()
         )
+    }
+
+    private static func extractStatusAndError(from errorData: Data) -> (statusText: String?, errorText: String) {
+        let stderrText = String(data: errorData, encoding: .utf8) ?? ""
+        guard let markerRange = stderrText.range(of: httpStatusMarker, options: .backwards) else {
+            return (nil, stderrText.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+
+        let errorText = String(stderrText[..<markerRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let statusText = String(stderrText[markerRange.upperBound...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (statusText, errorText)
     }
 
     static func sendJSONRequest(
@@ -96,73 +123,59 @@ enum HTTP2CurlTransport {
         body: Data,
         timeoutSeconds: TimeInterval
     ) async throws -> HTTP2CurlResponse {
-        try await Task.detached(priority: .userInitiated) {
-            let fileManager = FileManager.default
-            let tempDirectory = fileManager.temporaryDirectory
-            let requestBodyURL = tempDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("json")
-            let responseBodyURL = tempDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("json")
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
 
-            defer {
-                try? fileManager.removeItem(at: requestBodyURL)
-                try? fileManager.removeItem(at: responseBodyURL)
-            }
+        var arguments = [
+            "--silent",
+            "--show-error",
+            "--http2",
+            "--request", method,
+            "--max-time", String(Int(ceil(timeoutSeconds))),
+            "--write-out", "%{stderr}\(httpStatusMarker)%{http_code}",
+            url
+        ]
+        for header in headers {
+            arguments.append(contentsOf: ["-H", header])
+        }
+        arguments.append(contentsOf: ["--data-binary", "@-"])
+        process.arguments = arguments
 
-            try body.write(to: requestBodyURL, options: .atomic)
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
 
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-
-            var arguments = [
-                "--silent",
-                "--show-error",
-                "--http2",
-                "--request", method,
-                "--max-time", String(Int(ceil(timeoutSeconds))),
-                "--output", responseBodyURL.path,
-                "--write-out", "%{http_code}",
-                url
-            ]
-            for header in headers {
-                arguments.append(contentsOf: ["-H", header])
-            }
-            arguments.append(contentsOf: ["--data-binary", "@\(requestBodyURL.path)"])
-            process.arguments = arguments
-
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
-
-            let result = try runProcessAndCollectOutput(process, stdout: stdout, stderr: stderr)
-            let statusData = result.statusData
-            let errorData = result.errorData
-            let errorText = String(data: errorData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            guard result.terminationStatus == 0 else {
-                throw HTTP2CurlTransportError.executionFailed(result.terminationStatus, errorText)
-            }
-
-            let statusText = String(data: statusData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard let statusCode = Int(statusText) else {
-                throw HTTP2CurlTransportError.invalidStatusCode(statusText)
-            }
-
-            let responseData: Data
-            do {
-                responseData = try Data(contentsOf: responseBodyURL)
-            } catch {
-                throw HTTP2CurlTransportError.executionFailed(
-                    -1,
-                    "Failed to read response file: \(error.localizedDescription)"
+        return try await Task {
+            try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                let result = try runProcessAndCollectOutput(
+                    process,
+                    stdinData: body,
+                    stdout: stdout,
+                    stderr: stderr
                 )
+                try Task.checkCancellation()
+
+                let outputData = result.outputData
+                let (statusText, errorText) = extractStatusAndError(from: result.errorData)
+                guard result.terminationStatus == 0 else {
+                    throw HTTP2CurlTransportError.executionFailed(result.terminationStatus, errorText)
+                }
+                guard let statusText else {
+                    throw HTTP2CurlTransportError.invalidStatusCode("missing HTTP status")
+                }
+                guard let statusCode = Int(statusText) else {
+                    throw HTTP2CurlTransportError.invalidStatusCode(statusText)
+                }
+                return HTTP2CurlResponse(data: outputData, statusCode: statusCode)
+            } onCancel: {
+                if process.isRunning {
+                    process.terminate()
+                }
             }
-            return HTTP2CurlResponse(data: responseData, statusCode: statusCode)
         }.value
     }
 }
@@ -293,52 +306,59 @@ class TranscriptionService {
     }
 
     private func transcribeAudioWithCurl(fileURL: URL) async throws -> String {
-        try await Task.detached(priority: .userInitiated) { [apiKey, transcriptionModel, transcriptionResponseFormat] in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-            process.arguments = [
-                "--silent",
-                "--show-error",
-                "--fail",
-                "--http2",
-                "--max-time", String(Int(self.transcriptionTimeoutSeconds)),
-                "\(self.baseURL)/audio/transcriptions",
-                "-H", "Authorization: Bearer \(apiKey)",
-                "-F", "model=\(transcriptionModel)",
-                "-F", "response_format=\(transcriptionResponseFormat)",
-                "-F", "file=@\(fileURL.path);type=\(self.audioContentType(for: fileURL.lastPathComponent))"
-            ]
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+        process.arguments = [
+            "--silent",
+            "--show-error",
+            "--fail",
+            "--http2",
+            "--max-time", String(Int(self.transcriptionTimeoutSeconds)),
+            "\(self.baseURL)/audio/transcriptions",
+            "-H", "Authorization: Bearer \(apiKey)",
+            "-F", "model=\(transcriptionModel)",
+            "-F", "response_format=\(transcriptionResponseFormat)",
+            "-F", "file=@\(fileURL.path);type=\(self.audioContentType(for: fileURL.lastPathComponent))"
+        ]
 
-            let stdout = Pipe()
-            let stderr = Pipe()
-            process.standardOutput = stdout
-            process.standardError = stderr
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
 
-            try process.run()
-            process.waitUntilExit()
+        return try await Task {
+            try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                let result = try HTTP2CurlTransport.runProcessAndCollectOutput(process, stdout: stdout, stderr: stderr)
+                try Task.checkCancellation()
 
-            let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-            let errorText = String(data: errorData, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let outputData = result.outputData
+                let errorData = result.errorData
+                let errorText = String(data: errorData, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
-            guard process.terminationStatus == 0 else {
-                os_log(
-                    .error,
-                    log: transcriptionLog,
-                    "curl upload failed for %{public}@ (transport=%{public}@, bytes=%{public}lld): exit=%d%{public}@",
-                    fileURL.lastPathComponent,
-                    "http2-curl",
-                    self.fileSizeBytes(for: fileURL),
-                    process.terminationStatus,
-                    errorText.isEmpty ? "" : " stderr=\(errorText)"
-                )
-                throw TranscriptionError.submissionFailed(
-                    "curl transport failed with exit \(process.terminationStatus): \(errorText)"
-                )
+                guard result.terminationStatus == 0 else {
+                    os_log(
+                        .error,
+                        log: transcriptionLog,
+                        "curl upload failed for %{public}@ (transport=%{public}@, bytes=%{public}lld): exit=%d%{public}@",
+                        fileURL.lastPathComponent,
+                        "http2-curl",
+                        self.fileSizeBytes(for: fileURL),
+                        result.terminationStatus,
+                        errorText.isEmpty ? "" : " stderr=\(errorText)"
+                    )
+                    throw TranscriptionError.submissionFailed(
+                        "curl transport failed with exit \(result.terminationStatus): \(errorText)"
+                    )
+                }
+
+                return try self.parseTranscript(from: outputData)
+            } onCancel: {
+                if process.isRunning {
+                    process.terminate()
+                }
             }
-
-            return try self.parseTranscript(from: outputData)
         }.value
     }
 
