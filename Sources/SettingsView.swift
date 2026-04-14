@@ -469,9 +469,9 @@ struct GeneralSettingsView: View {
 
             HStack(alignment: .center, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Force HTTP/2 for Transcription")
+                    Text("Force HTTP/2 for API Requests")
                         .font(.caption.weight(.semibold))
-                    Text("Uses `curl --http2` for audio transcription uploads. Leave this off unless the default transport is failing.")
+                    Text("Uses `curl --http2` for transcription uploads, context inference, and post-processing. Leave this off unless the default transport is failing.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -960,7 +960,11 @@ struct PromptsSettingsView: View {
         systemTestError = nil
         systemTestPrompt = nil
 
-        let service = PostProcessingService(apiKey: appState.apiKey, baseURL: appState.apiBaseURL)
+        let service = PostProcessingService(
+            apiKey: appState.apiKey,
+            baseURL: appState.apiBaseURL,
+            forceHTTP2: appState.forceHTTP2Transcription
+        )
         let input = systemTestInput
         let customPrompt = appState.customSystemPrompt
         let vocabulary = appState.customVocabulary
@@ -1176,7 +1180,8 @@ struct PromptsSettingsView: View {
         let service = AppContextService(
             apiKey: appState.apiKey,
             baseURL: appState.apiBaseURL,
-            customContextPrompt: appState.customContextPrompt
+            customContextPrompt: appState.customContextPrompt,
+            forceHTTP2: appState.forceHTTP2Transcription
         )
 
         Task {

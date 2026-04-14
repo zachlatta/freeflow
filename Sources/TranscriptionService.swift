@@ -4,6 +4,169 @@ import os.log
 
 private let transcriptionLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Transcription")
 
+struct HTTP2CurlResponse {
+    let data: Data
+    let statusCode: Int
+}
+
+enum HTTP2CurlTransportError: LocalizedError {
+    case executionFailed(Int32, String)
+    case invalidStatusCode(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .executionFailed(let exitCode, let details):
+            return "curl transport failed with exit \(exitCode): \(details)"
+        case .invalidStatusCode(let value):
+            return "curl transport returned an invalid HTTP status code: \(value)"
+        }
+    }
+}
+
+private final class PipeDataBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        data.append(chunk)
+        lock.unlock()
+    }
+
+    func snapshot() -> Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return data
+    }
+}
+
+enum HTTP2CurlTransport {
+    private static func runProcessAndCollectOutput(
+        _ process: Process,
+        stdout: Pipe,
+        stderr: Pipe
+    ) throws -> (terminationStatus: Int32, statusData: Data, errorData: Data) {
+        let statusDataBuffer = PipeDataBuffer()
+        let errorDataBuffer = PipeDataBuffer()
+        let statusEOF = DispatchSemaphore(value: 0)
+        let errorEOF = DispatchSemaphore(value: 0)
+
+        stdout.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil
+                statusEOF.signal()
+                return
+            }
+            statusDataBuffer.append(chunk)
+        }
+
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil
+                errorEOF.signal()
+                return
+            }
+            errorDataBuffer.append(chunk)
+        }
+
+        defer {
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+        }
+
+        try process.run()
+        process.waitUntilExit()
+
+        statusEOF.wait()
+        errorEOF.wait()
+
+        return (
+            terminationStatus: process.terminationStatus,
+            statusData: statusDataBuffer.snapshot(),
+            errorData: errorDataBuffer.snapshot()
+        )
+    }
+
+    static func sendJSONRequest(
+        url: String,
+        method: String = "POST",
+        headers: [String],
+        body: Data,
+        timeoutSeconds: TimeInterval
+    ) async throws -> HTTP2CurlResponse {
+        try await Task.detached(priority: .userInitiated) {
+            let fileManager = FileManager.default
+            let tempDirectory = fileManager.temporaryDirectory
+            let requestBodyURL = tempDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("json")
+            let responseBodyURL = tempDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("json")
+
+            defer {
+                try? fileManager.removeItem(at: requestBodyURL)
+                try? fileManager.removeItem(at: responseBodyURL)
+            }
+
+            try body.write(to: requestBodyURL, options: .atomic)
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+
+            var arguments = [
+                "--silent",
+                "--show-error",
+                "--http2",
+                "--request", method,
+                "--max-time", String(Int(ceil(timeoutSeconds))),
+                "--output", responseBodyURL.path,
+                "--write-out", "%{http_code}",
+                url
+            ]
+            for header in headers {
+                arguments.append(contentsOf: ["-H", header])
+            }
+            arguments.append(contentsOf: ["--data-binary", "@\(requestBodyURL.path)"])
+            process.arguments = arguments
+
+            let stdout = Pipe()
+            let stderr = Pipe()
+            process.standardOutput = stdout
+            process.standardError = stderr
+
+            let result = try runProcessAndCollectOutput(process, stdout: stdout, stderr: stderr)
+            let statusData = result.statusData
+            let errorData = result.errorData
+            let errorText = String(data: errorData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            guard result.terminationStatus == 0 else {
+                throw HTTP2CurlTransportError.executionFailed(result.terminationStatus, errorText)
+            }
+
+            let statusText = String(data: statusData, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard let statusCode = Int(statusText) else {
+                throw HTTP2CurlTransportError.invalidStatusCode(statusText)
+            }
+
+            let responseData: Data
+            do {
+                responseData = try Data(contentsOf: responseBodyURL)
+            } catch {
+                throw HTTP2CurlTransportError.executionFailed(
+                    -1,
+                    "Failed to read response file: \(error.localizedDescription)"
+                )
+            }
+            return HTTP2CurlResponse(data: responseData, statusCode: statusCode)
+        }.value
+    }
+}
+
 class TranscriptionService {
     private let apiKey: String
     private let baseURL: String

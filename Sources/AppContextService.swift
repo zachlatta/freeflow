@@ -31,16 +31,24 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     private let apiKey: String
     private let baseURL: String
     private let customContextPrompt: String
+    private let forceHTTP2: Bool
     private let fallbackTextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let visionModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let maxScreenshotDataURILength = 500_000
     private let screenshotCompressionPrimary = 0.5
     private let screenshotMaxDimension: CGFloat = 1024
+    private let requestTimeoutSeconds: TimeInterval = 20
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1", customContextPrompt: String = "") {
+    init(
+        apiKey: String,
+        baseURL: String = "https://api.groq.com/openai/v1",
+        customContextPrompt: String = "",
+        forceHTTP2: Bool = false
+    ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.customContextPrompt = customContextPrompt
+        self.forceHTTP2 = forceHTTP2
     }
 
     func collectContext() async -> AppContext {
@@ -157,6 +165,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             request.httpMethod = "POST"
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = requestTimeoutSeconds
 
             let metadata = """
 App: \(appName ?? "Unknown")
@@ -204,13 +213,33 @@ Selected text: \(selectedText ?? "None")
                 ]
             ]
 
-            request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse else {
-                return nil
-            }
-            guard httpResponse.statusCode == 200 else {
-                return nil
+            let requestBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+            request.httpBody = requestBody
+
+            let data: Data
+            if forceHTTP2 {
+                let response = try await HTTP2CurlTransport.sendJSONRequest(
+                    url: request.url!.absoluteString,
+                    headers: [
+                        "Authorization: Bearer \(apiKey)",
+                        "Content-Type: application/json"
+                    ],
+                    body: requestBody,
+                    timeoutSeconds: requestTimeoutSeconds
+                )
+                guard response.statusCode == 200 else {
+                    return nil
+                }
+                data = response.data
+            } else {
+                let (responseData, response) = try await URLSession.shared.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    return nil
+                }
+                guard httpResponse.statusCode == 200 else {
+                    return nil
+                }
+                data = responseData
             }
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let choices = json["choices"] as? [[String: Any]],

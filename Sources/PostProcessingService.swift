@@ -91,14 +91,16 @@ Output hygiene:
 
     private let apiKey: String
     private let baseURL: String
+    private let forceHTTP2: Bool
     private let defaultModel = "openai/gpt-oss-20b"
     private let fallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let postProcessingMaxCompletionTokens = 4096
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
+    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1", forceHTTP2: Bool = false) {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.forceHTTP2 = forceHTTP2
     }
 
     func postProcess(
@@ -247,16 +249,35 @@ Model: \(model)
             payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
         }
 
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let requestBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+        request.httpBody = requestBody
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw PostProcessingError.invalidResponse("No HTTP response")
+        let data: Data
+        let statusCode: Int
+        if forceHTTP2 {
+            let response = try await HTTP2CurlTransport.sendJSONRequest(
+                url: request.url!.absoluteString,
+                headers: [
+                    "Authorization: Bearer \(apiKey)",
+                    "Content-Type: application/json"
+                ],
+                body: requestBody,
+                timeoutSeconds: postProcessingTimeoutSeconds
+            )
+            data = response.data
+            statusCode = response.statusCode
+        } else {
+            let (responseData, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw PostProcessingError.invalidResponse("No HTTP response")
+            }
+            data = responseData
+            statusCode = httpResponse.statusCode
         }
 
-        guard httpResponse.statusCode == 200 else {
+        guard statusCode == 200 else {
             let message = String(data: data, encoding: .utf8) ?? ""
-            throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
+            throw PostProcessingError.requestFailed(statusCode, message)
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],

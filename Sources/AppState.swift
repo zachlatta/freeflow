@@ -143,14 +143,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var apiKey: String {
         didSet {
             persistAPIKey(apiKey)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            rebuildContextService()
         }
     }
 
     @Published var apiBaseURL: String {
         didSet {
             persistAPIBaseURL(apiBaseURL)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            rebuildContextService()
         }
     }
 
@@ -195,7 +195,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var customContextPrompt: String {
         didSet {
             UserDefaults.standard.set(customContextPrompt, forKey: customContextPromptStorageKey)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            rebuildContextService()
         }
     }
 
@@ -226,6 +226,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var forceHTTP2Transcription: Bool {
         didSet {
             UserDefaults.standard.set(forceHTTP2Transcription, forKey: forceHTTP2TranscriptionStorageKey)
+            rebuildContextService()
         }
     }
 
@@ -353,7 +354,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
-        self.contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+        self.contextService = AppContextService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            customContextPrompt: customContextPrompt,
+            forceHTTP2: forceHTTP2Transcription
+        )
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
         self.apiBaseURL = apiBaseURL
@@ -477,6 +483,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private func rebuildContextService() {
+        contextService = AppContextService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            customContextPrompt: customContextPrompt,
+            forceHTTP2: forceHTTP2Transcription
+        )
+    }
+
     private func persistShortcut(_ binding: ShortcutBinding, key: String) {
         guard let data = try? JSONEncoder().encode(binding) else { return }
         UserDefaults.standard.set(data, forKey: key)
@@ -575,7 +590,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
             baseURL: apiBaseURL,
             forceHTTP2: forceHTTP2Transcription
         )
-        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+        let postProcessingService = PostProcessingService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            forceHTTP2: forceHTTP2Transcription
+        )
         let capturedCustomVocabulary = customVocabulary
         let capturedCustomSystemPrompt = customSystemPrompt
 
@@ -1206,7 +1225,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
             baseURL: apiBaseURL,
             forceHTTP2: forceHTTP2Transcription
         )
-        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+        let postProcessingService = PostProcessingService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            forceHTTP2: forceHTTP2Transcription
+        )
 
         Task {
             do {
