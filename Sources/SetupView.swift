@@ -962,8 +962,21 @@ struct SetupView: View {
                 }
                 do {
                     let recorder = AudioRecorder()
+                    recorder.onRecordingFailure = { error in
+                        testAudioLevelCancellable?.cancel()
+                        testAudioLevelCancellable = nil
+                        testAudioLevel = 0.0
+                        testHotkeyHarness.isTranscribing = false
+                        testAudioRecorder = nil
+                        testError = error.localizedDescription
+                        withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                            testPhase = .done
+                        }
+                        recorder.cleanup()
+                    }
                     try recorder.startRecording(deviceUID: appState.selectedMicrophoneID)
                     testAudioRecorder = recorder
+                    testError = nil
                     testAudioLevelCancellable = recorder.$audioLevel
                         .receive(on: DispatchQueue.main)
                         .sink { level in
@@ -993,7 +1006,10 @@ struct SetupView: View {
                 recorder.stopRecording { url in
                     guard let url else {
                         testHotkeyHarness.isTranscribing = false
-                        testError = "No audio file was created."
+                        testAudioRecorder = nil
+                        if testError == nil {
+                            testError = "No audio file was created."
+                        }
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                             testPhase = .done
                         }
@@ -1011,6 +1027,7 @@ struct SetupView: View {
                             let transcript = try await service.transcribe(fileURL: url)
                             await MainActor.run {
                                 testHotkeyHarness.isTranscribing = false
+                                testAudioRecorder = nil
                                 testTranscript = transcript
                                 withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
                                     testPhase = .done
@@ -1019,6 +1036,7 @@ struct SetupView: View {
                         } catch {
                             await MainActor.run {
                                 testHotkeyHarness.isTranscribing = false
+                                testAudioRecorder = nil
                                 testError = error.localizedDescription
                                 withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
                                     testPhase = .done
