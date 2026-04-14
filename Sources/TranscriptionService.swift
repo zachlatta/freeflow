@@ -83,9 +83,8 @@ class TranscriptionService {
             os_log(
                 .error,
                 log: transcriptionLog,
-                "URLSession upload failed for %{public}@ after %ld attempt(s) (bytes=%{public}lld): domain=%{public}@ code=%ld desc=%{public}@",
+                "URLSession upload failed for %{public}@ (bytes=%{public}lld): domain=%{public}@ code=%ld desc=%{public}@",
                 fileURL.lastPathComponent,
-                LLMAPITransport.defaultMaxAttempts,
                 fileSizeBytes(for: fileURL),
                 nsError.domain,
                 nsError.code,
