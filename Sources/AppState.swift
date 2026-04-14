@@ -126,7 +126,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let preserveClipboardStorageKey = "preserve_clipboard"
-    private let forceHTTP2TranscriptionStorageKey = "force_http2_transcription"
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
     private let soundVolumeStorageKey = "sound_volume"
     private let voiceMacrosStorageKey = "voice_macros"
@@ -223,12 +222,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    @Published var forceHTTP2Transcription: Bool {
-        didSet {
-            UserDefaults.standard.set(forceHTTP2Transcription, forKey: forceHTTP2TranscriptionStorageKey)
-        }
-    }
-
     @Published var alertSoundsEnabled: Bool {
         didSet {
             UserDefaults.standard.set(alertSoundsEnabled, forKey: alertSoundsEnabledStorageKey)
@@ -303,6 +296,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var isCapturingShortcut = false
 
     init() {
+        UserDefaults.standard.removeObject(forKey: "force_http2_transcription")
         let hasCompletedSetup = UserDefaults.standard.bool(forKey: "hasCompletedSetup")
         let apiKey = Self.loadStoredAPIKey(account: apiKeyStorageKey)
         let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
@@ -323,7 +317,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let preserveClipboard = UserDefaults.standard.object(forKey: preserveClipboardStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
-        let forceHTTP2Transcription = UserDefaults.standard.bool(forKey: forceHTTP2TranscriptionStorageKey)
         let soundVolume: Float = UserDefaults.standard.object(forKey: soundVolumeStorageKey) != nil
             ? UserDefaults.standard.float(forKey: soundVolumeStorageKey) : 1.0
         let alertSoundsEnabled = UserDefaults.standard.object(forKey: alertSoundsEnabledStorageKey) != nil
@@ -368,7 +361,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.customContextPromptLastModified = customContextPromptLastModified
         self.shortcutStartDelay = shortcutStartDelay
         self.preserveClipboard = preserveClipboard
-        self.forceHTTP2Transcription = forceHTTP2Transcription
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
         self.voiceMacros = initialMacros
@@ -572,8 +564,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let transcriptionService = TranscriptionService(
             apiKey: apiKey,
-            baseURL: apiBaseURL,
-            forceHTTP2: forceHTTP2Transcription
+            baseURL: apiBaseURL
         )
         let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
         let capturedCustomVocabulary = customVocabulary
@@ -1203,8 +1194,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let transcriptionService = TranscriptionService(
             apiKey: apiKey,
-            baseURL: apiBaseURL,
-            forceHTTP2: forceHTTP2Transcription
+            baseURL: apiBaseURL
         )
         let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
 
