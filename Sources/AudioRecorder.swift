@@ -263,14 +263,14 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         currentDeviceUID = nil
     }
 
-    private func reportRecordingFailure(_ error: Error) {
+    private func reportRecordingFailure(_ error: Error, completion: ((URL?) -> Void)? = nil) {
         sessionQueue.async {
             guard !self.failureReported else { return }
             self.failureReported = true
             self.cancelWatchdog()
             self._recording.withLock { $0 = false }
 
-            let completion = self.pendingStopCompletion
+            let completion = completion ?? self.pendingStopCompletion
             self.pendingStopCompletion = nil
             let discardURL = self.tempFileURL
             self.shouldDiscardRecording = false
@@ -571,21 +571,31 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             let shouldDiscardRecording = self.shouldDiscardRecording
             self.shouldDiscardRecording = false
             self.cancelWatchdog()
+
+            if let error {
+                if !shouldDiscardRecording {
+                    os_log(.error, log: recordingLog, "file output finished with error: %{public}@", error.localizedDescription)
+                    self.reportRecordingFailure(
+                        AudioRecorderError.failedToBeginFileRecording(error.localizedDescription),
+                        completion: completion
+                    )
+                } else {
+                    self.teardownSessionLocked()
+                    self.tempFileURL = nil
+                    try? FileManager.default.removeItem(at: outputFileURL)
+                    DispatchQueue.main.async {
+                        self.isRecording = false
+                        self.audioLevel = 0.0
+                    }
+                }
+                return
+            }
+
             self.teardownSessionLocked()
 
             DispatchQueue.main.async {
                 self.isRecording = false
                 self.audioLevel = 0.0
-            }
-
-            if let error {
-                if !shouldDiscardRecording {
-                    os_log(.error, log: recordingLog, "file output finished with error: %{public}@", error.localizedDescription)
-                    self.reportRecordingFailure(AudioRecorderError.failedToBeginFileRecording(error.localizedDescription))
-                } else {
-                    try? FileManager.default.removeItem(at: outputFileURL)
-                }
-                return
             }
 
             if shouldDiscardRecording {

@@ -1013,9 +1013,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
         }
         audioRecorder.onRecordingFailure = { [weak self] error in
-            guard let self else { return }
-            initTimer.cancel()
-            self.handleRecordingFailure(error)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                initTimer.cancel()
+                self.handleRecordingFailure(error)
+            }
         }
 
         // Start engine on background thread so UI isn't blocked

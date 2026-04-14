@@ -997,6 +997,7 @@ struct SetupView: View {
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                             testPhase = .done
                         }
+                        recorder.cleanup()
                         return
                     }
 
