@@ -1475,7 +1475,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
             // Permission errors are fatal — stop recording
             audioRecorder.cancelRecording()
-            audioRecorder.cleanup()
             audioLevelCancellable?.cancel()
             audioLevelCancellable = nil
             contextCaptureTask?.cancel()

@@ -1046,7 +1046,6 @@ struct SetupView: View {
         testAudioLevelCancellable = nil
         if let recorder = testAudioRecorder, recorder.isRecording {
             recorder.cancelRecording()
-            recorder.cleanup()
         }
         testAudioRecorder = nil
     }
@@ -1063,7 +1062,6 @@ struct SetupView: View {
             if recorder.isRecording {
                 recorder.cancelRecording()
             }
-            recorder.cleanup()
             testAudioRecorder = nil
         }
     }
