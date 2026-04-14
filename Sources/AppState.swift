@@ -1054,6 +1054,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         capturedContext = nil
         audioRecorder.cleanup()
         isRecording = false
+        isTranscribing = false
         activeRecordingTriggerMode = nil
         shortcutSessionController.reset()
         errorMessage = formattedRecordingStartError(error)
@@ -1191,6 +1192,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         lastContextScreenshotDataURL = nil
         lastContextScreenshotStatus = "No screenshot"
         isRecording = false
+        isTranscribing = true
         statusText = "Preparing audio..."
         errorMessage = nil
         playAlertSound(named: "Pop")
@@ -1198,6 +1200,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioRecorder.stopRecording { [weak self] fileURL in
             guard let self else { return }
             guard let fileURL else {
+                self.isTranscribing = false
                 self.audioRecorder.cleanup()
                 self.errorMessage = "No audio recorded"
                 self.statusText = "Error"
@@ -1207,7 +1210,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
             let savedAudioFile = Self.saveAudioFile(from: fileURL)
             let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
-            self.isTranscribing = true
             self.statusText = "Transcribing..."
             self.debugStatusMessage = "Transcribing audio"
 

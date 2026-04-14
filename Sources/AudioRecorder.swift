@@ -148,6 +148,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private let sampleBufferQueue = DispatchQueue(label: "com.zachlatta.freeflow.capture.samples")
     private var pendingStopCompletion: ((URL?) -> Void)?
     private var shouldDiscardRecording = false
+    private var isSessionInterrupted = false
 
     @Published var isRecording = false
     private let _recording = OSAllocatedUnfairLock(initialState: false)
@@ -235,10 +236,18 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             object: session,
             queue: nil
         ) { [weak self] notification in
-            _ = notification
-            self?.reportRecordingFailure(AudioRecorderError.failedToStartCaptureSession("Capture session interrupted."))
+            self?.handleSessionInterrupted(notification)
         }
         sessionObservers.append(interruptionObserver)
+
+        let interruptionEndedObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.interruptionEndedNotification,
+            object: session,
+            queue: nil
+        ) { [weak self] notification in
+            self?.handleSessionInterruptionEnded(notification)
+        }
+        sessionObservers.append(interruptionEndedObserver)
     }
 
     private func removeSessionObservers() {
@@ -250,6 +259,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
 
     private func teardownSessionLocked() {
         removeSessionObservers()
+        isSessionInterrupted = false
 
         audioDataOutput?.setSampleBufferDelegate(nil, queue: nil)
         if let session = captureSession, session.isRunning {
@@ -290,6 +300,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     }
 
     private func startBufferWatchdog() {
+        let baselineCount = _bufferCount.withLock { $0 }
         cancelWatchdog()
 
         let timer = DispatchSource.makeTimerSource(queue: sessionQueue)
@@ -297,13 +308,17 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             guard self._recording.withLock({ $0 }) else { return }
+            guard !self.isSessionInterrupted else {
+                os_log(.info, log: recordingLog, "watchdog suspended while capture session is interrupted")
+                return
+            }
 
             let count = self._bufferCount.withLock { $0 }
-            if count == 0 {
-                os_log(.error, log: recordingLog, "watchdog: 0 buffers after %.1fs — giving up", Self.watchdogTimeout)
+            if count == baselineCount {
+                os_log(.error, log: recordingLog, "watchdog: no new buffers after %.1fs — giving up", Self.watchdogTimeout)
                 self.reportRecordingFailure(AudioRecorderError.noAudioBuffersReceived)
             } else {
-                os_log(.info, log: recordingLog, "watchdog: %d buffers after %.1fs — healthy", count, Self.watchdogTimeout)
+                os_log(.info, log: recordingLog, "watchdog: %d new buffers after %.1fs — healthy", count - baselineCount, Self.watchdogTimeout)
             }
         }
         timer.resume()
@@ -313,6 +328,26 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private func cancelWatchdog() {
         watchdogTimer?.cancel()
         watchdogTimer = nil
+    }
+
+    private func handleSessionInterrupted(_ notification: Notification) {
+        _ = notification
+        sessionQueue.async {
+            guard self._recording.withLock({ $0 }) else { return }
+            self.isSessionInterrupted = true
+            self.cancelWatchdog()
+            os_log(.info, log: recordingLog, "capture session interrupted — waiting for recovery")
+        }
+    }
+
+    private func handleSessionInterruptionEnded(_ notification: Notification) {
+        _ = notification
+        sessionQueue.async {
+            guard self._recording.withLock({ $0 }) else { return }
+            self.isSessionInterrupted = false
+            os_log(.info, log: recordingLog, "capture session interruption ended — restarting watchdog")
+            self.startBufferWatchdog()
+        }
     }
 
     private func makeSession(deviceUID: String?, outputURL: URL) throws {
@@ -372,6 +407,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         audioFileOutput = fileOutput
         audioDataOutput = dataOutput
         currentDeviceUID = device.uniqueID
+        isSessionInterrupted = false
         installSessionObservers(for: session)
 
         os_log(.info, log: recordingLog, "configured capture session with device %{public}@ [uid=%{public}@]", device.localizedName, device.uniqueID)
@@ -571,8 +607,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             let shouldDiscardRecording = self.shouldDiscardRecording
             self.shouldDiscardRecording = false
             self.cancelWatchdog()
+            let recordingSuccessfullyFinished = (error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool ?? false
 
-            if let error {
+            if let error, !recordingSuccessfullyFinished {
                 if !shouldDiscardRecording {
                     os_log(.error, log: recordingLog, "file output finished with error: %{public}@", error.localizedDescription)
                     self.reportRecordingFailure(
@@ -589,6 +626,10 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
                     }
                 }
                 return
+            }
+
+            if let error {
+                os_log(.info, log: recordingLog, "file output finished with recoverable stop status: %{public}@", error.localizedDescription)
             }
 
             self.teardownSessionLocked()
