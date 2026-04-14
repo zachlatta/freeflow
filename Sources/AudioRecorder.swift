@@ -134,6 +134,7 @@ enum AudioRecorderError: LocalizedError {
 }
 
 final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputSampleBufferDelegate, AVCaptureFileOutputRecordingDelegate {
+    private static let sessionQueueKey = DispatchSpecificKey<UInt8>()
     private var captureSession: AVCaptureSession?
     private var currentInput: AVCaptureDeviceInput?
     private var audioFileOutput: AVCaptureAudioFileOutput?
@@ -149,6 +150,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private var pendingStopCompletion: ((URL?) -> Void)?
     private var shouldDiscardRecording = false
     private var isSessionInterrupted = false
+    private var hasFileRecordingStarted = false
+    private var shouldStopOnceFileRecordingStarts = false
 
     @Published var isRecording = false
     private let _recording = OSAllocatedUnfairLock(initialState: false)
@@ -162,10 +165,21 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private static let watchdogTimeout: TimeInterval = 2.0
     private static let sampleRateLogLimit = 40
 
+    override init() {
+        super.init()
+        sessionQueue.setSpecific(key: Self.sessionQueueKey, value: 1)
+    }
+
     deinit {
-        sessionQueue.sync {
+        let cleanup = {
             self.cancelWatchdog()
             self.teardownSessionLocked()
+        }
+
+        if DispatchQueue.getSpecific(key: Self.sessionQueueKey) != nil {
+            cleanup()
+        } else {
+            sessionQueue.sync(execute: cleanup)
         }
     }
 
@@ -260,6 +274,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private func teardownSessionLocked() {
         removeSessionObservers()
         isSessionInterrupted = false
+        hasFileRecordingStarted = false
+        shouldStopOnceFileRecordingStarts = false
 
         audioDataOutput?.setSampleBufferDelegate(nil, queue: nil)
         if let session = captureSession, session.isRunning {
@@ -328,6 +344,19 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private func cancelWatchdog() {
         watchdogTimer?.cancel()
         watchdogTimer = nil
+    }
+
+    private func stopFileOutputIfPossibleLocked() -> Bool {
+        guard let fileOutput = audioFileOutput else { return false }
+
+        if hasFileRecordingStarted || fileOutput.isRecording {
+            fileOutput.stopRecording()
+        } else {
+            shouldStopOnceFileRecordingStarts = true
+            os_log(.info, log: recordingLog, "stop requested before file output started — waiting for didStart callback")
+        }
+
+        return true
     }
 
     private func handleSessionInterrupted(_ notification: Notification) {
@@ -435,6 +464,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         failureReported = false
         shouldDiscardRecording = false
         pendingStopCompletion = nil
+        hasFileRecordingStarted = false
+        shouldStopOnceFileRecordingStarts = false
         smoothedLevel = 0.0
 
         os_log(.info, log: recordingLog, "startRecording() entered")
@@ -472,8 +503,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             self.pendingStopCompletion = completion
             self.shouldDiscardRecording = false
 
-            if let fileOutput = self.audioFileOutput, fileOutput.isRecording {
-                fileOutput.stopRecording()
+            if self.stopFileOutputIfPossibleLocked() {
+                return
             } else {
                 let outputURL = self.tempFileURL
                 self.pendingStopCompletion = nil
@@ -494,8 +525,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             self.pendingStopCompletion = nil
             self.shouldDiscardRecording = true
 
-            if let fileOutput = self.audioFileOutput, fileOutput.isRecording {
-                fileOutput.stopRecording()
+            if self.stopFileOutputIfPossibleLocked() {
+                return
             } else {
                 let discardURL = self.tempFileURL
                 self.tempFileURL = nil
@@ -592,7 +623,15 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         didStartRecordingTo outputFileURL: URL,
         from connections: [AVCaptureConnection]
     ) {
-        os_log(.info, log: recordingLog, "file output started writing to %{public}@", outputFileURL.path)
+        sessionQueue.async {
+            self.hasFileRecordingStarted = true
+            os_log(.info, log: recordingLog, "file output started writing to %{public}@", outputFileURL.path)
+
+            guard self.shouldStopOnceFileRecordingStarts else { return }
+
+            self.shouldStopOnceFileRecordingStarts = false
+            output.stopRecording()
+        }
     }
 
     func fileOutput(
