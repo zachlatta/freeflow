@@ -1,7 +1,6 @@
 import Foundation
 import ApplicationServices
 import AppKit
-import Darwin
 
 struct AppContext {
     let appName: String?
@@ -17,31 +16,6 @@ struct AppContext {
     var contextSummary: String {
         currentActivity
     }
-}
-
-private typealias CGWindowListCreateImageCompat = @convention(c) (
-    CGRect,
-    CGWindowListOption,
-    CGWindowID,
-    CGWindowImageOption
-) -> Unmanaged<CGImage>?
-
-private func cgWindowListCreateImageCompat(
-    screenBounds: CGRect,
-    listOption: CGWindowListOption,
-    windowID: CGWindowID,
-    imageOption: CGWindowImageOption
-) -> CGImage? {
-    struct Loader {
-        static let function: CGWindowListCreateImageCompat? = {
-            guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "CGWindowListCreateImage") else {
-                return nil
-            }
-            return unsafeBitCast(symbol, to: CGWindowListCreateImageCompat.self)
-        }()
-    }
-
-    return Loader.function?(screenBounds, listOption, windowID, imageOption)?.takeRetainedValue()
 }
 
 final class AppContextService {
@@ -475,11 +449,11 @@ Selected text: \(selectedText ?? "None")
             }
         }
 
-        guard let fullScreenImage = cgWindowListCreateImageCompat(
-            screenBounds: CGRect.infinite,
-            listOption: .optionOnScreenOnly,
-            windowID: kCGNullWindowID,
-            imageOption: [.bestResolution]
+        guard let fullScreenImage = CGWindowListCreateImage(
+            CGRect.infinite,
+            .optionOnScreenOnly,
+            kCGNullWindowID,
+            [.bestResolution]
         ) else {
             return (nil, nil, "Could not capture screenshot (screen recording permission or window access issue)")
         }
@@ -505,11 +479,11 @@ Selected text: \(selectedText ?? "None")
         compression: Double? = nil,
         maxDimension: CGFloat? = nil
     ) -> String? {
-        guard let image = cgWindowListCreateImageCompat(
-            screenBounds: .null,
-            listOption: .optionIncludingWindow,
-            windowID: windowID,
-            imageOption: [.bestResolution]
+        guard let image = CGWindowListCreateImage(
+            .null,
+            .optionIncludingWindow,
+            windowID,
+            [.bestResolution]
         ) else {
             return nil
         }
