@@ -261,11 +261,14 @@ class TranscriptionService {
     // both positive cases (real "thank you" speech) and empty-audio cases. Kept
     // conservative to minimize false positives (filtering real user speech).
     // Normal speech included audios have very low no_speech_prob.
-    private let hallucinationPhrases: [(phrase: String, minNoSpeechProb: Double)] = [
-        ("thank you", 0.06),
-        ("thank you very much", 0.06),
-        ("thank you so much", 0.06)
+    private let hallucinationPhrases = [
+        "thank you",
+        "thank you very much",
+        "thank you so much",
+        "you"
     ]
+
+    private let hallucinationNoSpeechThreshold = 0.1
 
     private func parseTranscript(from data: Data) throws -> String {
         if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -292,14 +295,14 @@ class TranscriptionService {
         let normalized = text
             .lowercased()
             .trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines))
-        guard let match = hallucinationPhrases.first(where: { $0.phrase == normalized }) else {
+        guard hallucinationPhrases.contains(normalized) else {
             return false
         }
         guard let segments = json["segments"] as? [[String: Any]],
               let noSpeechProb = segments.first?["no_speech_prob"] as? Double else {
             return false
         }
-        return noSpeechProb >= match.minNoSpeechProb
+        return noSpeechProb >= hallucinationNoSpeechThreshold
     }
 }
 
