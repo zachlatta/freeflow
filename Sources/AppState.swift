@@ -987,10 +987,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Starting..."
         hasShownScreenshotPermissionAlert = false
 
-        // Show initializing dots only if engine takes longer than 0.5s to start
+        // Show initializing dots only if engine takes longer than 0.2s to start
         var overlayShown = false
         let initTimer = DispatchSource.makeTimerSource(queue: .main)
-        initTimer.schedule(deadline: .now() + 0.5)
+        initTimer.schedule(deadline: .now() + 0.2)
         initTimer.setEventHandler { [weak self] in
             guard let self, !overlayShown else { return }
             overlayShown = true
