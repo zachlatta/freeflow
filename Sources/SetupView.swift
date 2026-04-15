@@ -617,11 +617,11 @@ struct SetupView: View {
 
     var commandModeStep: some View {
         VStack(spacing: 20) {
-            Image(systemName: "wand.and.stars")
+            Image(systemName: "pencil")
                 .font(.system(size: 60))
                 .foregroundStyle(.blue)
 
-            Text("Command Mode")
+            Text("Edit Mode")
                 .font(.title)
                 .fontWeight(.bold)
 
@@ -631,7 +631,7 @@ struct SetupView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             VStack(alignment: .leading, spacing: 14) {
-                Toggle("Enable Command Mode", isOn: Binding(
+                Toggle("Enable Edit Mode", isOn: Binding(
                     get: { appState.isCommandModeEnabled },
                     set: { newValue in
                         _ = appState.setCommandModeEnabled(newValue)

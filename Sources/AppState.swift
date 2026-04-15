@@ -128,12 +128,17 @@ private enum SessionIntent {
         }
     }
 
-    var persistedIntent: String {
+    var persistedIntent: PipelineHistoryItemIntent {
         switch self {
         case .dictation:
-            return "dictation"
+            return .dictation
         case .command(let invocation, _):
-            return "command:\(invocation.rawValue)"
+            switch invocation {
+            case .automatic:
+                return .commandAutomatic
+            case .manual:
+                return .commandManual
+            }
         }
     }
 
@@ -146,11 +151,11 @@ private enum SessionIntent {
         }
     }
 
-    static func fromPersisted(intent: String, selectedText: String?) -> SessionIntent {
-        if intent == "command:automatic", let selectedText {
+    static func fromPersisted(intent: PipelineHistoryItemIntent, selectedText: String?) -> SessionIntent {
+        if intent == .commandAutomatic, let selectedText {
             return .command(invocation: .automatic, selectedText: selectedText)
         }
-        if intent == "command:manual", let selectedText {
+        if intent == .commandManual, let selectedText {
             return .command(invocation: .manual, selectedText: selectedText)
         }
         return .dictation
@@ -1214,7 +1219,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         pendingManualCommandInvocation = false
         errorMessage = "Select text to transform first."
         statusText = "Select text to transform first"
-        debugStatusMessage = "Command mode requires selected text"
+        debugStatusMessage = "Edit mode requires selected text"
         shortcutSessionController.reset()
         if triggerMode == .toggle {
             cancelPendingShortcutStart()
@@ -1229,14 +1234,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         pendingSelectionSnapshot = nil
         pendingManualCommandInvocation = false
         errorMessage = message
-        statusText = "Fix Command Mode modifier"
-        debugStatusMessage = "Command mode modifier conflicts with dictation shortcuts"
+        statusText = "Fix Edit Mode modifier"
+        debugStatusMessage = "Edit mode modifier conflicts with dictation shortcuts"
         shortcutSessionController.reset()
         if triggerMode == .toggle {
             cancelPendingShortcutStart()
         }
         playAlertSound(named: "Basso")
-        scheduleReadyStatusReset(after: 2, matching: ["Fix Command Mode modifier"])
+        scheduleReadyStatusReset(after: 2, matching: ["Fix Edit Mode modifier"])
     }
 
     private func startRecording(triggerMode: RecordingTriggerMode) {
@@ -1522,9 +1527,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     ? "Post-processing failed on retry, using raw transcript"
                     : "Post-processing failed, using raw transcript"
             case .commandModeSucceeded(let invocation):
-                return "Command mode succeeded (\(invocation.rawValue))"
+                return "Edit mode succeeded (\(invocation.rawValue))"
             case .commandModeFailedFallback(let invocation):
-                return "Command mode failed, using selected text (\(invocation.rawValue))"
+                return "Edit mode failed, using selected text (\(invocation.rawValue))"
             }
         }
     }
@@ -1553,7 +1558,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 )
                 return (result.transcript, .commandModeSucceeded(invocation: invocation), result.prompt)
             } catch {
-                os_log(.error, log: recordingLog, "Command mode failed: %{public}@", error.localizedDescription)
+                os_log(.error, log: recordingLog, "Edit mode failed: %{public}@", error.localizedDescription)
                 return (selectedText, .commandModeFailedFallback(invocation: invocation), "")
             }
         }

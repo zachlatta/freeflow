@@ -237,7 +237,7 @@ struct GeneralSettingsView: View {
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
-                SettingsCard("Command Mode", icon: "wand.and.stars") {
+                SettingsCard("Edit Mode", icon: "pencil") {
                     commandModeSection
                 }
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
@@ -530,7 +530,7 @@ struct GeneralSettingsView: View {
 
     private var commandModeSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Toggle("Enable Command Mode", isOn: Binding(
+            Toggle("Enable Edit Mode", isOn: Binding(
                 get: { appState.isCommandModeEnabled },
                 set: { newValue in
                     _ = appState.setCommandModeEnabled(newValue)

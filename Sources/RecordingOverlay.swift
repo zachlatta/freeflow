@@ -248,11 +248,19 @@ final class RecordingOverlayManager {
             return lockedOverlayWidth
         }
 
-        let toggleWidth: CGFloat = overlayState.isCommandMode ? 180 : 150
-        let defaultWidth: CGFloat = overlayState.isCommandMode ? 124 : 92
-        let baseWidth: CGFloat = overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle
-            ? toggleWidth
-            : defaultWidth
+        let commandModeWidth: CGFloat = 180
+        let toggleWidth: CGFloat = 150
+        let defaultWidth: CGFloat = 92
+        let baseWidth: CGFloat
+
+        if overlayState.isCommandMode {
+            baseWidth = commandModeWidth
+        } else if overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle {
+            baseWidth = toggleWidth
+        } else {
+            baseWidth = defaultWidth
+        }
+
         guard screenHasNotch else { return baseWidth }
         return max(notchWidth, baseWidth)
     }
@@ -368,7 +376,7 @@ struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
     let onStopButtonPressed: () -> Void
 
-    private let leadingAccessoryWidth: CGFloat = 20
+    private let leadingAccessoryWidth: CGFloat = 24
     private let trailingAccessoryWidth: CGFloat = 32
 
     private var showsLiveRecordingContent: Bool {
@@ -404,7 +412,8 @@ struct RecordingOverlayView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
                 }
-                .frame(width: leadingAccessoryWidth, alignment: .leading)
+                .frame(width: leadingAccessoryWidth, alignment: .center)
+                .frame(maxHeight: .infinity, alignment: .center)
 
                 Spacer(minLength: 0)
 
@@ -445,9 +454,10 @@ struct DoneView: View {
 
 struct CommandModeIndicator: View {
     var body: some View {
-        Image(systemName: "square.and.pencil")
+        Image(systemName: "pencil")
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(.white.opacity(0.92))
+            .frame(width: 16, height: 16, alignment: .center)
     }
 }
 

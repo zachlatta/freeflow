@@ -88,7 +88,7 @@ final class PipelineHistoryStore {
                 let request = pipelineHistoryRequest()
                 request.predicate = NSPredicate(format: "id == %@", item.id as CVarArg)
                 guard let entity = try container.viewContext.fetch(request).first else { return }
-                entity.intent = item.intent
+                entity.intent = item.intent.rawValue
                 entity.selectedText = item.selectedText
                 entity.rawTranscript = item.rawTranscript
                 entity.postProcessedTranscript = item.postProcessedTranscript
@@ -184,7 +184,7 @@ final class PipelineHistoryStore {
                 let context = container.viewContext
                 let entity = PipelineHistoryEntry(context: context)
                 entity.id = item.id
-                entity.intent = item.intent
+                entity.intent = item.intent.rawValue
                 entity.selectedText = item.selectedText
                 entity.timestamp = item.timestamp
                 entity.rawTranscript = item.rawTranscript
@@ -255,7 +255,7 @@ final class PipelineHistoryStore {
 
     private static func makeHistoryItem(from entity: PipelineHistoryEntry) -> PipelineHistoryItem {
         PipelineHistoryItem(
-            intent: entity.intent ?? "dictation",
+            intent: PipelineHistoryItemIntent(rawValue: entity.intent ?? "") ?? .dictation,
             selectedText: entity.selectedText,
             id: entity.id,
             timestamp: entity.timestamp ?? Date(),
@@ -281,7 +281,7 @@ final class PipelineHistoryStore {
         entity.managedObjectClassName = NSStringFromClass(PipelineHistoryEntry.self)
 
         entity.properties = [
-            makeAttribute(name: "intent", type: .stringAttributeType, isOptional: false),
+            makeAttribute(name: "intent", type: .stringAttributeType, isOptional: true, defaultValue: "dictation"),
             makeAttribute(name: "selectedText", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "id", type: .UUIDAttributeType, isOptional: false),
             makeAttribute(name: "timestamp", type: .dateAttributeType, isOptional: false),
@@ -302,11 +302,17 @@ final class PipelineHistoryStore {
         return model
     }
 
-    private static func makeAttribute(name: String, type: NSAttributeType, isOptional: Bool) -> NSAttributeDescription {
+    private static func makeAttribute(
+        name: String,
+        type: NSAttributeType,
+        isOptional: Bool,
+        defaultValue: Any? = nil
+    ) -> NSAttributeDescription {
         let attribute = NSAttributeDescription()
         attribute.name = name
         attribute.attributeType = type
         attribute.isOptional = isOptional
+        attribute.defaultValue = defaultValue
         return attribute
     }
 }
