@@ -7,6 +7,7 @@ final class RecordingOverlayState: ObservableObject {
     @Published var phase: OverlayPhase = .recording
     @Published var audioLevel: Float = 0.0
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
+    @Published var isCommandMode = false
     @Published var showsTranscribingSpinner = false
 }
 
@@ -84,10 +85,11 @@ final class RecordingOverlayManager {
         overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle
     }
 
-    func showInitializing(mode: RecordingTriggerMode = .hold) {
+    func showInitializing(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
         DispatchQueue.main.async {
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
+            self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .initializing
             self.overlayState.showsTranscribingSpinner = false
             self.overlayState.audioLevel = 0
@@ -95,10 +97,11 @@ final class RecordingOverlayManager {
         }
     }
 
-    func showRecording(mode: RecordingTriggerMode = .hold) {
+    func showRecording(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
         DispatchQueue.main.async {
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
+            self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .recording
             self.overlayState.showsTranscribingSpinner = false
             self.overlayState.audioLevel = 0
@@ -106,10 +109,11 @@ final class RecordingOverlayManager {
         }
     }
 
-    func transitionToRecording(mode: RecordingTriggerMode = .hold) {
+    func transitionToRecording(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
         DispatchQueue.main.async {
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
+            self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .recording
             self.overlayState.showsTranscribingSpinner = false
             self.updateOverlayLayout(animated: true)
@@ -244,7 +248,11 @@ final class RecordingOverlayManager {
             return lockedOverlayWidth
         }
 
-        let baseWidth: CGFloat = overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle ? 150 : 92
+        let toggleWidth: CGFloat = overlayState.isCommandMode ? 180 : 150
+        let defaultWidth: CGFloat = overlayState.isCommandMode ? 124 : 92
+        let baseWidth: CGFloat = overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle
+            ? toggleWidth
+            : defaultWidth
         guard screenHasNotch else { return baseWidth }
         return max(notchWidth, baseWidth)
     }
@@ -263,6 +271,7 @@ final class RecordingOverlayManager {
 
     private func dismissAll() {
         lockedOverlayWidth = nil
+        overlayState.isCommandMode = false
         overlayState.showsTranscribingSpinner = false
         if let panel = overlayWindow {
             panel.orderOut(nil)
@@ -359,6 +368,9 @@ struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
     let onStopButtonPressed: () -> Void
 
+    private let leadingAccessoryWidth: CGFloat = 20
+    private let trailingAccessoryWidth: CGFloat = 32
+
     private var showsLiveRecordingContent: Bool {
         state.phase == .recording || (state.phase == .transcribing && !state.showsTranscribingSpinner)
     }
@@ -368,7 +380,7 @@ struct RecordingOverlayView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        ZStack {
             Group {
                 if state.phase == .initializing {
                     InitializingDotsView()
@@ -385,27 +397,38 @@ struct RecordingOverlayView: View {
                 }
             }
 
-            if showsStopButton {
-                Button(action: onStopButtonPressed) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 9, weight: .bold))
-                        Text("Stop")
-                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            HStack {
+                Group {
+                    if state.isCommandMode {
+                        CommandModeIndicator()
+                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.red.opacity(0.92)))
                 }
-                .buttonStyle(.plain)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .frame(width: leadingAccessoryWidth, alignment: .leading)
+
+                Spacer(minLength: 0)
+
+                Group {
+                    if showsStopButton {
+                        Button(action: onStopButtonPressed) {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 20, height: 20)
+                            .background(Circle().fill(Color.red.opacity(0.92)))
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                }
+                .frame(width: trailingAccessoryWidth, alignment: .trailing)
             }
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.phase)
         .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.recordingTriggerMode)
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.isCommandMode)
     }
 }
 
@@ -417,6 +440,14 @@ struct DoneView: View {
             .font(.system(size: 12, weight: .bold))
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct CommandModeIndicator: View {
+    var body: some View {
+        Image(systemName: "square.and.pencil")
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.white.opacity(0.92))
     }
 }
 

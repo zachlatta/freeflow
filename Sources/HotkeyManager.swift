@@ -19,6 +19,10 @@ final class HotkeyManager {
     var onShortcutEvent: ((ShortcutEvent) -> Void)?
     var onEscapeKeyPressed: (() -> Bool)?
 
+    var currentPressedModifiers: ShortcutModifiers {
+        currentModifiers
+    }
+
     func start(configuration: ShortcutConfiguration) {
         stop()
         self.configuration = configuration

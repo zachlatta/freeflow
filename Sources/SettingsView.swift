@@ -100,6 +100,7 @@ struct GeneralSettingsView: View {
     @State private var keyValidationError: String?
     @State private var keyValidationSuccess = false
     @State private var customVocabularyInput: String = ""
+    @State private var commandModeValidationMessage: String?
     @State private var micPermissionGranted = false
     @StateObject private var githubCache = GitHubMetadataCache.shared
     @ObservedObject private var updateManager = UpdateManager.shared
@@ -237,6 +238,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
+                SettingsCard("Command Mode", icon: "wand.and.stars") {
+                    commandModeSection
+                }
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
                     clipboardSection
                 }
@@ -259,6 +263,7 @@ struct GeneralSettingsView: View {
             apiKeyInput = appState.apiKey
             apiBaseURLInput = appState.apiBaseURL
             customVocabularyInput = appState.customVocabulary
+            commandModeValidationMessage = appState.commandModeManualModifierValidationMessage
             checkMicPermission()
             appState.refreshLaunchAtLoginStatus()
             Task { await githubCache.fetchIfNeeded() }
@@ -521,6 +526,78 @@ struct GeneralSettingsView: View {
                 Text("Applies before recording starts for both hold and tap shortcuts. Stopping still happens immediately.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var commandModeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle("Enable Command Mode", isOn: Binding(
+                get: { appState.isCommandModeEnabled },
+                set: { newValue in
+                    if let message = appState.setCommandModeEnabled(newValue) {
+                        commandModeValidationMessage = message
+                    } else {
+                        commandModeValidationMessage = nil
+                    }
+                }
+            ))
+
+            Text("Transform highlighted text with a spoken instruction instead of dictating over it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Invocation Style", selection: Binding(
+                get: { appState.commandModeStyle },
+                set: { newValue in
+                    if let message = appState.setCommandModeStyle(newValue) {
+                        commandModeValidationMessage = message
+                    } else {
+                        commandModeValidationMessage = nil
+                    }
+                }
+            )) {
+                ForEach(CommandModeStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!appState.isCommandModeEnabled)
+
+            if appState.isCommandModeEnabled {
+                switch appState.commandModeStyle {
+                case .automatic:
+                    Text("If text is selected, your normal dictation shortcut transforms the selection instead of dictating over it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .manual:
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Hold the extra modifier together with your normal dictation shortcut to transform selected text.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Picker("Extra Modifier", selection: Binding(
+                            get: { appState.commandModeManualModifier },
+                            set: { newValue in
+                                if let message = appState.setCommandModeManualModifier(newValue) {
+                                    commandModeValidationMessage = message
+                                } else {
+                                    commandModeValidationMessage = nil
+                                }
+                            }
+                        )) {
+                            ForEach(CommandModeManualModifier.allCases) { modifier in
+                                Text(modifier.title).tag(modifier)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let validationMessage = commandModeValidationMessage ?? appState.commandModeManualModifierValidationMessage {
+                Label(validationMessage, systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
     }

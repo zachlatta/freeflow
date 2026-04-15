@@ -2,6 +2,13 @@ import Foundation
 import ApplicationServices
 import AppKit
 
+struct AppSelectionSnapshot {
+    let appName: String?
+    let bundleIdentifier: String?
+    let windowTitle: String?
+    let selectedText: String?
+}
+
 struct AppContext {
     let appName: String?
     let bundleIdentifier: String?
@@ -42,6 +49,25 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.customContextPrompt = customContextPrompt
+    }
+
+    func collectSelectionSnapshot() -> AppSelectionSnapshot {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            return AppSelectionSnapshot(
+                appName: nil,
+                bundleIdentifier: nil,
+                windowTitle: nil,
+                selectedText: nil
+            )
+        }
+
+        let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        return AppSelectionSnapshot(
+            appName: frontmostApp.localizedName,
+            bundleIdentifier: frontmostApp.bundleIdentifier,
+            windowTitle: focusedWindowTitle(from: appElement) ?? frontmostApp.localizedName,
+            selectedText: selectedText(from: appElement)
+        )
     }
 
     func collectContext() async -> AppContext {
