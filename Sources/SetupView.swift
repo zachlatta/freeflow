@@ -155,7 +155,7 @@ struct SetupView: View {
             awsSessionTokenInput = appState.awsSessionToken
             awsRegionInput = appState.awsRegion
             bedrockModelInput = appState.bedrockModelId
-            if appState.awsConfig != nil { fetchBedrockModels() }
+            if appState.awsConfig != nil { Task { await fetchBedrockModels() } }
             checkMicPermission()
             checkAccessibility()
             Task {
@@ -413,7 +413,7 @@ struct SetupView: View {
                         if appState.transcriptionProvider == .awsTranscribe {
                             TextField("Language code (e.g. en-US)", text: Binding(
                                 get: { appState.transcribeLanguageCode },
-                                set: { appState.transcribeLanguageCode = $0 }
+                                set: { appState.transcribeLanguageCode = $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                             ))
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: 200)
@@ -458,27 +458,22 @@ struct SetupView: View {
         fetchModelsTask = Task {
             try? await Task.sleep(nanoseconds: 800_000_000) // 0.8s debounce
             guard !Task.isCancelled else { return }
-            fetchBedrockModels()
+            await fetchBedrockModels()
         }
     }
 
-    private func fetchBedrockModels() {
+    @MainActor
+    private func fetchBedrockModels() async {
         guard let aws = appState.awsConfig else { return }
         isFetchingModels = true
         fetchModelsError = nil
-        Task {
-            do {
-                let models = try await BedrockModel.fetch(aws: aws)
-                await MainActor.run {
-                    fetchedBedrockModels = models
-                    isFetchingModels = false
-                }
-            } catch {
-                await MainActor.run {
-                    fetchModelsError = error.localizedDescription
-                    isFetchingModels = false
-                }
-            }
+        do {
+            let models = try await BedrockModel.fetch(aws: aws)
+            fetchedBedrockModels = models
+            isFetchingModels = false
+        } catch {
+            fetchModelsError = error.localizedDescription
+            isFetchingModels = false
         }
     }
 

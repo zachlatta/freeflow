@@ -752,7 +752,7 @@ struct ProvidersSettingsView: View {
             bedrockModelInput = appState.bedrockModelId
             transcribeLanguageInput = appState.transcribeLanguageCode
             if appState.awsConfig != nil {
-                fetchBedrockModels()
+                Task { await fetchBedrockModels() }
             }
         }
     }
@@ -974,7 +974,7 @@ struct ProvidersSettingsView: View {
         fetchModelsTask = Task {
             try? await Task.sleep(nanoseconds: 800_000_000) // 0.8s debounce
             guard !Task.isCancelled else { return }
-            fetchBedrockModels()
+            await fetchBedrockModels()
         }
     }
 
@@ -1003,23 +1003,18 @@ struct ProvidersSettingsView: View {
         }
     }
 
-    private func fetchBedrockModels() {
+    @MainActor
+    private func fetchBedrockModels() async {
         guard let aws = appState.awsConfig else { return }
         isFetchingModels = true
         fetchModelsError = nil
-        Task {
-            do {
-                let models = try await BedrockModel.fetch(aws: aws)
-                await MainActor.run {
-                    fetchedBedrockModels = models
-                    isFetchingModels = false
-                }
-            } catch {
-                await MainActor.run {
-                    fetchModelsError = error.localizedDescription
-                    isFetchingModels = false
-                }
-            }
+        do {
+            let models = try await BedrockModel.fetch(aws: aws)
+            fetchedBedrockModels = models
+            isFetchingModels = false
+        } catch {
+            fetchModelsError = error.localizedDescription
+            isFetchingModels = false
         }
     }
 
