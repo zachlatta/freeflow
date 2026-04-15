@@ -572,21 +572,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 let finalTranscript: String
                 let processingStatus: String
                 let postProcessingPrompt: String
-                do {
-                    let postProcessingResult = try await postProcessingService.postProcess(
-                        transcript: rawTranscript,
-                        context: restoredContext,
-                        customVocabulary: capturedCustomVocabulary,
-                        customSystemPrompt: capturedCustomSystemPrompt
-                    )
-                    finalTranscript = postProcessingResult.transcript
-                    processingStatus = "Post-processing succeeded (retried)"
-                    postProcessingPrompt = postProcessingResult.prompt
-                } catch {
-                    finalTranscript = rawTranscript
-                    processingStatus = "Post-processing failed on retry, using raw transcript"
-                    postProcessingPrompt = ""
-                }
+                let result = await self.processTranscript(
+                    rawTranscript,
+                    context: restoredContext,
+                    postProcessingService: postProcessingService,
+                    customVocabulary: capturedCustomVocabulary,
+                    customSystemPrompt: capturedCustomSystemPrompt
+                )
+                finalTranscript = result.finalTranscript
+                processingStatus = result.outcome.statusMessage(isRetry: true)
+                postProcessingPrompt = result.prompt
 
                 await MainActor.run {
                     let updatedItem = PipelineHistoryItem(
@@ -1240,29 +1235,57 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }?.original
     }
 
+    private enum TranscriptProcessingOutcome {
+        case skippedEmptyRawTranscript
+        case voiceMacro(command: String)
+        case postProcessingSucceeded
+        case postProcessingFailedFallback
+
+        func statusMessage(isRetry: Bool = false) -> String {
+            switch self {
+            case .skippedEmptyRawTranscript:
+                return "Skipped macros and post-processing for empty raw transcript"
+            case .voiceMacro(let command):
+                return "Voice macro used: \(command)"
+            case .postProcessingSucceeded:
+                return isRetry ? "Post-processing succeeded (retried)" : "Post-processing succeeded"
+            case .postProcessingFailedFallback:
+                return isRetry
+                    ? "Post-processing failed on retry, using raw transcript"
+                    : "Post-processing failed, using raw transcript"
+            }
+        }
+    }
+
     private func processTranscript(
         _ rawTranscript: String,
         context: AppContext,
         postProcessingService: PostProcessingService,
         customVocabulary: String,
         customSystemPrompt: String
-    ) async -> (finalTranscript: String, status: String, prompt: String) {
-        if let macro = findMatchingMacro(for: rawTranscript) {
+    ) async -> (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String) {
+        let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedRawTranscript.isEmpty else {
+            return ("", .skippedEmptyRawTranscript, "")
+        }
+
+        if let macro = findMatchingMacro(for: trimmedRawTranscript) {
             os_log(.info, log: recordingLog, "Voice macro triggered: %{public}@", macro.command)
-            return (macro.payload, "Voice macro used: \(macro.command)", "")
+            return (macro.payload, .voiceMacro(command: macro.command), "")
         }
         
         do {
             let result = try await postProcessingService.postProcess(
-                transcript: rawTranscript,
+                transcript: trimmedRawTranscript,
                 context: context,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt
             )
-            return (result.transcript, "Post-processing succeeded", result.prompt)
+            return (result.transcript, .postProcessingSucceeded, result.prompt)
         } catch {
             os_log(.error, log: recordingLog, "Post-processing failed: %{public}@", error.localizedDescription)
-            return (rawTranscript, "Post-processing failed, using raw transcript", "")
+            return (trimmedRawTranscript, .postProcessingFailedFallback, "")
         }
     }
 
@@ -1348,7 +1371,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     await MainActor.run { [weak self] in
                         self?.debugStatusMessage = "Running post-processing"
                     }
-                    let (finalTranscript, processingStatus, postProcessingPrompt) = await self.processTranscript(
+                    let result = await self.processTranscript(
                         rawTranscript,
                         context: appContext,
                         postProcessingService: postProcessingService,
@@ -1364,15 +1387,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.lastContextScreenshotStatus = appContext.screenshotError
                             ?? "available (\(appContext.screenshotMimeType ?? "image"))"
                         let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let trimmedFinalTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                        self.lastPostProcessingPrompt = postProcessingPrompt
+                        let trimmedFinalTranscript = result.finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let processingStatus = result.outcome.statusMessage()
+                        self.lastPostProcessingPrompt = result.prompt
                         self.lastRawTranscript = trimmedRawTranscript
                         self.lastPostProcessedTranscript = trimmedFinalTranscript
                         self.lastPostProcessingStatus = processingStatus
                         self.recordPipelineHistoryEntry(
                             rawTranscript: trimmedRawTranscript,
                             postProcessedTranscript: trimmedFinalTranscript,
-                            postProcessingPrompt: postProcessingPrompt,
+                            postProcessingPrompt: result.prompt,
                             context: appContext,
                             processingStatus: processingStatus,
                             audioFileName: savedAudioFile?.fileName
