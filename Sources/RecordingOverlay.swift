@@ -359,7 +359,7 @@ struct RecordingOverlayView: View {
     let onStopButtonPressed: () -> Void
 
     private var showsLiveRecordingContent: Bool {
-        state.phase == .recording || !state.showsTranscribingSpinner
+        state.phase == .recording || (state.phase == .transcribing && !state.showsTranscribingSpinner)
     }
 
     private var showsStopButton: Bool {
