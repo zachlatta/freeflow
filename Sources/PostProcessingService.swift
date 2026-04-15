@@ -187,8 +187,8 @@ Behavior:
                     throw PostProcessingError.invalidResponse("Post-processing service deallocated")
                 }
                 return try await self.processCommandTransformWithFallback(
-                    selectedText: trimmedSelectedText,
-                    voiceCommand: trimmedVoiceCommand,
+                    selectedText: selectedText,
+                    voiceCommand: voiceCommand,
                     contextSummary: context.contextSummary,
                     customVocabulary: vocabularyTerms
                 )
@@ -377,7 +377,7 @@ Model: \(model)
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
 
-        let sanitizedTranscript = sanitizePostProcessedTranscript(content)
+        let sanitizedTranscript = sanitizeCommandModeTranscript(content)
         guard !sanitizedTranscript.isEmpty else {
             throw PostProcessingError.emptyOutput
         }
@@ -503,6 +503,10 @@ Model: \(model)
         }
 
         return result
+    }
+
+    private func sanitizeCommandModeTranscript(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func mergedVocabularyTerms(rawVocabulary: String) -> [String] {

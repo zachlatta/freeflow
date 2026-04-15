@@ -100,7 +100,6 @@ struct GeneralSettingsView: View {
     @State private var keyValidationError: String?
     @State private var keyValidationSuccess = false
     @State private var customVocabularyInput: String = ""
-    @State private var commandModeValidationMessage: String?
     @State private var micPermissionGranted = false
     @StateObject private var githubCache = GitHubMetadataCache.shared
     @ObservedObject private var updateManager = UpdateManager.shared
@@ -263,7 +262,6 @@ struct GeneralSettingsView: View {
             apiKeyInput = appState.apiKey
             apiBaseURLInput = appState.apiBaseURL
             customVocabularyInput = appState.customVocabulary
-            commandModeValidationMessage = appState.commandModeManualModifierValidationMessage
             checkMicPermission()
             appState.refreshLaunchAtLoginStatus()
             Task { await githubCache.fetchIfNeeded() }
@@ -535,11 +533,7 @@ struct GeneralSettingsView: View {
             Toggle("Enable Command Mode", isOn: Binding(
                 get: { appState.isCommandModeEnabled },
                 set: { newValue in
-                    if let message = appState.setCommandModeEnabled(newValue) {
-                        commandModeValidationMessage = message
-                    } else {
-                        commandModeValidationMessage = nil
-                    }
+                    _ = appState.setCommandModeEnabled(newValue)
                 }
             ))
 
@@ -550,11 +544,7 @@ struct GeneralSettingsView: View {
             Picker("Invocation Style", selection: Binding(
                 get: { appState.commandModeStyle },
                 set: { newValue in
-                    if let message = appState.setCommandModeStyle(newValue) {
-                        commandModeValidationMessage = message
-                    } else {
-                        commandModeValidationMessage = nil
-                    }
+                    _ = appState.setCommandModeStyle(newValue)
                 }
             )) {
                 ForEach(CommandModeStyle.allCases) { style in
@@ -579,11 +569,7 @@ struct GeneralSettingsView: View {
                         Picker("Extra Modifier", selection: Binding(
                             get: { appState.commandModeManualModifier },
                             set: { newValue in
-                                if let message = appState.setCommandModeManualModifier(newValue) {
-                                    commandModeValidationMessage = message
-                                } else {
-                                    commandModeValidationMessage = nil
-                                }
+                                _ = appState.setCommandModeManualModifier(newValue)
                             }
                         )) {
                             ForEach(CommandModeManualModifier.allCases) { modifier in
@@ -596,7 +582,7 @@ struct GeneralSettingsView: View {
             }
             .opacity(appState.isCommandModeEnabled ? 1 : 0.5)
 
-            if let validationMessage = commandModeValidationMessage ?? appState.commandModeManualModifierValidationMessage {
+            if let validationMessage = appState.commandModeManualModifierValidationMessage {
                 Label(validationMessage, systemImage: "xmark.circle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)

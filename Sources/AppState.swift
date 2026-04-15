@@ -127,6 +127,34 @@ private enum SessionIntent {
             return true
         }
     }
+
+    var persistedIntent: String {
+        switch self {
+        case .dictation:
+            return "dictation"
+        case .command(let invocation, _):
+            return "command:\(invocation.rawValue)"
+        }
+    }
+
+    var persistedSelectedText: String? {
+        switch self {
+        case .dictation:
+            return nil
+        case .command(_, let selectedText):
+            return selectedText
+        }
+    }
+
+    static func fromPersisted(intent: String, selectedText: String?) -> SessionIntent {
+        if intent == "command:automatic", let selectedText {
+            return .command(invocation: .automatic, selectedText: selectedText)
+        }
+        if intent == "command:manual", let selectedText {
+            return .command(invocation: .manual, selectedText: selectedText)
+        }
+        return .dictation
+    }
 }
 
 final class AppState: ObservableObject, @unchecked Sendable {
@@ -627,9 +655,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 let finalTranscript: String
                 let processingStatus: String
                 let postProcessingPrompt: String
+                let restoredIntent = SessionIntent.fromPersisted(
+                    intent: item.intent,
+                    selectedText: item.selectedText
+                )
                 let result = await self.processTranscript(
                     rawTranscript,
-                    intent: .dictation,
+                    intent: restoredIntent,
                     context: restoredContext,
                     postProcessingService: postProcessingService,
                     customVocabulary: capturedCustomVocabulary,
@@ -641,6 +673,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
                 await MainActor.run {
                     let updatedItem = PipelineHistoryItem(
+                        intent: item.intent,
+                        selectedText: item.selectedText,
                         id: item.id,
                         timestamp: item.timestamp,
                         rawTranscript: rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -666,6 +700,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             } catch {
                 await MainActor.run {
                     let updatedItem = PipelineHistoryItem(
+                        intent: item.intent,
+                        selectedText: item.selectedText,
                         id: item.id,
                         timestamp: item.timestamp,
                         rawTranscript: item.rawTranscript,
@@ -1146,12 +1182,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return .dictation
         }
 
-        let trimmedSelectedText = selectionSnapshot.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawSelectedText = selectionSnapshot.selectedText ?? ""
+        let trimmedSelectedText = rawSelectedText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         switch commandModeStyle {
         case .automatic:
             if !trimmedSelectedText.isEmpty {
-                return .command(invocation: .automatic, selectedText: trimmedSelectedText)
+                return .command(invocation: .automatic, selectedText: rawSelectedText)
             }
             return .dictation
         case .manual:
@@ -1166,7 +1203,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 rejectCommandModeSelectionRequirement(triggerMode: triggerMode)
                 return nil
             }
-            return .command(invocation: .manual, selectedText: trimmedSelectedText)
+            return .command(invocation: .manual, selectedText: rawSelectedText)
         }
     }
 
@@ -1510,7 +1547,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             do {
                 let result = try await postProcessingService.commandTransform(
                     selectedText: selectedText,
-                    voiceCommand: trimmedRawTranscript,
+                    voiceCommand: rawTranscript,
                     context: context,
                     customVocabulary: customVocabulary
                 )
@@ -1653,6 +1690,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             postProcessingPrompt: result.prompt,
                             context: appContext,
                             processingStatus: processingStatus,
+                            intent: sessionIntent,
                             audioFileName: savedAudioFile?.fileName
                         )
                         self.transcriptionTask = nil
@@ -1722,6 +1760,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             postProcessingPrompt: "",
                             context: resolvedContext,
                             processingStatus: "Error: \(error.localizedDescription)",
+                            intent: sessionIntent,
                             audioFileName: savedAudioFile?.fileName
                         )
                         self.audioRecorder.cleanup()
@@ -1738,9 +1777,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         postProcessingPrompt: String,
         context: AppContext,
         processingStatus: String,
+        intent: SessionIntent,
         audioFileName: String? = nil
     ) {
         let newEntry = PipelineHistoryItem(
+            intent: intent.persistedIntent,
+            selectedText: intent.persistedSelectedText,
             timestamp: Date(),
             rawTranscript: rawTranscript,
             postProcessedTranscript: postProcessedTranscript,

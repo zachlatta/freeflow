@@ -48,7 +48,6 @@ struct SetupView: View {
     @State private var testMicPulsing = false
     @State private var holdShortcutValidationMessage: String?
     @State private var toggleShortcutValidationMessage: String?
-    @State private var commandModeValidationMessage: String?
     @State private var isCapturingHoldShortcut = false
     @State private var isCapturingToggleShortcut = false
     @StateObject private var testHotkeyHarness = SetupTestHotkeyHarness()
@@ -145,7 +144,6 @@ struct SetupView: View {
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             checkAccessibility()
-            commandModeValidationMessage = appState.commandModeManualModifierValidationMessage
             Task {
                 await githubCache.fetchIfNeeded()
             }
@@ -636,14 +634,14 @@ struct SetupView: View {
                 Toggle("Enable Command Mode", isOn: Binding(
                     get: { appState.isCommandModeEnabled },
                     set: { newValue in
-                        commandModeValidationMessage = appState.setCommandModeEnabled(newValue)
+                        _ = appState.setCommandModeEnabled(newValue)
                     }
                 ))
 
                 Picker("Invocation Style", selection: Binding(
                     get: { appState.commandModeStyle },
                     set: { newValue in
-                        commandModeValidationMessage = appState.setCommandModeStyle(newValue)
+                        _ = appState.setCommandModeStyle(newValue)
                     }
                 )) {
                     ForEach(CommandModeStyle.allCases) { style in
@@ -670,7 +668,7 @@ struct SetupView: View {
                             Picker("Extra Modifier", selection: Binding(
                                 get: { appState.commandModeManualModifier },
                                 set: { newValue in
-                                    commandModeValidationMessage = appState.setCommandModeManualModifier(newValue)
+                                    _ = appState.setCommandModeManualModifier(newValue)
                                 }
                             )) {
                                 ForEach(CommandModeManualModifier.allCases) { modifier in
@@ -683,7 +681,7 @@ struct SetupView: View {
                 }
                 .opacity(appState.isCommandModeEnabled ? 1 : 0.5)
 
-                if let validationMessage = commandModeValidationMessage ?? appState.commandModeManualModifierValidationMessage {
+                if let validationMessage = appState.commandModeManualModifierValidationMessage {
                     Label(validationMessage, systemImage: "xmark.circle.fill")
                         .font(.caption)
                         .foregroundStyle(.red)
