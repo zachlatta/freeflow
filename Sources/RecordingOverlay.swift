@@ -7,6 +7,7 @@ final class RecordingOverlayState: ObservableObject {
     @Published var phase: OverlayPhase = .recording
     @Published var audioLevel: Float = 0.0
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
+    @Published var showsTranscribingSpinner = false
 }
 
 enum OverlayPhase {
@@ -57,8 +58,8 @@ private func makeNotchContent<V: View>(
 
 final class RecordingOverlayManager {
     private var overlayWindow: NSPanel?
-    private var transcribingPanel: NSPanel?
     private let overlayState = RecordingOverlayState()
+    private var lockedOverlayWidth: CGFloat?
 
     var onStopButtonPressed: (() -> Void)?
 
@@ -85,8 +86,10 @@ final class RecordingOverlayManager {
 
     func showInitializing(mode: RecordingTriggerMode = .hold) {
         DispatchQueue.main.async {
+            self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.phase = .initializing
+            self.overlayState.showsTranscribingSpinner = false
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: false)
         }
@@ -94,8 +97,10 @@ final class RecordingOverlayManager {
 
     func showRecording(mode: RecordingTriggerMode = .hold) {
         DispatchQueue.main.async {
+            self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.phase = .recording
+            self.overlayState.showsTranscribingSpinner = false
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: true)
         }
@@ -103,8 +108,10 @@ final class RecordingOverlayManager {
 
     func transitionToRecording(mode: RecordingTriggerMode = .hold) {
         DispatchQueue.main.async {
+            self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.phase = .recording
+            self.overlayState.showsTranscribingSpinner = false
             self.updateOverlayLayout(animated: true)
         }
     }
@@ -122,15 +129,21 @@ final class RecordingOverlayManager {
         }
     }
 
-    func showTranscribing() {
+    func prepareForTranscribing() {
         DispatchQueue.main.async {
-            self.showTranscribingPanel()
+            self.lockedOverlayWidth = self.overlayWindow?.frame.width ?? self.overlayWidth
+            self.overlayState.phase = .transcribing
+            self.overlayState.showsTranscribingSpinner = false
+            self.showOverlayPanel(animatedResize: true)
         }
     }
 
-    func slideUpToNotch(completion: @escaping () -> Void) {
+    func showTranscribing() {
         DispatchQueue.main.async {
-            self.slideOverlayUp(completion: completion)
+            self.lockedOverlayWidth = self.overlayWindow?.frame.width ?? self.overlayWidth
+            self.overlayState.phase = .transcribing
+            self.overlayState.showsTranscribingSpinner = true
+            self.showOverlayPanel(animatedResize: true)
         }
     }
 
@@ -226,96 +239,33 @@ final class RecordingOverlayManager {
     }
 
     private var overlayWidth: CGFloat {
+        if let lockedOverlayWidth, (overlayState.phase == .transcribing || overlayState.phase == .done) {
+            return lockedOverlayWidth
+        }
+
         let baseWidth: CGFloat = overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle ? 150 : 92
         guard screenHasNotch else { return baseWidth }
         return max(notchWidth, baseWidth)
     }
 
-    private func slideOverlayUp(completion: @escaping () -> Void) {
-        guard let panel = overlayWindow, let screen = NSScreen.main else {
-            completion()
-            return
-        }
-
-        let hiddenY = screen.frame.maxY
-        let frame = panel.frame
-
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.09
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0.0, 1.0, 1.0)
-            panel.animator().setFrame(
-                NSRect(x: frame.origin.x, y: hiddenY, width: frame.width, height: frame.height),
-                display: true
-            )
-        }, completionHandler: {
-            panel.orderOut(nil)
-            self.overlayWindow = nil
-            completion()
-        })
-    }
-
-    private func showTranscribingPanel() {
-        overlayState.phase = .transcribing
-
-        if let panel = overlayWindow {
-            panel.orderOut(nil)
-            overlayWindow = nil
-        }
-
-        if transcribingPanel != nil { return }
-
-        let overlap = screenHasNotch ? notchOverlap : 0
-        let panelWidth: CGFloat = 44
-        let panelHeight: CGFloat = 22 + overlap
-
-        let panel = makeOverlayPanel(width: panelWidth, height: panelHeight)
-        panel.hasShadow = false
-        panel.contentView = makeNotchContent(
-            width: panelWidth,
-            height: panelHeight,
-            cornerRadius: screenHasNotch ? 14 : 11,
-            rootView: TranscribingIndicatorView().padding(.top, overlap)
-        )
-
-        if let screen = NSScreen.main {
-            let x = screen.frame.midX - panelWidth / 2
-            let y = screen.frame.maxY - panelHeight
-            panel.setFrame(NSRect(x: x, y: y, width: panelWidth, height: panelHeight), display: true)
-        }
-
-        panel.alphaValue = 0
-        panel.orderFrontRegardless()
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
-            panel.animator().alphaValue = 1
-        }
-
-        transcribingPanel = panel
-    }
-
     private func showDonePanel() {
         overlayState.phase = .done
 
-        if let panel = transcribingPanel {
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = 0.2
-                panel.animator().alphaValue = 0
-            }, completionHandler: {
-                panel.orderOut(nil)
-                self.transcribingPanel = nil
-            })
+        guard let panel = overlayWindow else { return }
+        panel.contentView = makeOverlayContent(frame: panel.frame)
+
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            panel.animator().alphaValue = 0
         }
     }
 
     private func dismissAll() {
+        lockedOverlayWidth = nil
+        overlayState.showsTranscribingSpinner = false
         if let panel = overlayWindow {
             panel.orderOut(nil)
             overlayWindow = nil
-        }
-        if let panel = transcribingPanel {
-            panel.orderOut(nil)
-            transcribingPanel = nil
         }
     }
 }
@@ -340,13 +290,18 @@ struct WaveformView: View {
 
     private static let barCount = 9
     private static let multipliers: [CGFloat] = [0.35, 0.55, 0.75, 0.9, 1.0, 0.9, 0.75, 0.55, 0.35]
+    private static let centerIndex = CGFloat((barCount - 1) / 2)
 
     var body: some View {
         HStack(spacing: 2.5) {
             ForEach(0..<Self.barCount, id: \.self) { index in
                 WaveformBar(amplitude: barAmplitude(for: index))
                     .animation(
-                        .interpolatingSpring(stiffness: 600, damping: 28),
+                        .spring(
+                            response: barResponse(for: index),
+                            dampingFraction: 0.88
+                        )
+                        .delay(barDelay(for: index)),
                         value: audioLevel
                     )
             }
@@ -357,6 +312,17 @@ struct WaveformView: View {
     private func barAmplitude(for index: Int) -> CGFloat {
         let level = CGFloat(audioLevel)
         return min(level * Self.multipliers[index], 1.0)
+    }
+
+    private func barResponse(for index: Int) -> Double {
+        let distance = abs(CGFloat(index) - Self.centerIndex)
+        let normalizedDistance = distance / Self.centerIndex
+        return 0.18 + Double(normalizedDistance) * 0.06
+    }
+
+    private func barDelay(for index: Int) -> Double {
+        let distance = abs(CGFloat(index) - Self.centerIndex)
+        return Double(distance) * 0.01
     }
 }
 
@@ -398,9 +364,12 @@ struct RecordingOverlayView: View {
                 if state.phase == .initializing {
                     InitializingDotsView()
                         .transition(.opacity)
-                } else {
+                } else if state.phase == .recording || !state.showsTranscribingSpinner {
                     WaveformView(audioLevel: state.audioLevel)
                         .transition(.opacity)
+                } else {
+                    TranscribingSpinnerView()
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
             }
 
@@ -430,35 +399,24 @@ struct RecordingOverlayView: View {
 
 // MARK: - Transcribing Indicator
 
-struct TranscribingIndicatorView: View {
-    @State private var animatingDot = 0
-    @State private var dotAnimationTimer: Timer?
+struct TranscribingSpinnerView: View {
+    @State private var isAnimating = false
 
     var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<3, id: \.self) { index in
-                Circle()
-                    .fill(.white.opacity(animatingDot == index ? 0.9 : 0.25))
-                    .frame(width: 4.5, height: 4.5)
-                    .animation(.easeInOut(duration: 0.4), value: animatingDot)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .onAppear { startDotAnimation() }
-        .onDisappear { stopDotAnimation() }
-    }
-
-    private func startDotAnimation() {
-        dotAnimationTimer?.invalidate()
-        dotAnimationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            DispatchQueue.main.async {
-                animatingDot = (animatingDot + 1) % 3
-            }
-        }
-    }
-
-    private func stopDotAnimation() {
-        dotAnimationTimer?.invalidate()
-        dotAnimationTimer = nil
+        Circle()
+            .trim(from: 0.14, to: 0.82)
+            .stroke(
+                Color.white,
+                style: StrokeStyle(lineWidth: 2.2, lineCap: .round)
+            )
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(isAnimating ? 360 : 0))
+            .animation(
+                .linear(duration: 0.75).repeatForever(autoreverses: false),
+                value: isAnimating
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onAppear { isAnimating = true }
+            .onDisappear { isAnimating = false }
     }
 }
