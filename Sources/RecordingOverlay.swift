@@ -358,13 +358,24 @@ struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
     let onStopButtonPressed: () -> Void
 
+    private var showsLiveRecordingContent: Bool {
+        state.phase == .recording || !state.showsTranscribingSpinner
+    }
+
+    private var showsStopButton: Bool {
+        showsLiveRecordingContent && state.recordingTriggerMode == .toggle
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             Group {
                 if state.phase == .initializing {
                     InitializingDotsView()
                         .transition(.opacity)
-                } else if state.phase == .recording || !state.showsTranscribingSpinner {
+                } else if state.phase == .done {
+                    DoneView()
+                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                } else if showsLiveRecordingContent {
                     WaveformView(audioLevel: state.audioLevel)
                         .transition(.opacity)
                 } else {
@@ -373,7 +384,7 @@ struct RecordingOverlayView: View {
                 }
             }
 
-            if state.phase == .recording && state.recordingTriggerMode == .toggle {
+            if showsStopButton {
                 Button(action: onStopButtonPressed) {
                     HStack(spacing: 5) {
                         Image(systemName: "stop.fill")
@@ -398,6 +409,15 @@ struct RecordingOverlayView: View {
 }
 
 // MARK: - Transcribing Indicator
+
+struct DoneView: View {
+    var body: some View {
+        Image(systemName: "checkmark")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
 
 struct TranscribingSpinnerView: View {
     @State private var isAnimating = false
