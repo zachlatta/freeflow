@@ -972,12 +972,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         let derivedHold = holdBinding.withAddedModifiers(manualModifier)
-        if !holdBinding.isDisabled && (derivedHold == holdBinding || derivedHold == toggleBinding) {
+        if !holdBinding.isDisabled && derivedHold == toggleBinding {
             return "That modifier would make the command hold shortcut overlap an existing dictation shortcut."
         }
 
         let derivedToggle = toggleBinding.withAddedModifiers(manualModifier)
-        if !toggleBinding.isDisabled && (derivedToggle == holdBinding || derivedToggle == toggleBinding) {
+        if !toggleBinding.isDisabled && derivedToggle == holdBinding {
             return "That modifier would make the command tap shortcut overlap an existing dictation shortcut."
         }
 
