@@ -280,7 +280,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var accessibilityTimer: Timer?
     private var audioLevelCancellable: AnyCancellable?
     private var debugOverlayTimer: Timer?
+    private var recordingInitializationTimer: DispatchSourceTimer?
     private var transcribingIndicatorTask: Task<Void, Never>?
+    private var transcriptionTask: Task<Void, Never>?
+    private var transcribingAudioFileName: String?
     private var contextService: AppContextService
     private var contextCaptureTask: Task<AppContext?, Never>?
     private var capturedContext: AppContext?
@@ -821,11 +824,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self?.handleShortcutEvent(event)
             }
         }
+        hotkeyManager.onEscapeKeyPressed = { [weak self] in
+            self?.handleEscapeKeyPress() ?? false
+        }
         restartHotkeyMonitoring()
     }
 
     func stopHotkeyMonitoring() {
         shouldMonitorHotkeys = false
+        hotkeyManager.onShortcutEvent = nil
+        hotkeyManager.onEscapeKeyPressed = nil
         hotkeyManager.stop()
     }
 
@@ -875,6 +883,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private func handleEscapeKeyPress() -> Bool {
+        if isTranscribing {
+            cancelTranscription()
+            return true
+        }
+
+        if pendingShortcutStartMode == .toggle || activeRecordingTriggerMode == .toggle {
+            cancelToggleShortcutSession()
+            return true
+        }
+
+        return false
+    }
+
     func toggleRecording() {
         os_log(.info, log: recordingLog, "toggleRecording() called, isRecording=%{public}d", isRecording)
         cancelPendingShortcutStart()
@@ -889,6 +911,57 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func handleOverlayStopButtonPressed() {
         guard isRecording, activeRecordingTriggerMode == .toggle else { return }
         stopAndTranscribe()
+    }
+
+    private func cancelToggleShortcutSession() {
+        guard pendingShortcutStartMode == .toggle || activeRecordingTriggerMode == .toggle else { return }
+
+        cancelPendingShortcutStart()
+        shortcutSessionController.reset()
+        activeRecordingTriggerMode = nil
+        audioRecorder.onRecordingReady = nil
+        audioRecorder.onRecordingFailure = nil
+        audioLevelCancellable?.cancel()
+        audioLevelCancellable = nil
+        cancelRecordingInitializationTimer()
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        capturedContext = nil
+        isRecording = false
+        errorMessage = nil
+        debugStatusMessage = "Cancelled"
+        statusText = "Cancelled"
+        overlayManager.dismiss()
+        audioRecorder.cancelRecording()
+        refreshAvailableMicrophonesIfNeeded()
+        scheduleReadyStatusReset(after: 2)
+    }
+
+    private func cancelTranscription() {
+        guard isTranscribing else { return }
+
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        transcribingIndicatorTask?.cancel()
+        transcribingIndicatorTask = nil
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        capturedContext = nil
+        shortcutSessionController.reset()
+        activeRecordingTriggerMode = nil
+        isRecording = false
+        isTranscribing = false
+        errorMessage = nil
+        debugStatusMessage = "Cancelled"
+        statusText = "Cancelled"
+        overlayManager.dismiss()
+        audioRecorder.cleanup()
+        if let transcribingAudioFileName {
+            Self.deleteAudioFile(transcribingAudioFileName)
+            self.transcribingAudioFileName = nil
+        }
+        refreshAvailableMicrophonesIfNeeded()
+        scheduleReadyStatusReset(after: 2)
     }
 
     private func scheduleShortcutStart(mode: RecordingTriggerMode) {
@@ -989,7 +1062,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         // Show initializing dots only if engine takes longer than 0.2s to start
         var overlayShown = false
+        cancelRecordingInitializationTimer()
         let initTimer = DispatchSource.makeTimerSource(queue: .main)
+        recordingInitializationTimer = initTimer
         initTimer.schedule(deadline: .now() + 0.2)
         initTimer.setEventHandler { [weak self] in
             guard let self, !overlayShown else { return }
@@ -1004,7 +1079,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioRecorder.onRecordingReady = { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
-                initTimer.cancel()
+                self.cancelRecordingInitializationTimer()
                 os_log(.info, log: recordingLog, "first real audio — transitioning to waveform")
                 self.statusText = "Recording..."
                 if overlayShown {
@@ -1019,7 +1094,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioRecorder.onRecordingFailure = { [weak self] error in
             DispatchQueue.main.async {
                 guard let self else { return }
-                initTimer.cancel()
+                self.cancelRecordingInitializationTimer()
                 self.handleRecordingFailure(error)
             }
         }
@@ -1032,6 +1107,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 try self.audioRecorder.startRecording(deviceUID: deviceUID)
                 os_log(.info, log: recordingLog, "audioRecorder.startRecording() done: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
                 DispatchQueue.main.async {
+                    guard self.isRecording, self.activeRecordingTriggerMode != nil else { return }
                     self.startContextCapture()
                     self.audioLevelCancellable = self.audioRecorder.$audioLevel
                         .receive(on: DispatchQueue.main)
@@ -1041,7 +1117,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 }
             } catch {
                 DispatchQueue.main.async {
-                    initTimer.cancel()
+                    self.cancelRecordingInitializationTimer()
+                    guard self.isRecording || self.activeRecordingTriggerMode != nil else { return }
                     self.handleRecordingFailure(error)
                 }
             }
@@ -1049,6 +1126,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func handleRecordingFailure(_ error: Error) {
+        cancelRecordingInitializationTimer()
         audioRecorder.onRecordingReady = nil
         audioRecorder.onRecordingFailure = nil
         audioLevelCancellable?.cancel()
@@ -1059,6 +1137,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioRecorder.cleanup()
         isRecording = false
         isTranscribing = false
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        transcribingIndicatorTask?.cancel()
+        transcribingIndicatorTask = nil
+        if let transcribingAudioFileName {
+            Self.deleteAudioFile(transcribingAudioFileName)
+            self.transcribingAudioFileName = nil
+        }
         activeRecordingTriggerMode = nil
         shortcutSessionController.reset()
         errorMessage = formattedRecordingStartError(error)
@@ -1178,6 +1264,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func stopAndTranscribe() {
         cancelPendingShortcutStart()
+        cancelRecordingInitializationTimer()
         shortcutSessionController.reset()
         activeRecordingTriggerMode = nil
         audioRecorder.onRecordingReady = nil
@@ -1216,6 +1303,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
             let savedAudioFile = Self.saveAudioFile(from: fileURL)
             let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
+            self.transcribingAudioFileName = savedAudioFile?.fileName
             self.statusText = "Transcribing..."
             self.debugStatusMessage = "Transcribing audio"
 
@@ -1238,10 +1326,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
         let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
 
-            Task {
+            self.transcriptionTask?.cancel()
+            self.transcriptionTask = Task {
                 do {
                     async let transcript = transcriptionService.transcribe(fileURL: transcriptionFileURL)
                     let rawTranscript = try await transcript
+                    try Task.checkCancellation()
                     let appContext: AppContext
                     if let sessionContext {
                         appContext = sessionContext
@@ -1250,6 +1340,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     } else {
                         appContext = self.fallbackContextAtStop()
                     }
+                    try Task.checkCancellation()
                     await MainActor.run { [weak self] in
                         self?.debugStatusMessage = "Running post-processing"
                     }
@@ -1260,8 +1351,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         customVocabulary: self.customVocabulary,
                         customSystemPrompt: self.customSystemPrompt
                     )
+                    try Task.checkCancellation()
 
                     await MainActor.run {
+                        guard self.isTranscribing else { return }
                         self.lastContextSummary = appContext.contextSummary
                         self.lastContextScreenshotDataURL = appContext.screenshotDataURL
                         self.lastContextScreenshotStatus = appContext.screenshotError
@@ -1280,8 +1373,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             processingStatus: processingStatus,
                             audioFileName: savedAudioFile?.fileName
                         )
+                        self.transcriptionTask = nil
                         self.transcribingIndicatorTask?.cancel()
                         self.transcribingIndicatorTask = nil
+                        self.transcribingAudioFileName = nil
                         self.lastTranscript = trimmedFinalTranscript
                         self.isTranscribing = false
                         self.debugStatusMessage = "Done"
@@ -1306,11 +1401,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.audioRecorder.cleanup()
                         self.refreshAvailableMicrophonesIfNeeded()
 
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                            if self.statusText == completionStatusText || self.statusText == "Nothing to transcribe" {
-                                self.statusText = "Ready"
-                            }
-                        }
+                        self.scheduleReadyStatusReset(after: 3, matching: [completionStatusText, "Nothing to transcribe"])
+                    }
+                } catch is CancellationError {
+                    await MainActor.run {
+                        self.transcriptionTask = nil
                     }
                 } catch {
                     let resolvedContext: AppContext
@@ -1322,8 +1417,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         resolvedContext = self.fallbackContextAtStop()
                     }
                     await MainActor.run {
+                        guard self.isTranscribing else { return }
+                        self.transcriptionTask = nil
                         self.transcribingIndicatorTask?.cancel()
                         self.transcribingIndicatorTask = nil
+                        self.transcribingAudioFileName = nil
                         self.errorMessage = error.localizedDescription
                         self.isTranscribing = false
                         self.statusText = "Error"
@@ -1611,6 +1709,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
             self?.pasteAtCursor()
             completion?()
+        }
+    }
+
+    private func cancelRecordingInitializationTimer() {
+        recordingInitializationTimer?.cancel()
+        recordingInitializationTimer = nil
+    }
+
+    private func scheduleReadyStatusReset(after delay: TimeInterval, matching statuses: Set<String>? = nil) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            if let statuses, !statuses.contains(self.statusText) {
+                return
+            }
+            self.statusText = "Ready"
         }
     }
 }
