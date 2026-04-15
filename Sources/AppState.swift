@@ -128,7 +128,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
     private let soundVolumeStorageKey = "sound_volume"
     private let voiceMacrosStorageKey = "voice_macros"
-    private let transcribingIndicatorDelay: TimeInterval = 1.0
+    private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let clipboardRestoreDelay: TimeInterval = 0.15
     let maxPipelineHistoryCount = 20
 
@@ -1315,7 +1315,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Preparing audio..."
         errorMessage = nil
         playAlertSound(named: "Pop")
-        overlayManager.slideUpToNotch { }
+        overlayManager.prepareForTranscribing()
         audioRecorder.stopRecording { [weak self] fileURL in
             guard let self else { return }
             guard let fileURL else {

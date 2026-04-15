@@ -90,7 +90,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     @Published var isRecording = false
     private let _recording = OSAllocatedUnfairLock(initialState: false)
     @Published var audioLevel: Float = 0.0
-    private var smoothedLevel: Float = 0.0
+    private let liveLevelNormalizerLock = OSAllocatedUnfairLock(initialState: LiveAudioLevelNormalizer())
 
     var onRecordingReady: (() -> Void)?
     var onRecordingFailure: ((Error) -> Void)?
@@ -214,6 +214,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             let completion = completion
             let discardURL = self.finishAudioFileLocked(discard: true)
             self.teardownSessionLocked()
+            self.liveLevelNormalizerLock.withLock { $0.reset() }
             if let discardURL {
                 try? FileManager.default.removeItem(at: discardURL)
             }
@@ -440,7 +441,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         _bufferCount.withLock { $0 = 0 }
         readyFired = false
         failureReported = false
-        smoothedLevel = 0.0
+        liveLevelNormalizerLock.withLock { $0.reset() }
 
         os_log(.info, log: recordingLog, "startRecording() entered")
 
@@ -481,6 +482,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             self.teardownSessionLocked()
             let outputURL = self.finishAudioFileLocked(discard: false)
             self._recording.withLock { $0 = false }
+            self.liveLevelNormalizerLock.withLock { $0.reset() }
             DispatchQueue.main.async {
                 self.isRecording = false
                 self.audioLevel = 0.0
@@ -495,6 +497,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             self.teardownSessionLocked()
             let discardURL = self.finishAudioFileLocked(discard: true)
             self._recording.withLock { $0 = false }
+            self.liveLevelNormalizerLock.withLock { $0.reset() }
             if let discardURL {
                 try? FileManager.default.removeItem(at: discardURL)
             }
@@ -547,16 +550,12 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         }
 
         let rms = sqrtf(sumOfSquares / Float(sampleCount))
-        let scaled = min(rms * 10.0, 1.0)
-
-        if scaled > smoothedLevel {
-            smoothedLevel = smoothedLevel * 0.3 + scaled * 0.7
-        } else {
-            smoothedLevel = smoothedLevel * 0.6 + scaled * 0.4
+        let normalizedDisplayLevel = liveLevelNormalizerLock.withLock {
+            $0.normalizedLevel(forRMS: rms)
         }
 
         DispatchQueue.main.async {
-            self.audioLevel = self.smoothedLevel
+            self.audioLevel = normalizedDisplayLevel
         }
         return rms
     }
