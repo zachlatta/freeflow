@@ -261,7 +261,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         var finalizedURL: URL?
         var shouldKeepFile = false
 
-        // Stop accepting buffers before releasing the writer so we never race the final write.
+        // Drain all queued sample-buffer callbacks before releasing the writer.
         sampleBufferQueue.sync {
             finalizedURL = self.tempFileURL
             shouldKeepFile = !discard && self.recordedFrameCount > 0 && self.fileWriteError == nil
@@ -463,9 +463,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
 
         sessionQueue.async {
             self.cancelWatchdog()
-            self._recording.withLock { $0 = false }
             self.teardownSessionLocked()
             let outputURL = self.finishAudioFileLocked(discard: false)
+            self._recording.withLock { $0 = false }
             DispatchQueue.main.async {
                 self.isRecording = false
                 self.audioLevel = 0.0
@@ -477,9 +477,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     func cancelRecording() {
         sessionQueue.async {
             self.cancelWatchdog()
-            self._recording.withLock { $0 = false }
             self.teardownSessionLocked()
             let discardURL = self.finishAudioFileLocked(discard: true)
+            self._recording.withLock { $0 = false }
             if let discardURL {
                 try? FileManager.default.removeItem(at: discardURL)
             }
