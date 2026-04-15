@@ -1,13 +1,13 @@
 name: Build macOS App
 
 on:
-  push:
-    branches: [main]
-  # SECURITY: Do NOT change this to pull_request_target — that trigger runs with
-  # access to repository secrets, which would expose signing credentials to fork PRs.
-  pull_request:
-    branches: [main]
-
+  # push:
+  #   branches: [main]
+  # # SECURITY: Do NOT change this to pull_request_target — that trigger runs with
+  # # access to repository secrets, which would expose signing credentials to fork PRs.
+  # pull_request:
+  #   branches: [main]
+  workflow_dispatch:
 jobs:
   build:
     runs-on: macos-latest
