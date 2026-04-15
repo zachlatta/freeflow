@@ -131,19 +131,13 @@ final class RecordingOverlayManager {
 
     func prepareForTranscribing() {
         DispatchQueue.main.async {
-            self.lockedOverlayWidth = self.overlayWindow?.frame.width ?? self.overlayWidth
-            self.overlayState.phase = .transcribing
-            self.overlayState.showsTranscribingSpinner = false
-            self.showOverlayPanel(animatedResize: true)
+            self.setTranscribingPhase(showsTranscribingSpinner: false)
         }
     }
 
     func showTranscribing() {
         DispatchQueue.main.async {
-            self.lockedOverlayWidth = self.overlayWindow?.frame.width ?? self.overlayWidth
-            self.overlayState.phase = .transcribing
-            self.overlayState.showsTranscribingSpinner = true
-            self.showOverlayPanel(animatedResize: true)
+            self.setTranscribingPhase(showsTranscribingSpinner: true)
         }
     }
 
@@ -198,6 +192,13 @@ final class RecordingOverlayManager {
         panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
         panel.contentView = makeOverlayContent(frame: frame)
         resize(panel: panel, to: frame, animated: animated)
+    }
+
+    private func setTranscribingPhase(showsTranscribingSpinner: Bool) {
+        lockedOverlayWidth = overlayWindow?.frame.width ?? overlayWidth
+        overlayState.phase = .transcribing
+        overlayState.showsTranscribingSpinner = showsTranscribingSpinner
+        showOverlayPanel(animatedResize: true)
     }
 
     private func makeOverlayContent(frame: NSRect) -> NSView {
