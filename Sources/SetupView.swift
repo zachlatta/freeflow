@@ -1047,7 +1047,9 @@ struct SetupView: View {
                                 }
                             }
                         }
-                        recorder.cleanup()
+                        await MainActor.run {
+                            recorder.cleanup()
+                        }
                     }
                 }
 

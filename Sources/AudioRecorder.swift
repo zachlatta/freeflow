@@ -77,6 +77,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private var tempFileURL: URL?
     private var recordingStartTime: CFAbsoluteTime = 0
     private let _bufferCount = OSAllocatedUnfairLock(initialState: 0)
+    private let fileWriteErrorLock = OSAllocatedUnfairLock(initialState: ())
     private var watchdogTimer: DispatchSourceTimer?
     private let sessionQueue = DispatchQueue(label: "com.zachlatta.freeflow.capture.session")
     private let sampleBufferQueue = DispatchQueue(label: "com.zachlatta.freeflow.capture.samples")
@@ -264,14 +265,18 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         // Drain all queued sample-buffer callbacks before releasing the writer.
         sampleBufferQueue.sync {
             finalizedURL = self.tempFileURL
-            shouldKeepFile = !discard && self.recordedFrameCount > 0 && self.fileWriteError == nil
+            shouldKeepFile = !discard && self.recordedFrameCount > 0 && self.fileWriteErrorLock.withLock { _ in
+                self.fileWriteError == nil
+            }
             self.activeAudioFile = nil
             self.activeAudioFormat = nil
         }
 
         defer {
             self.recordedFrameCount = 0
-            self.fileWriteError = nil
+            self.fileWriteErrorLock.withLock { _ in
+                self.fileWriteError = nil
+            }
             if !shouldKeepFile {
                 self.tempFileURL = nil
             }
@@ -301,7 +306,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     }
 
     private func appendSampleBufferToFile(_ sampleBuffer: CMSampleBuffer) throws {
-        if let fileWriteError {
+        if let fileWriteError = fileWriteErrorLock.withLock({ _ in
+            self.fileWriteError
+        }) {
             throw fileWriteError
         }
 
@@ -411,7 +418,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         activeAudioFile = nil
         activeAudioFormat = nil
         recordedFrameCount = 0
-        fileWriteError = nil
+        fileWriteErrorLock.withLock { _ in
+            fileWriteError = nil
+        }
         installSessionObservers(for: session)
 
         os_log(.info, log: recordingLog, "configured capture session with device %{public}@ [uid=%{public}@]", device.localizedName, device.uniqueID)
@@ -445,7 +454,13 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
                 self.startBufferWatchdog()
             }
         } catch {
-            tempFileURL = nil
+            if DispatchQueue.getSpecific(key: Self.sessionQueueKey) != nil {
+                tempFileURL = nil
+            } else {
+                sessionQueue.sync {
+                    tempFileURL = nil
+                }
+            }
             throw error
         }
 
@@ -491,9 +506,17 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     }
 
     func cleanup() {
-        if let url = tempFileURL {
-            try? FileManager.default.removeItem(at: url)
-            tempFileURL = nil
+        let cleanup = {
+            if let url = self.tempFileURL {
+                try? FileManager.default.removeItem(at: url)
+                self.tempFileURL = nil
+            }
+        }
+
+        if DispatchQueue.getSpecific(key: Self.sessionQueueKey) != nil {
+            cleanup()
+        } else {
+            sessionQueue.sync(execute: cleanup)
         }
     }
 
@@ -548,7 +571,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         do {
             try appendSampleBufferToFile(sampleBuffer)
         } catch {
-            fileWriteError = error
+            fileWriteErrorLock.withLock { _ in
+                fileWriteError = error
+            }
             os_log(.error, log: recordingLog, "audio file write failed: %{public}@", error.localizedDescription)
             reportRecordingFailure(error)
             return
