@@ -564,7 +564,7 @@ struct GeneralSettingsView: View {
             .pickerStyle(.segmented)
             .disabled(!appState.isCommandModeEnabled)
 
-            if appState.isCommandModeEnabled {
+            Group {
                 switch appState.commandModeStyle {
                 case .automatic:
                     Text("If text is selected, your normal dictation shortcut transforms the selection instead of dictating over it.")
@@ -590,9 +590,11 @@ struct GeneralSettingsView: View {
                                 Text(modifier.title).tag(modifier)
                             }
                         }
+                        .disabled(!appState.isCommandModeEnabled || appState.commandModeStyle != .manual)
                     }
                 }
             }
+            .opacity(appState.isCommandModeEnabled ? 1 : 0.5)
 
             if let validationMessage = commandModeValidationMessage ?? appState.commandModeManualModifierValidationMessage {
                 Label(validationMessage, systemImage: "xmark.circle.fill")

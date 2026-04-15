@@ -1206,6 +1206,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let t0 = CFAbsoluteTimeGetCurrent()
         os_log(.info, log: recordingLog, "startRecording() entered")
         guard !isRecording && !isTranscribing else { return }
+        let scheduledSelectionSnapshot = pendingSelectionSnapshot
+        let scheduledManualCommandInvocation = pendingManualCommandInvocation
         cancelPendingShortcutStart()
         activeRecordingTriggerMode = triggerMode
         guard hasAccessibility else {
@@ -1218,17 +1220,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
         os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        let selectionSnapshot = pendingSelectionSnapshot ?? contextService.collectSelectionSnapshot()
-        let manualCommandRequested = pendingSelectionSnapshot == nil
+        let selectionSnapshot = scheduledSelectionSnapshot ?? contextService.collectSelectionSnapshot()
+        let manualCommandRequested = scheduledSelectionSnapshot == nil
             ? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
-            : pendingManualCommandInvocation
+            : scheduledManualCommandInvocation
         guard let resolvedIntent = resolveSessionIntent(
             triggerMode: triggerMode,
             selectionSnapshot: selectionSnapshot,
             manualCommandRequested: manualCommandRequested
         ) else { return }
-        pendingSelectionSnapshot = nil
-        pendingManualCommandInvocation = false
         currentSessionIntent = resolvedIntent
         overlayManager.setRecordingTriggerMode(triggerMode, animated: false)
         guard ensureMicrophoneAccess() else { return }

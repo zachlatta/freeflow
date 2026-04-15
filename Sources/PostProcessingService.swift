@@ -3,6 +3,7 @@ import Foundation
 enum PostProcessingError: LocalizedError {
     case requestFailed(Int, String)
     case invalidResponse(String)
+    case invalidInput(String)
     case emptyOutput
     case requestTimedOut(TimeInterval)
 
@@ -12,6 +13,8 @@ enum PostProcessingError: LocalizedError {
             "Post-processing failed with status \(statusCode): \(details)"
         case .invalidResponse(let details):
             "Invalid post-processing response: \(details)"
+        case .invalidInput(let details):
+            "Invalid post-processing input: \(details)"
         case .emptyOutput:
             "Post-processing returned empty output"
         case .requestTimedOut(let seconds):
@@ -170,6 +173,12 @@ Behavior:
         let vocabularyTerms = mergedVocabularyTerms(rawVocabulary: customVocabulary)
         let trimmedSelectedText = selectedText.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedVoiceCommand = voiceCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSelectedText.isEmpty else {
+            throw PostProcessingError.invalidInput("Selected text must not be empty")
+        }
+        guard !trimmedVoiceCommand.isEmpty else {
+            throw PostProcessingError.invalidInput("Voice command must not be empty")
+        }
 
         let timeoutSeconds = postProcessingTimeoutSeconds
         return try await withThrowingTaskGroup(of: PostProcessingResult.self) { group in
