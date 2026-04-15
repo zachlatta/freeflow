@@ -2,7 +2,6 @@ import Foundation
 import Combine
 import AppKit
 import AVFoundation
-import CoreAudio
 import ServiceManagement
 import ApplicationServices
 import ScreenCaptureKit
@@ -286,7 +285,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var contextCaptureTask: Task<AppContext?, Never>?
     private var capturedContext: AppContext?
     private var hasShownScreenshotPermissionAlert = false
-    private var audioDeviceListenerBlock: AudioObjectPropertyListenerBlock?
+    private var audioDeviceObservers: [NSObjectProtocol] = []
+    private var needsMicrophoneRefreshAfterRecording = false
     private let pipelineHistoryStore = PipelineHistoryStore()
     private let shortcutSessionController = DictationShortcutSessionController()
     private var activeRecordingTriggerMode: RecordingTriggerMode?
@@ -372,7 +372,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.precomputeMacros()
 
         refreshAvailableMicrophones()
-        installAudioDeviceListener()
+        installAudioDeviceObservers()
 
         if shortcuts.didMigrateLegacyValue {
             persistShortcut(shortcuts.hold, key: holdShortcutStorageKey)
@@ -389,23 +389,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     deinit {
-        removeAudioDeviceListener()
+        removeAudioDeviceObservers()
     }
 
-    private func removeAudioDeviceListener() {
-        guard let block = audioDeviceListenerBlock else { return }
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        AudioObjectRemovePropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            DispatchQueue.main,
-            block
-        )
-        audioDeviceListenerBlock = nil
+    private func removeAudioDeviceObservers() {
+        let notificationCenter = NotificationCenter.default
+        for observer in audioDeviceObservers {
+            notificationCenter.removeObserver(observer)
+        }
+        audioDeviceObservers.removeAll()
     }
 
     private static func loadStoredAPIKey(account: String) -> String {
@@ -714,26 +706,47 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     func refreshAvailableMicrophones() {
+        guard !isRecording, !audioRecorder.isRecording else {
+            needsMicrophoneRefreshAfterRecording = true
+            return
+        }
+
+        needsMicrophoneRefreshAfterRecording = false
         availableMicrophones = AudioDevice.availableInputDevices()
     }
 
-    private func installAudioDeviceListener() {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            DispatchQueue.main.async {
-                self?.refreshAvailableMicrophones()
+    private func refreshAvailableMicrophonesIfNeeded() {
+        guard needsMicrophoneRefreshAfterRecording else { return }
+        refreshAvailableMicrophones()
+    }
+
+    private func installAudioDeviceObservers() {
+        removeAudioDeviceObservers()
+
+        let notificationCenter = NotificationCenter.default
+        let refreshOnAudioDeviceChange: (Notification) -> Void = { [weak self] notification in
+            guard let device = notification.object as? AVCaptureDevice,
+                  device.hasMediaType(.audio) else {
+                return
             }
+            self?.refreshAvailableMicrophones()
         }
-        audioDeviceListenerBlock = block
-        AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &propertyAddress,
-            DispatchQueue.main,
-            block
+
+        audioDeviceObservers.append(
+            notificationCenter.addObserver(
+                forName: .AVCaptureDeviceWasConnected,
+                object: nil,
+                queue: .main,
+                using: refreshOnAudioDeviceChange
+            )
+        )
+        audioDeviceObservers.append(
+            notificationCenter.addObserver(
+                forName: .AVCaptureDeviceWasDisconnected,
+                object: nil,
+                queue: .main,
+                using: refreshOnAudioDeviceChange
+            )
         )
     }
 
@@ -974,10 +987,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Starting..."
         hasShownScreenshotPermissionAlert = false
 
-        // Show initializing dots only if engine takes longer than 0.5s to start
+        // Show initializing dots only if engine takes longer than 0.2s to start
         var overlayShown = false
         let initTimer = DispatchSource.makeTimerSource(queue: .main)
-        initTimer.schedule(deadline: .now() + 0.5)
+        initTimer.schedule(deadline: .now() + 0.2)
         initTimer.setEventHandler { [weak self] in
             guard let self, !overlayShown else { return }
             overlayShown = true
@@ -1003,6 +1016,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.playAlertSound(named: "Tink")
             }
         }
+        audioRecorder.onRecordingFailure = { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                initTimer.cancel()
+                self.handleRecordingFailure(error)
+            }
+        }
 
         // Start engine on background thread so UI isn't blocked
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -1022,15 +1042,29 @@ final class AppState: ObservableObject, @unchecked Sendable {
             } catch {
                 DispatchQueue.main.async {
                     initTimer.cancel()
-                    self.isRecording = false
-                    self.activeRecordingTriggerMode = nil
-                    self.shortcutSessionController.reset()
-                    self.errorMessage = self.formattedRecordingStartError(error)
-                    self.statusText = "Error"
-                    self.overlayManager.dismiss()
+                    self.handleRecordingFailure(error)
                 }
             }
         }
+    }
+
+    private func handleRecordingFailure(_ error: Error) {
+        audioRecorder.onRecordingReady = nil
+        audioRecorder.onRecordingFailure = nil
+        audioLevelCancellable?.cancel()
+        audioLevelCancellable = nil
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        capturedContext = nil
+        audioRecorder.cleanup()
+        isRecording = false
+        isTranscribing = false
+        activeRecordingTriggerMode = nil
+        shortcutSessionController.reset()
+        errorMessage = formattedRecordingStartError(error)
+        statusText = "Error"
+        overlayManager.dismiss()
+        refreshAvailableMicrophonesIfNeeded()
     }
 
     private func formattedRecordingStartError(_ error: Error) -> String {
@@ -1146,6 +1180,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         cancelPendingShortcutStart()
         shortcutSessionController.reset()
         activeRecordingTriggerMode = nil
+        audioRecorder.onRecordingReady = nil
+        audioRecorder.onRecordingFailure = nil
         audioLevelCancellable?.cancel()
         audioLevelCancellable = nil
         debugStatusMessage = "Preparing audio"
@@ -1160,37 +1196,41 @@ final class AppState: ObservableObject, @unchecked Sendable {
         lastPostProcessingPrompt = ""
         lastContextScreenshotDataURL = nil
         lastContextScreenshotStatus = "No screenshot"
-
-        guard let fileURL = audioRecorder.stopRecording() else {
-            audioRecorder.cleanup()
-            errorMessage = "No audio recorded"
-            isRecording = false
-            statusText = "Error"
-            overlayManager.dismiss()
-            return
-        }
-        let savedAudioFile = Self.saveAudioFile(from: fileURL)
-        let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
         isRecording = false
         isTranscribing = true
-        statusText = "Transcribing..."
-        debugStatusMessage = "Transcribing audio"
+        statusText = "Preparing audio..."
         errorMessage = nil
         playAlertSound(named: "Pop")
         overlayManager.slideUpToNotch { }
+        audioRecorder.stopRecording { [weak self] fileURL in
+            guard let self else { return }
+            guard let fileURL else {
+                self.isTranscribing = false
+                self.audioRecorder.cleanup()
+                self.errorMessage = "No audio recorded"
+                self.statusText = "Error"
+                self.overlayManager.dismiss()
+                self.refreshAvailableMicrophonesIfNeeded()
+                return
+            }
 
-        transcribingIndicatorTask?.cancel()
-        let indicatorDelay = transcribingIndicatorDelay
-        transcribingIndicatorTask = Task { [weak self] in
-            do {
-                try await Task.sleep(nanoseconds: UInt64(indicatorDelay * 1_000_000_000))
-                let shouldShowTranscribing = self?.isTranscribing ?? false
-                guard shouldShowTranscribing else { return }
-                await MainActor.run { [weak self] in
-                    self?.overlayManager.showTranscribing()
-                }
-            } catch {}
-        }
+            let savedAudioFile = Self.saveAudioFile(from: fileURL)
+            let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
+            self.statusText = "Transcribing..."
+            self.debugStatusMessage = "Transcribing audio"
+
+            self.transcribingIndicatorTask?.cancel()
+            let indicatorDelay = self.transcribingIndicatorDelay
+            self.transcribingIndicatorTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(indicatorDelay * 1_000_000_000))
+                    let shouldShowTranscribing = self?.isTranscribing ?? false
+                    guard shouldShowTranscribing else { return }
+                    await MainActor.run { [weak self] in
+                        self?.overlayManager.showTranscribing()
+                    }
+                } catch {}
+            }
 
         let transcriptionService = TranscriptionService(
             apiKey: apiKey,
@@ -1198,112 +1238,115 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
         let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
 
-        Task {
-            do {
-                async let transcript = transcriptionService.transcribe(fileURL: transcriptionFileURL)
-                let rawTranscript = try await transcript
-                let appContext: AppContext
-                if let sessionContext {
-                    appContext = sessionContext
-                } else if let inFlightContext = await inFlightContextTask?.value {
-                    appContext = inFlightContext
-                } else {
-                    appContext = fallbackContextAtStop()
-                }
-                await MainActor.run { [weak self] in
-                    self?.debugStatusMessage = "Running post-processing"
-                }
-                let (finalTranscript, processingStatus, postProcessingPrompt) = await processTranscript(
-                    rawTranscript,
-                    context: appContext,
-                    postProcessingService: postProcessingService,
-                    customVocabulary: customVocabulary,
-                    customSystemPrompt: customSystemPrompt
-                )
-
-                await MainActor.run {
-                    self.lastContextSummary = appContext.contextSummary
-                    self.lastContextScreenshotDataURL = appContext.screenshotDataURL
-                    self.lastContextScreenshotStatus = appContext.screenshotError
-                        ?? "available (\(appContext.screenshotMimeType ?? "image"))"
-                    let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let trimmedFinalTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                    self.lastPostProcessingPrompt = postProcessingPrompt
-                    self.lastRawTranscript = trimmedRawTranscript
-                    self.lastPostProcessedTranscript = trimmedFinalTranscript
-                    self.lastPostProcessingStatus = processingStatus
-                    self.recordPipelineHistoryEntry(
-                        rawTranscript: trimmedRawTranscript,
-                        postProcessedTranscript: trimmedFinalTranscript,
-                        postProcessingPrompt: postProcessingPrompt,
-                        context: appContext,
-                        processingStatus: processingStatus,
-                        audioFileName: savedAudioFile?.fileName
-                    )
-                    self.transcribingIndicatorTask?.cancel()
-                    self.transcribingIndicatorTask = nil
-                    self.lastTranscript = trimmedFinalTranscript
-                    self.isTranscribing = false
-                    self.debugStatusMessage = "Done"
-                    let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
-
-                    if trimmedFinalTranscript.isEmpty {
-                        self.statusText = "Nothing to transcribe"
-                        self.overlayManager.dismiss()
+            Task {
+                do {
+                    async let transcript = transcriptionService.transcribe(fileURL: transcriptionFileURL)
+                    let rawTranscript = try await transcript
+                    let appContext: AppContext
+                    if let sessionContext {
+                        appContext = sessionContext
+                    } else if let inFlightContext = await inFlightContextTask?.value {
+                        appContext = inFlightContext
                     } else {
-                        self.statusText = completionStatusText
-                        self.overlayManager.showDone()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
-                            self.overlayManager.dismiss()
-                        }
-
-                        let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
-                        self.pasteAtCursorWhenShortcutReleased {
-                            self.restoreClipboardIfNeeded(pendingClipboardRestore)
-                        }
+                        appContext = self.fallbackContextAtStop()
                     }
-
-                    self.audioRecorder.cleanup()
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        if self.statusText == completionStatusText || self.statusText == "Nothing to transcribe" {
-                            self.statusText = "Ready"
-                        }
+                    await MainActor.run { [weak self] in
+                        self?.debugStatusMessage = "Running post-processing"
                     }
-                }
-            } catch {
-                let resolvedContext: AppContext
-                if let sessionContext {
-                    resolvedContext = sessionContext
-                } else if let inFlightContext = await inFlightContextTask?.value {
-                    resolvedContext = inFlightContext
-                } else {
-                    resolvedContext = fallbackContextAtStop()
-                }
-                await MainActor.run {
-                    self.transcribingIndicatorTask?.cancel()
-                    self.transcribingIndicatorTask = nil
-                    self.errorMessage = error.localizedDescription
-                    self.isTranscribing = false
-                    self.statusText = "Error"
-                    self.audioRecorder.cleanup()
-                    self.overlayManager.dismiss()
-                    self.lastPostProcessedTranscript = ""
-                    self.lastRawTranscript = ""
-                    self.lastContextSummary = ""
-                    self.lastPostProcessingStatus = "Error: \(error.localizedDescription)"
-                    self.lastPostProcessingPrompt = ""
-                    self.lastContextScreenshotDataURL = resolvedContext.screenshotDataURL
-                    self.lastContextScreenshotStatus = resolvedContext.screenshotError
-                        ?? "available (\(resolvedContext.screenshotMimeType ?? "image"))"
-                    self.recordPipelineHistoryEntry(
-                        rawTranscript: "",
-                        postProcessedTranscript: "",
-                        postProcessingPrompt: "",
-                        context: resolvedContext,
-                        processingStatus: "Error: \(error.localizedDescription)",
-                        audioFileName: savedAudioFile?.fileName
+                    let (finalTranscript, processingStatus, postProcessingPrompt) = await self.processTranscript(
+                        rawTranscript,
+                        context: appContext,
+                        postProcessingService: postProcessingService,
+                        customVocabulary: self.customVocabulary,
+                        customSystemPrompt: self.customSystemPrompt
                     )
+
+                    await MainActor.run {
+                        self.lastContextSummary = appContext.contextSummary
+                        self.lastContextScreenshotDataURL = appContext.screenshotDataURL
+                        self.lastContextScreenshotStatus = appContext.screenshotError
+                            ?? "available (\(appContext.screenshotMimeType ?? "image"))"
+                        let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let trimmedFinalTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                        self.lastPostProcessingPrompt = postProcessingPrompt
+                        self.lastRawTranscript = trimmedRawTranscript
+                        self.lastPostProcessedTranscript = trimmedFinalTranscript
+                        self.lastPostProcessingStatus = processingStatus
+                        self.recordPipelineHistoryEntry(
+                            rawTranscript: trimmedRawTranscript,
+                            postProcessedTranscript: trimmedFinalTranscript,
+                            postProcessingPrompt: postProcessingPrompt,
+                            context: appContext,
+                            processingStatus: processingStatus,
+                            audioFileName: savedAudioFile?.fileName
+                        )
+                        self.transcribingIndicatorTask?.cancel()
+                        self.transcribingIndicatorTask = nil
+                        self.lastTranscript = trimmedFinalTranscript
+                        self.isTranscribing = false
+                        self.debugStatusMessage = "Done"
+                        let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
+
+                        if trimmedFinalTranscript.isEmpty {
+                            self.statusText = "Nothing to transcribe"
+                            self.overlayManager.dismiss()
+                        } else {
+                            self.statusText = completionStatusText
+                            self.overlayManager.showDone()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                                self.overlayManager.dismiss()
+                            }
+
+                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
+                            self.pasteAtCursorWhenShortcutReleased {
+                                self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                            }
+                        }
+
+                        self.audioRecorder.cleanup()
+                        self.refreshAvailableMicrophonesIfNeeded()
+
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            if self.statusText == completionStatusText || self.statusText == "Nothing to transcribe" {
+                                self.statusText = "Ready"
+                            }
+                        }
+                    }
+                } catch {
+                    let resolvedContext: AppContext
+                    if let sessionContext {
+                        resolvedContext = sessionContext
+                    } else if let inFlightContext = await inFlightContextTask?.value {
+                        resolvedContext = inFlightContext
+                    } else {
+                        resolvedContext = self.fallbackContextAtStop()
+                    }
+                    await MainActor.run {
+                        self.transcribingIndicatorTask?.cancel()
+                        self.transcribingIndicatorTask = nil
+                        self.errorMessage = error.localizedDescription
+                        self.isTranscribing = false
+                        self.statusText = "Error"
+                        self.overlayManager.dismiss()
+                        self.lastPostProcessedTranscript = ""
+                        self.lastRawTranscript = ""
+                        self.lastContextSummary = ""
+                        self.lastPostProcessingStatus = "Error: \(error.localizedDescription)"
+                        self.lastPostProcessingPrompt = ""
+                        self.lastContextScreenshotDataURL = resolvedContext.screenshotDataURL
+                        self.lastContextScreenshotStatus = resolvedContext.screenshotError
+                            ?? "available (\(resolvedContext.screenshotMimeType ?? "image"))"
+                        self.recordPipelineHistoryEntry(
+                            rawTranscript: "",
+                            postProcessedTranscript: "",
+                            postProcessingPrompt: "",
+                            context: resolvedContext,
+                            processingStatus: "Error: \(error.localizedDescription)",
+                            audioFileName: savedAudioFile?.fileName
+                        )
+                        self.audioRecorder.cleanup()
+                        self.refreshAvailableMicrophonesIfNeeded()
+                    }
                 }
             }
         }
@@ -1438,8 +1481,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             hasShownScreenshotPermissionAlert = true
 
             // Permission errors are fatal — stop recording
-            _ = audioRecorder.stopRecording()
-            audioRecorder.cleanup()
+            audioRecorder.cancelRecording()
             audioLevelCancellable?.cancel()
             audioLevelCancellable = nil
             contextCaptureTask?.cancel()

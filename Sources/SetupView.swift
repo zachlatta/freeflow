@@ -962,8 +962,24 @@ struct SetupView: View {
                 }
                 do {
                     let recorder = AudioRecorder()
+                    recorder.onRecordingFailure = { [weak recorder] error in
+                        guard let recorder else { return }
+                        Task { @MainActor in
+                            testAudioLevelCancellable?.cancel()
+                            testAudioLevelCancellable = nil
+                            testAudioLevel = 0.0
+                            testHotkeyHarness.isTranscribing = false
+                            testAudioRecorder = nil
+                            testError = error.localizedDescription
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                testPhase = .done
+                            }
+                            recorder.cleanup()
+                        }
+                    }
                     try recorder.startRecording(deviceUID: appState.selectedMicrophoneID)
                     testAudioRecorder = recorder
+                    testError = nil
                     testAudioLevelCancellable = recorder.$audioLevel
                         .receive(on: DispatchQueue.main)
                         .sink { level in
@@ -982,7 +998,6 @@ struct SetupView: View {
 
             case .stop:
                 guard testPhase == .recording, let recorder = testAudioRecorder else { return }
-                let fileURL = recorder.stopRecording()
                 testAudioLevelCancellable?.cancel()
                 testAudioLevelCancellable = nil
                 testAudioLevel = 0.0
@@ -991,40 +1006,51 @@ struct SetupView: View {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     testPhase = .transcribing
                 }
-
-                guard let url = fileURL else {
-                    testHotkeyHarness.isTranscribing = false
-                    testError = "No audio file was created."
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                        testPhase = .done
-                    }
-                    return
-                }
-
-                Task {
-                    do {
-                        let service = TranscriptionService(
-                            apiKey: appState.apiKey,
-                            baseURL: appState.apiBaseURL
-                        )
-                        let transcript = try await service.transcribe(fileURL: url)
-                        await MainActor.run {
+                recorder.stopRecording { url in
+                    guard let url else {
+                        Task { @MainActor in
                             testHotkeyHarness.isTranscribing = false
-                            testTranscript = transcript
-                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                            testAudioRecorder = nil
+                            if testError == nil {
+                                testError = "No audio file was created."
+                            }
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                 testPhase = .done
                             }
+                            recorder.cleanup()
                         }
-                    } catch {
-                        await MainActor.run {
-                            testHotkeyHarness.isTranscribing = false
-                            testError = error.localizedDescription
-                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                                testPhase = .done
+                        return
+                    }
+
+                    Task {
+                        do {
+                            let service = TranscriptionService(
+                                apiKey: appState.apiKey,
+                                baseURL: appState.apiBaseURL,
+                            )
+                            let transcript = try await service.transcribe(fileURL: url)
+                            await MainActor.run {
+                                testHotkeyHarness.isTranscribing = false
+                                testAudioRecorder = nil
+                                testTranscript = transcript
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                    testPhase = .done
+                                }
+                            }
+                        } catch {
+                            await MainActor.run {
+                                testHotkeyHarness.isTranscribing = false
+                                testAudioRecorder = nil
+                                testError = error.localizedDescription
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                    testPhase = .done
+                                }
                             }
                         }
+                        await MainActor.run {
+                            recorder.cleanup()
+                        }
                     }
-                    recorder.cleanup()
                 }
 
             case .switchedToToggle:
@@ -1043,8 +1069,7 @@ struct SetupView: View {
         testAudioLevelCancellable?.cancel()
         testAudioLevelCancellable = nil
         if let recorder = testAudioRecorder, recorder.isRecording {
-            _ = recorder.stopRecording()
-            recorder.cleanup()
+            recorder.cancelRecording()
         }
         testAudioRecorder = nil
     }
@@ -1059,9 +1084,8 @@ struct SetupView: View {
         testHotkeyHarness.resetSession()
         if let recorder = testAudioRecorder {
             if recorder.isRecording {
-                _ = recorder.stopRecording()
+                recorder.cancelRecording()
             }
-            recorder.cleanup()
             testAudioRecorder = nil
         }
     }
