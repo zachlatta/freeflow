@@ -934,7 +934,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         overlayManager.dismiss()
         audioRecorder.cancelRecording()
         refreshAvailableMicrophonesIfNeeded()
-        scheduleReadyStatusReset(after: 2)
+        if !isRecording && !isTranscribing && statusText == "Cancelled" {
+            scheduleReadyStatusReset(after: 2, matching: ["Cancelled"])
+        }
     }
 
     private func cancelTranscription() {
@@ -961,7 +963,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.transcribingAudioFileName = nil
         }
         refreshAvailableMicrophonesIfNeeded()
-        scheduleReadyStatusReset(after: 2)
+        if !isRecording && !isTranscribing && statusText == "Cancelled" {
+            scheduleReadyStatusReset(after: 2, matching: ["Cancelled"])
+        }
     }
 
     private func scheduleShortcutStart(mode: RecordingTriggerMode) {
