@@ -248,6 +248,10 @@ Behavior:
             guard shouldFallback else {
                 throw error
             }
+
+            guard let retryModel else {
+                throw error
+            }
         }
         return try await process(
             transcript: transcript,
@@ -288,6 +292,10 @@ Behavior:
             guard shouldFallback else {
                 throw error
             }
+
+            guard let retryModel else {
+                throw error
+            }
         }
         return try await processCommandTransform(
             selectedText: selectedText,
@@ -302,14 +310,14 @@ Behavior:
         preferredModel.isEmpty ? defaultModel : preferredModel
     }
 
-    private func resolvedRetryModel(for primaryModel: String) -> String {
+    private func resolvedRetryModel(for primaryModel: String) -> String? {
         if primaryModel == defaultModel {
             return fallbackModel
         }
         if primaryModel == fallbackModel {
             return defaultModel
         }
-        return defaultModel
+        return nil
     }
 
     private func process(
