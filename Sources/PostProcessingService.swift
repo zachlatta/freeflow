@@ -118,6 +118,7 @@ Behavior:
     private let preferredFallbackModel: String
     private let defaultModel = "openai/gpt-oss-20b"
     private let defaultFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    private let defaultModelReasoningEffort = "low"
     private let postProcessingMaxCompletionTokens = 4096
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
@@ -393,6 +394,8 @@ Model: \(model)
         ]
         if model == defaultModel {
             payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
+            payload["reasoning_effort"] = defaultModelReasoningEffort
+            payload["include_reasoning"] = false
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
@@ -415,11 +418,11 @@ Model: \(model)
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
 
-        let sanitizedTranscript = sanitizeCommandModeTranscript(content)
-        guard !sanitizedTranscript.isEmpty else {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PostProcessingError.emptyOutput
         }
 
+        let sanitizedTranscript = sanitizePostProcessedTranscript(content)
         return PostProcessingResult(
             transcript: sanitizedTranscript,
             prompt: promptForDisplay
@@ -491,6 +494,8 @@ Model: \(model)
         ]
         if model == defaultModel {
             payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
+            payload["reasoning_effort"] = defaultModelReasoningEffort
+            payload["include_reasoning"] = false
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
@@ -513,11 +518,11 @@ Model: \(model)
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
 
-        let sanitizedTranscript = sanitizePostProcessedTranscript(content)
-        guard !sanitizedTranscript.isEmpty else {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PostProcessingError.emptyOutput
         }
 
+        let sanitizedTranscript = sanitizeCommandModeTranscript(content)
         return PostProcessingResult(
             transcript: sanitizedTranscript,
             prompt: promptForDisplay
