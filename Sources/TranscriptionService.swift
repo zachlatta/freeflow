@@ -239,8 +239,24 @@ class TranscriptionService {
         guard hallucinationPhrases.contains(normalized) else {
             return false
         }
-        guard let segments = json["segments"] as? [[String: Any]],
-              let noSpeechProb = segments.first?["no_speech_prob"] as? Double else {
+
+        guard let segments = json["segments"] as? [[String: Any]] else {
+            os_log(
+                .info,
+                log: transcriptionLog,
+                "Skipping hallucination filter for '%{public}@': provider response has no segments/no_speech metadata",
+                normalized
+            )
+            return false
+        }
+
+        guard let noSpeechProb = segments.first?["no_speech_prob"] as? Double else {
+            os_log(
+                .info,
+                log: transcriptionLog,
+                "Skipping hallucination filter for '%{public}@': provider response omitted no_speech_prob",
+                normalized
+            )
             return false
         }
         return noSpeechProb >= hallucinationNoSpeechThreshold

@@ -224,8 +224,8 @@ Behavior:
         customVocabulary: [String],
         customSystemPrompt: String = ""
     ) async throws -> PostProcessingResult {
-        let primaryModel = preferredModel.isEmpty ? defaultModel : preferredModel
-        let retryModel = preferredModel.isEmpty ? fallbackModel : preferredModel
+        let primaryModel = resolvedPrimaryModel()
+        let retryModel = resolvedRetryModel(for: primaryModel)
         do {
             return try await process(
                 transcript: transcript,
@@ -249,7 +249,6 @@ Behavior:
                 throw error
             }
         }
-
         return try await process(
             transcript: transcript,
             contextSummary: contextSummary,
@@ -265,8 +264,8 @@ Behavior:
         contextSummary: String,
         customVocabulary: [String]
     ) async throws -> PostProcessingResult {
-        let primaryModel = preferredModel.isEmpty ? defaultModel : preferredModel
-        let retryModel = preferredModel.isEmpty ? fallbackModel : preferredModel
+        let primaryModel = resolvedPrimaryModel()
+        let retryModel = resolvedRetryModel(for: primaryModel)
         do {
             return try await processCommandTransform(
                 selectedText: selectedText,
@@ -290,7 +289,6 @@ Behavior:
                 throw error
             }
         }
-
         return try await processCommandTransform(
             selectedText: selectedText,
             voiceCommand: voiceCommand,
@@ -298,6 +296,20 @@ Behavior:
             model: retryModel,
             customVocabulary: customVocabulary
         )
+    }
+
+    private func resolvedPrimaryModel() -> String {
+        preferredModel.isEmpty ? defaultModel : preferredModel
+    }
+
+    private func resolvedRetryModel(for primaryModel: String) -> String {
+        if primaryModel == defaultModel {
+            return fallbackModel
+        }
+        if primaryModel == fallbackModel {
+            return defaultModel
+        }
+        return defaultModel
     }
 
     private func process(
