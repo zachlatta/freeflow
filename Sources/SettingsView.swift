@@ -1526,7 +1526,7 @@ struct RunLogEntryView: View {
                             title: "Transcribe Audio",
                             content: {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Sent audio to \(AppState.defaultTranscriptionModel)")
+                                    Text("Sent audio to the configured transcription model")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .textSelection(.enabled)
