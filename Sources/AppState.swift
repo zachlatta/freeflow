@@ -1707,13 +1707,25 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.debugStatusMessage = "Done"
                         let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
 
+                        let shouldPersistRawDictationFallback: Bool
+                        switch result.outcome {
+                        case .postProcessingFailedFallback:
+                            shouldPersistRawDictationFallback = !trimmedFinalTranscript.isEmpty
+                        default:
+                            shouldPersistRawDictationFallback = false
+                        }
+
                         if trimmedFinalTranscript.isEmpty {
                             self.statusText = "Nothing to transcribe"
                             self.overlayManager.dismiss()
                         } else {
                             self.statusText = completionStatusText
-                            self.overlayManager.showDone()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                            if shouldPersistRawDictationFallback {
+                                self.overlayManager.showFallbackMessage("Used raw dictation")
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                                    self.overlayManager.dismiss()
+                                }
+                            } else {
                                 self.overlayManager.dismiss()
                             }
 

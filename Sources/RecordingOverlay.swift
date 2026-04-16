@@ -9,13 +9,14 @@ final class RecordingOverlayState: ObservableObject {
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
     @Published var isCommandMode = false
     @Published var showsTranscribingSpinner = false
+    @Published var feedbackMessage: String?
 }
 
 enum OverlayPhase {
     case initializing
     case recording
     case transcribing
-    case done
+    case feedback
 }
 
 // MARK: - Panel Helpers
@@ -92,6 +93,7 @@ final class RecordingOverlayManager {
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .initializing
             self.overlayState.showsTranscribingSpinner = false
+            self.overlayState.feedbackMessage = nil
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: false)
         }
@@ -104,6 +106,7 @@ final class RecordingOverlayManager {
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .recording
             self.overlayState.showsTranscribingSpinner = false
+            self.overlayState.feedbackMessage = nil
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: true)
         }
@@ -116,6 +119,7 @@ final class RecordingOverlayManager {
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .recording
             self.overlayState.showsTranscribingSpinner = false
+            self.overlayState.feedbackMessage = nil
             self.updateOverlayLayout(animated: true)
         }
     }
@@ -145,9 +149,9 @@ final class RecordingOverlayManager {
         }
     }
 
-    func showDone() {
+    func showFallbackMessage(_ message: String) {
         DispatchQueue.main.async {
-            self.showDonePanel()
+            self.showFeedbackPanel(message: message)
         }
     }
 
@@ -202,6 +206,7 @@ final class RecordingOverlayManager {
         lockedOverlayWidth = overlayWindow?.frame.width ?? overlayWidth
         overlayState.phase = .transcribing
         overlayState.showsTranscribingSpinner = showsTranscribingSpinner
+        overlayState.feedbackMessage = nil
         showOverlayPanel(animatedResize: true)
     }
 
@@ -244,8 +249,15 @@ final class RecordingOverlayManager {
     }
 
     private var overlayWidth: CGFloat {
-        if let lockedOverlayWidth, (overlayState.phase == .transcribing || overlayState.phase == .done) {
+        if let lockedOverlayWidth, overlayState.phase == .transcribing {
             return lockedOverlayWidth
+        }
+
+        if overlayState.phase == .feedback {
+            let approximateTextWidth = CGFloat((overlayState.feedbackMessage?.count ?? 0) * 7)
+            let feedbackWidth = max(168, min(260, 48 + approximateTextWidth))
+            guard screenHasNotch else { return feedbackWidth }
+            return max(notchWidth, feedbackWidth)
         }
 
         let commandModeWidth: CGFloat = 180
@@ -265,22 +277,18 @@ final class RecordingOverlayManager {
         return max(notchWidth, baseWidth)
     }
 
-    private func showDonePanel() {
-        overlayState.phase = .done
-
-        guard let panel = overlayWindow else { return }
-        panel.contentView = makeOverlayContent(frame: panel.frame)
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            panel.animator().alphaValue = 0
-        }
+    private func showFeedbackPanel(message: String) {
+        lockedOverlayWidth = nil
+        overlayState.phase = .feedback
+        overlayState.feedbackMessage = message
+        showOverlayPanel(animatedResize: true)
     }
 
     private func dismissAll() {
         lockedOverlayWidth = nil
         overlayState.isCommandMode = false
         overlayState.showsTranscribingSpinner = false
+        overlayState.feedbackMessage = nil
         if let panel = overlayWindow {
             panel.orderOut(nil)
             overlayWindow = nil
@@ -344,6 +352,33 @@ struct WaveformView: View {
     }
 }
 
+struct ProcessingWaveformView: View {
+    private static let barCount = 9
+    private static let multipliers: [CGFloat] = [0.42, 0.58, 0.76, 0.9, 1.0, 0.9, 0.76, 0.58, 0.42]
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+
+            HStack(spacing: 2.5) {
+                ForEach(0..<Self.barCount, id: \.self) { index in
+                    let wave = 0.5 + 0.5 * sin((time * 5.6) - Double(index) * 0.5)
+                    let shimmer = 0.5 + 0.5 * sin((time * 2.8) + Double(index) * 0.75)
+                    let amplitude = min(
+                        0.16 + CGFloat(wave) * Self.multipliers[index] * 0.52 + CGFloat(shimmer) * 0.08,
+                        1.0
+                    )
+
+                    WaveformBar(amplitude: amplitude)
+                        .opacity(0.45 + CGFloat(wave) * 0.5)
+                }
+            }
+            .frame(height: 20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 struct InitializingDotsView: View {
     @State private var activeDot = 0
     @State private var timer: Timer?
@@ -393,14 +428,14 @@ struct RecordingOverlayView: View {
                 if state.phase == .initializing {
                     InitializingDotsView()
                         .transition(.opacity)
-                } else if state.phase == .done {
-                    DoneView()
+                } else if state.phase == .feedback, let feedbackMessage = state.feedbackMessage {
+                    FeedbackMessageView(message: feedbackMessage)
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 } else if showsLiveRecordingContent {
                     WaveformView(audioLevel: state.audioLevel)
                         .transition(.opacity)
                 } else {
-                    TranscribingSpinnerView()
+                    ProcessingWaveformView()
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                 }
             }
@@ -443,15 +478,6 @@ struct RecordingOverlayView: View {
 
 // MARK: - Transcribing Indicator
 
-struct DoneView: View {
-    var body: some View {
-        Image(systemName: "checkmark")
-            .font(.system(size: 12, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
 struct CommandModeIndicator: View {
     var body: some View {
         Image(systemName: "pencil")
@@ -461,24 +487,19 @@ struct CommandModeIndicator: View {
     }
 }
 
-struct TranscribingSpinnerView: View {
-    @State private var isAnimating = false
+struct FeedbackMessageView: View {
+    let message: String
 
     var body: some View {
-        Circle()
-            .trim(from: 0.14, to: 0.82)
-            .stroke(
-                Color.white,
-                style: StrokeStyle(lineWidth: 2.2, lineCap: .round)
-            )
-            .frame(width: 14, height: 14)
-            .rotationEffect(.degrees(isAnimating ? 360 : 0))
-            .animation(
-                .linear(duration: 0.75).repeatForever(autoreverses: false),
-                value: isAnimating
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear { isAnimating = true }
-            .onDisappear { isAnimating = false }
+        HStack(spacing: 8) {
+            WaveformView(audioLevel: 0.42)
+                .frame(width: 26)
+
+            Text(message)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
