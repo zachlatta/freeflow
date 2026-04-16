@@ -96,6 +96,7 @@ struct GeneralSettingsView: View {
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
+    @State private var advancedProviderSettingsExpanded = false
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
     @State private var keyValidationSuccess = false
@@ -233,9 +234,6 @@ struct GeneralSettingsView: View {
                 }
                 SettingsCard("API Key", icon: "key.fill") {
                     apiKeySection
-                }
-                SettingsCard("Models", icon: "cpu.fill") {
-                    modelsSection
                 }
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
@@ -444,32 +442,48 @@ struct GeneralSettingsView: View {
                     .font(.caption)
             }
 
-            Divider()
+            DisclosureGroup(isExpanded: $advancedProviderSettingsExpanded) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Divider()
 
-            Text("API Base URL")
-                .font(.caption.weight(.semibold))
+                    Text("API Base URL")
+                        .font(.caption.weight(.semibold))
 
-            Text("Change this to use a different OpenAI-compatible API provider.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                    Text("Change this to use a different OpenAI-compatible API provider.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
 
-            HStack(spacing: 8) {
-                TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onChange(of: apiBaseURLInput) { newValue in
-                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
-                            appState.apiBaseURL = trimmed
+                    HStack(spacing: 8) {
+                        TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .onChange(of: apiBaseURLInput) { newValue in
+                                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !trimmed.isEmpty {
+                                    appState.apiBaseURL = trimmed
+                                }
+                            }
+
+                        Button("Reset to Default") {
+                            apiBaseURLInput = "https://api.groq.com/openai/v1"
+                            appState.apiBaseURL = "https://api.groq.com/openai/v1"
                         }
+                        .font(.caption)
                     }
 
-                Button("Reset to Default") {
-                    apiBaseURLInput = "https://api.groq.com/openai/v1"
-                    appState.apiBaseURL = "https://api.groq.com/openai/v1"
+                    modelsSection
                 }
-                .font(.caption)
+            } label: {
+                HStack {
+                    Text("Advanced Provider Settings")
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    advancedProviderSettingsExpanded.toggle()
+                }
             }
+            .padding(.top, 4)
         }
     }
 
@@ -480,8 +494,15 @@ struct GeneralSettingsView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Transcription Model")
-                    .font(.caption.weight(.semibold))
+                HStack {
+                    Text("Transcription Model")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button("Reset to Default") {
+                        appState.transcriptionModel = AppState.defaultTranscriptionModel
+                    }
+                    .font(.caption)
+                }
                 TextField(AppState.defaultTranscriptionModel, text: $appState.transcriptionModel)
                     .textFieldStyle(.roundedBorder)
                 Text("Used for requests to `/audio/transcriptions`.")
@@ -490,8 +511,15 @@ struct GeneralSettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Post-Processing Model")
-                    .font(.caption.weight(.semibold))
+                HStack {
+                    Text("Post-Processing Model")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button("Reset to Default") {
+                        appState.postProcessingModel = AppState.defaultPostProcessingModel
+                    }
+                    .font(.caption)
+                }
                 TextField(AppState.defaultPostProcessingModel, text: $appState.postProcessingModel)
                     .textFieldStyle(.roundedBorder)
                 Text("Used for transcript cleanup and Edit Mode transforms.")
@@ -500,8 +528,32 @@ struct GeneralSettingsView: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Context Model")
-                    .font(.caption.weight(.semibold))
+                HStack {
+                    Text("Post-Processing Fallback Model")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button("Reset to Default") {
+                        appState.postProcessingFallbackModel = AppState.defaultPostProcessingFallbackModel
+                    }
+                    .font(.caption)
+                }
+                TextField(AppState.defaultPostProcessingFallbackModel, text: $appState.postProcessingFallbackModel)
+                    .textFieldStyle(.roundedBorder)
+                Text("Used as the explicit retry model for transcript cleanup and Edit Mode transforms.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Context Model")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button("Reset to Default") {
+                        appState.contextModel = AppState.defaultContextModel
+                    }
+                    .font(.caption)
+                }
                 TextField(AppState.defaultContextModel, text: $appState.contextModel)
                     .textFieldStyle(.roundedBorder)
                 Text("Used for context inference, with a text-only retry when screenshot analysis fails.")
@@ -1051,7 +1103,8 @@ struct PromptsSettingsView: View {
         let service = PostProcessingService(
             apiKey: appState.apiKey,
             baseURL: appState.apiBaseURL,
-            preferredModel: appState.postProcessingModel
+            preferredModel: appState.postProcessingModel,
+            preferredFallbackModel: appState.postProcessingFallbackModel
         )
         let input = systemTestInput
         let customPrompt = appState.customSystemPrompt

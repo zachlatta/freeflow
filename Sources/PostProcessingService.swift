@@ -115,19 +115,22 @@ Behavior:
     private let apiKey: String
     private let baseURL: String
     private let preferredModel: String
+    private let preferredFallbackModel: String
     private let defaultModel = "openai/gpt-oss-20b"
-    private let fallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    private let defaultFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let postProcessingMaxCompletionTokens = 4096
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
     init(
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
-        preferredModel: String = ""
+        preferredModel: String = "",
+        preferredFallbackModel: String = ""
     ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.preferredModel = preferredModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.preferredFallbackModel = preferredFallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func postProcess(
@@ -248,11 +251,12 @@ Behavior:
             guard shouldFallback else {
                 throw error
             }
-
-            guard let retryModel else {
-                throw error
-            }
         }
+
+        guard let retryModel else {
+            throw PostProcessingError.emptyOutput
+        }
+
         return try await process(
             transcript: transcript,
             contextSummary: contextSummary,
@@ -292,11 +296,12 @@ Behavior:
             guard shouldFallback else {
                 throw error
             }
-
-            guard let retryModel else {
-                throw error
-            }
         }
+
+        guard let retryModel else {
+            throw PostProcessingError.emptyOutput
+        }
+
         return try await processCommandTransform(
             selectedText: selectedText,
             voiceCommand: voiceCommand,
@@ -311,10 +316,13 @@ Behavior:
     }
 
     private func resolvedRetryModel(for primaryModel: String) -> String? {
-        if primaryModel == defaultModel {
-            return fallbackModel
+        if !preferredFallbackModel.isEmpty {
+            return preferredFallbackModel == primaryModel ? nil : preferredFallbackModel
         }
-        if primaryModel == fallbackModel {
+        if primaryModel == defaultModel {
+            return defaultFallbackModel
+        }
+        if primaryModel == defaultFallbackModel {
             return defaultModel
         }
         return nil

@@ -167,6 +167,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let apiBaseURLStorageKey = "api_base_url"
     private let transcriptionModelStorageKey = "transcription_model"
     private let postProcessingModelStorageKey = "post_processing_model"
+    private let postProcessingFallbackModelStorageKey = "post_processing_fallback_model"
     private let contextModelStorageKey = "context_model"
     private let holdShortcutStorageKey = "hold_shortcut"
     private let toggleShortcutStorageKey = "toggle_shortcut"
@@ -191,6 +192,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     let maxPipelineHistoryCount = 20
     static let defaultTranscriptionModel = "whisper-large-v3"
     static let defaultPostProcessingModel = "openai/gpt-oss-20b"
+    static let defaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     static let defaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
 
     @Published var hasCompletedSetup: Bool {
@@ -222,6 +224,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var postProcessingModel: String {
         didSet {
             UserDefaults.standard.set(postProcessingModel, forKey: postProcessingModelStorageKey)
+        }
+    }
+
+    @Published var postProcessingFallbackModel: String {
+        didSet {
+            UserDefaults.standard.set(postProcessingFallbackModel, forKey: postProcessingFallbackModelStorageKey)
         }
     }
 
@@ -406,6 +414,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
         let transcriptionModel = UserDefaults.standard.string(forKey: transcriptionModelStorageKey) ?? Self.defaultTranscriptionModel
         let postProcessingModel = UserDefaults.standard.string(forKey: postProcessingModelStorageKey) ?? Self.defaultPostProcessingModel
+        let postProcessingFallbackModel = UserDefaults.standard.string(forKey: postProcessingFallbackModelStorageKey) ?? Self.defaultPostProcessingFallbackModel
         let contextModel = UserDefaults.standard.string(forKey: contextModelStorageKey) ?? Self.defaultContextModel
         let shortcuts = Self.loadShortcutConfiguration(
             holdKey: holdShortcutStorageKey,
@@ -473,6 +482,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.apiBaseURL = apiBaseURL
         self.transcriptionModel = transcriptionModel
         self.postProcessingModel = postProcessingModel
+        self.postProcessingFallbackModel = postProcessingFallbackModel
         self.contextModel = contextModel
         self.holdShortcut = shortcuts.hold
         self.toggleShortcut = shortcuts.toggle
@@ -698,7 +708,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let postProcessingService = PostProcessingService(
             apiKey: apiKey,
             baseURL: apiBaseURL,
-            preferredModel: postProcessingModel
+            preferredModel: postProcessingModel,
+            preferredFallbackModel: postProcessingFallbackModel
         )
         let capturedCustomVocabulary = customVocabulary
         let capturedCustomSystemPrompt = customSystemPrompt
@@ -1700,7 +1711,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let postProcessingService = PostProcessingService(
             apiKey: apiKey,
             baseURL: apiBaseURL,
-            preferredModel: postProcessingModel
+            preferredModel: postProcessingModel,
+            preferredFallbackModel: postProcessingFallbackModel
         )
 
             self.transcriptionTask?.cancel()
