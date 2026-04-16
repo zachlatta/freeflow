@@ -414,7 +414,7 @@ struct GeneralSettingsView: View {
 
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("FreeFlow uses Groq's whisper-large-v3 model for transcription.")
+            Text("FreeFlow uses the configured transcription model with your selected OpenAI-compatible provider.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1526,7 +1526,7 @@ struct RunLogEntryView: View {
                             title: "Transcribe Audio",
                             content: {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Sent audio to Groq whisper-large-v3")
+                                    Text("Sent audio to \(AppState.defaultTranscriptionModel)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .textSelection(.enabled)

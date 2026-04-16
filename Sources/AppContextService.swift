@@ -155,10 +155,17 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         selectedText: String?,
         screenshotDataURL: String?
     ) async -> (activity: String, prompt: String)? {
-        let attempts: [(model: String, screenshotDataURL: String?)] = [
-            (contextModel, screenshotDataURL),
-            (contextModel, nil)
-        ]
+        let attempts: [(model: String, screenshotDataURL: String?)] =
+            if let screenshotDataURL {
+                [
+                    (contextModel, screenshotDataURL),
+                    (contextModel, nil)
+                ]
+            } else {
+                [
+                    (contextModel, nil)
+                ]
+            }
 
         for attempt in attempts {
             if let inferred = await inferActivityWithLLM(

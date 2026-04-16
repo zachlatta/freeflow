@@ -225,6 +225,7 @@ Behavior:
         customSystemPrompt: String = ""
     ) async throws -> PostProcessingResult {
         let primaryModel = preferredModel.isEmpty ? defaultModel : preferredModel
+        let retryModel = preferredModel.isEmpty ? fallbackModel : preferredModel
         do {
             return try await process(
                 transcript: transcript,
@@ -252,7 +253,7 @@ Behavior:
         return try await process(
             transcript: transcript,
             contextSummary: contextSummary,
-            model: fallbackModel,
+            model: retryModel,
             customVocabulary: customVocabulary,
             customSystemPrompt: customSystemPrompt
         )
@@ -265,6 +266,7 @@ Behavior:
         customVocabulary: [String]
     ) async throws -> PostProcessingResult {
         let primaryModel = preferredModel.isEmpty ? defaultModel : preferredModel
+        let retryModel = preferredModel.isEmpty ? fallbackModel : preferredModel
         do {
             return try await processCommandTransform(
                 selectedText: selectedText,
@@ -293,7 +295,7 @@ Behavior:
             selectedText: selectedText,
             voiceCommand: voiceCommand,
             contextSummary: contextSummary,
-            model: fallbackModel,
+            model: retryModel,
             customVocabulary: customVocabulary
         )
     }
