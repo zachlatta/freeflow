@@ -380,7 +380,7 @@ Model: \(model)
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
 
-        let sanitizedTranscript = sanitizeCommandModeTranscript(content)
+        let sanitizedTranscript = sanitizePostProcessedTranscript(content)
         guard !sanitizedTranscript.isEmpty else {
             throw PostProcessingError.emptyOutput
         }
@@ -480,7 +480,7 @@ Model: \(model)
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
 
-        let sanitizedTranscript = sanitizePostProcessedTranscript(content)
+        let sanitizedTranscript = sanitizeCommandModeTranscript(content)
         guard !sanitizedTranscript.isEmpty else {
             throw PostProcessingError.emptyOutput
         }
