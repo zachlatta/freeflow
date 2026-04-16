@@ -1,6 +1,14 @@
 import Foundation
 
+enum PipelineHistoryItemIntent: String, Codable {
+    case dictation
+    case commandAutomatic = "command:automatic"
+    case commandManual = "command:manual"
+}
+
 struct PipelineHistoryItem: Identifiable, Codable {
+    let intent: PipelineHistoryItemIntent
+    let selectedText: String?
     let id: UUID
     let timestamp: Date
     let rawTranscript: String
@@ -16,6 +24,8 @@ struct PipelineHistoryItem: Identifiable, Codable {
     let audioFileName: String?
 
     init(
+        intent: PipelineHistoryItemIntent = .dictation,
+        selectedText: String? = nil,
         id: UUID = UUID(),
         timestamp: Date,
         rawTranscript: String,
@@ -30,6 +40,8 @@ struct PipelineHistoryItem: Identifiable, Codable {
         customVocabulary: String,
         audioFileName: String? = nil
     ) {
+        self.intent = intent
+        self.selectedText = selectedText
         self.id = id
         self.timestamp = timestamp
         self.rawTranscript = rawTranscript

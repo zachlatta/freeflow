@@ -62,6 +62,47 @@ enum RecordingTriggerMode: String, Codable {
     }
 }
 
+enum CommandModeStyle: String, CaseIterable, Codable, Identifiable {
+    case automatic
+    case manual
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .manual: return "Manual"
+        }
+    }
+}
+
+enum CommandModeManualModifier: String, CaseIterable, Codable, Identifiable {
+    case command
+    case control
+    case option
+    case shift
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .command: return "Command"
+        case .control: return "Control"
+        case .option: return "Option"
+        case .shift: return "Shift"
+        }
+    }
+
+    var shortcutModifier: ShortcutModifiers {
+        switch self {
+        case .command: return .command
+        case .control: return .control
+        case .option: return .option
+        case .shift: return .shift
+        }
+    }
+}
+
 enum ShortcutRole {
     case hold
     case toggle

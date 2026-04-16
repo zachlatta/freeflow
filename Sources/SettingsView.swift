@@ -237,6 +237,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
+                SettingsCard("Edit Mode", icon: "pencil") {
+                    commandModeSection
+                }
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
                     clipboardSection
                 }
@@ -521,6 +524,68 @@ struct GeneralSettingsView: View {
                 Text("Applies before recording starts for both hold and tap shortcuts. Stopping still happens immediately.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var commandModeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle("Enable Edit Mode", isOn: Binding(
+                get: { appState.isCommandModeEnabled },
+                set: { newValue in
+                    _ = appState.setCommandModeEnabled(newValue)
+                }
+            ))
+
+            Text("Transform highlighted text with a spoken instruction instead of dictating over it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Invocation Style", selection: Binding(
+                get: { appState.commandModeStyle },
+                set: { newValue in
+                    _ = appState.setCommandModeStyle(newValue)
+                }
+            )) {
+                ForEach(CommandModeStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!appState.isCommandModeEnabled)
+
+            Group {
+                switch appState.commandModeStyle {
+                case .automatic:
+                    Text("If text is selected, your normal dictation shortcut transforms the selection instead of dictating over it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .manual:
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Hold the extra modifier together with your normal dictation shortcut to transform selected text.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Picker("Extra Modifier", selection: Binding(
+                            get: { appState.commandModeManualModifier },
+                            set: { newValue in
+                                _ = appState.setCommandModeManualModifier(newValue)
+                            }
+                        )) {
+                            ForEach(CommandModeManualModifier.allCases) { modifier in
+                                Text(modifier.title).tag(modifier)
+                            }
+                        }
+                        .disabled(!appState.isCommandModeEnabled || appState.commandModeStyle != .manual)
+                    }
+                }
+            }
+            .opacity(appState.isCommandModeEnabled ? 1 : 0.5)
+
+            if let validationMessage = appState.commandModeManualModifierValidationMessage {
+                Label(validationMessage, systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
         }
     }

@@ -2,6 +2,13 @@ import Foundation
 import ApplicationServices
 import AppKit
 
+struct AppSelectionSnapshot {
+    let appName: String?
+    let bundleIdentifier: String?
+    let windowTitle: String?
+    let selectedText: String?
+}
+
 struct AppContext {
     let appName: String?
     let bundleIdentifier: String?
@@ -42,6 +49,25 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.customContextPrompt = customContextPrompt
+    }
+
+    func collectSelectionSnapshot() -> AppSelectionSnapshot {
+        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            return AppSelectionSnapshot(
+                appName: nil,
+                bundleIdentifier: nil,
+                windowTitle: nil,
+                selectedText: nil
+            )
+        }
+
+        let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        return AppSelectionSnapshot(
+            appName: frontmostApp.localizedName,
+            bundleIdentifier: frontmostApp.bundleIdentifier,
+            windowTitle: focusedWindowTitle(from: appElement) ?? frontmostApp.localizedName,
+            selectedText: rawSelectedText(from: appElement)
+        )
     }
 
     func collectContext() async -> AppContext {
@@ -283,6 +309,19 @@ Selected text: \(selectedText ?? "None")
         return nil
     }
 
+    private func rawSelectedText(from appElement: AXUIElement) -> String? {
+        if let focusedElement = accessibilityElement(from: appElement, attribute: kAXFocusedUIElementAttribute as CFString),
+           let selectedText = accessibilityRawString(from: focusedElement, attribute: kAXSelectedTextAttribute as CFString) {
+            return selectedText
+        }
+
+        if let selectedText = accessibilityRawString(from: appElement, attribute: kAXSelectedTextAttribute as CFString) {
+            return selectedText
+        }
+
+        return nil
+    }
+
     private func accessibilityElement(from element: AXUIElement, attribute: CFString) -> AXUIElement? {
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, attribute, &value)
@@ -299,6 +338,13 @@ Selected text: \(selectedText ?? "None")
         let result = AXUIElementCopyAttributeValue(element, attribute, &value)
         guard result == .success, let stringValue = value as? String else { return nil }
         return trimmedText(stringValue)
+    }
+
+    private func accessibilityRawString(from element: AXUIElement, attribute: CFString) -> String? {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard result == .success, let stringValue = value as? String else { return nil }
+        return stringValue.isEmpty ? nil : stringValue
     }
 
     private func accessibilityPoint(from element: AXUIElement, attribute: CFString) -> CGPoint? {

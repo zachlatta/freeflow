@@ -17,6 +17,7 @@ struct SetupView: View {
         case screenRecording
         case holdShortcut
         case toggleShortcut
+        case commandMode
         case vocabulary
         case launchAtLogin
         case testTranscription
@@ -178,6 +179,8 @@ struct SetupView: View {
             holdShortcutStep
         case .toggleShortcut:
             toggleShortcutStep
+        case .commandMode:
+            commandModeStep
         case .vocabulary:
             vocabularyStep
         case .launchAtLogin:
@@ -612,6 +615,85 @@ struct SetupView: View {
         }
     }
 
+    var commandModeStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "pencil")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Edit Mode")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Transform selected text with a spoken instruction instead of dictating over it.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Toggle("Enable Edit Mode", isOn: Binding(
+                    get: { appState.isCommandModeEnabled },
+                    set: { newValue in
+                        _ = appState.setCommandModeEnabled(newValue)
+                    }
+                ))
+
+                Picker("Invocation Style", selection: Binding(
+                    get: { appState.commandModeStyle },
+                    set: { newValue in
+                        _ = appState.setCommandModeStyle(newValue)
+                    }
+                )) {
+                    ForEach(CommandModeStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!appState.isCommandModeEnabled)
+
+                Group {
+                    switch appState.commandModeStyle {
+                    case .automatic:
+                        Text("Automatic mode uses your normal dictation shortcut. If text is selected, FreeFlow transforms that selection instead of dictating new text.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    case .manual:
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Manual mode only triggers when you hold an extra modifier together with your normal dictation shortcut.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Picker("Extra Modifier", selection: Binding(
+                                get: { appState.commandModeManualModifier },
+                                set: { newValue in
+                                    _ = appState.setCommandModeManualModifier(newValue)
+                                }
+                            )) {
+                                ForEach(CommandModeManualModifier.allCases) { modifier in
+                                    Text(modifier.title).tag(modifier)
+                                }
+                            }
+                            .disabled(!appState.isCommandModeEnabled || appState.commandModeStyle != .manual)
+                        }
+                    }
+                }
+                .opacity(appState.isCommandModeEnabled ? 1 : 0.5)
+
+                if let validationMessage = appState.commandModeManualModifierValidationMessage {
+                    Label(validationMessage, systemImage: "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(10)
+        }
+    }
+
     var launchAtLoginStep: some View {
         VStack(spacing: 20) {
             Image(systemName: "sunrise.fill")
@@ -802,6 +884,17 @@ struct SetupView: View {
                 }
                 if appState.hasEnabledHoldShortcut && appState.hasEnabledToggleShortcut {
                     HowToRow(icon: "arrow.triangle.branch", text: "While holding, press the toggle shortcut to latch on")
+                }
+                if appState.isCommandModeEnabled {
+                    switch appState.commandModeStyle {
+                    case .automatic:
+                        HowToRow(icon: "wand.and.stars", text: "With text selected, your normal shortcut transforms the selection")
+                    case .manual:
+                        HowToRow(
+                            icon: "wand.and.stars",
+                            text: "Hold \(appState.commandModeManualModifier.title) with your normal shortcut to transform selected text"
+                        )
+                    }
                 }
                 HowToRow(icon: "doc.on.clipboard", text: "Text is typed at your cursor & copied")
             }
