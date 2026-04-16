@@ -252,19 +252,19 @@ Behavior:
             guard shouldFallback else {
                 throw error
             }
-        }
 
-        guard let retryModel else {
-            throw PostProcessingError.emptyOutput
-        }
+            guard let retryModel else {
+                throw error
+            }
 
-        return try await process(
-            transcript: transcript,
-            contextSummary: contextSummary,
-            model: retryModel,
-            customVocabulary: customVocabulary,
-            customSystemPrompt: customSystemPrompt
-        )
+            return try await process(
+                transcript: transcript,
+                contextSummary: contextSummary,
+                model: retryModel,
+                customVocabulary: customVocabulary,
+                customSystemPrompt: customSystemPrompt
+            )
+        }
     }
 
     private func processCommandTransformWithFallback(
@@ -297,19 +297,19 @@ Behavior:
             guard shouldFallback else {
                 throw error
             }
-        }
 
-        guard let retryModel else {
-            throw PostProcessingError.emptyOutput
-        }
+            guard let retryModel else {
+                throw error
+            }
 
-        return try await processCommandTransform(
-            selectedText: selectedText,
-            voiceCommand: voiceCommand,
-            contextSummary: contextSummary,
-            model: retryModel,
-            customVocabulary: customVocabulary
-        )
+            return try await processCommandTransform(
+                selectedText: selectedText,
+                voiceCommand: voiceCommand,
+                contextSummary: contextSummary,
+                model: retryModel,
+                customVocabulary: customVocabulary
+            )
+        }
     }
 
     private func resolvedPrimaryModel() -> String {
