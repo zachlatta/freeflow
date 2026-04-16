@@ -116,6 +116,7 @@ Behavior:
     private let baseURL: String
     private let defaultModel = "openai/gpt-oss-20b"
     private let fallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    private let defaultModelReasoningEffort = "low"
     private let postProcessingMaxCompletionTokens = 4096
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
@@ -355,6 +356,8 @@ Model: \(model)
         ]
         if model == defaultModel {
             payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
+            payload["reasoning_effort"] = defaultModelReasoningEffort
+            payload["include_reasoning"] = false
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
@@ -453,6 +456,8 @@ Model: \(model)
         ]
         if model == defaultModel {
             payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
+            payload["reasoning_effort"] = defaultModelReasoningEffort
+            payload["include_reasoning"] = false
         }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
