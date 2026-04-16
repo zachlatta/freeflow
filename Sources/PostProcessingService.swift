@@ -380,11 +380,11 @@ Model: \(model)
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
 
-        let sanitizedTranscript = sanitizeCommandModeTranscript(content)
-        guard !sanitizedTranscript.isEmpty else {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PostProcessingError.emptyOutput
         }
 
+        let sanitizedTranscript = sanitizePostProcessedTranscript(content)
         return PostProcessingResult(
             transcript: sanitizedTranscript,
             prompt: promptForDisplay
@@ -480,11 +480,11 @@ Model: \(model)
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
 
-        let sanitizedTranscript = sanitizePostProcessedTranscript(content)
-        guard !sanitizedTranscript.isEmpty else {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PostProcessingError.emptyOutput
         }
 
+        let sanitizedTranscript = sanitizeCommandModeTranscript(content)
         return PostProcessingResult(
             transcript: sanitizedTranscript,
             prompt: promptForDisplay
