@@ -371,6 +371,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingManualCommandInvocation = false
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
+    private var pendingOverlayDismissToken: UUID?
     private var shouldMonitorHotkeys = false
     private var isCapturingShortcut = false
 
@@ -1314,6 +1315,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func beginRecording(triggerMode: RecordingTriggerMode) {
         os_log(.info, log: recordingLog, "beginRecording() entered")
+        clearPendingOverlayDismissToken()
         errorMessage = nil
 
         isRecording = true
@@ -1330,6 +1332,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             guard let self, !overlayShown else { return }
             overlayShown = true
             os_log(.info, log: recordingLog, "engine slow — showing initializing overlay")
+            self.clearPendingOverlayDismissToken()
             self.overlayManager.showInitializing(
                 mode: self.activeRecordingTriggerMode ?? triggerMode,
                 isCommandMode: self.currentSessionIntent.isCommandMode
@@ -1345,6 +1348,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.cancelRecordingInitializationTimer()
                 os_log(.info, log: recordingLog, "first real audio — transitioning to waveform")
                 self.statusText = "Recording..."
+                self.clearPendingOverlayDismissToken()
                 if overlayShown {
                     self.overlayManager.transitionToRecording(
                         mode: self.activeRecordingTriggerMode ?? triggerMode,
@@ -1707,13 +1711,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.debugStatusMessage = "Done"
                         let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
 
+                        let shouldPersistRawDictationFallback: Bool
+                        switch result.outcome {
+                        case .postProcessingFailedFallback:
+                            shouldPersistRawDictationFallback = !trimmedFinalTranscript.isEmpty
+                        default:
+                            shouldPersistRawDictationFallback = false
+                        }
+
                         if trimmedFinalTranscript.isEmpty {
                             self.statusText = "Nothing to transcribe"
+                            self.clearPendingOverlayDismissToken()
                             self.overlayManager.dismiss()
                         } else {
                             self.statusText = completionStatusText
-                            self.overlayManager.showDone()
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+                            if shouldPersistRawDictationFallback {
+                                self.scheduleOverlayDismissAfterFailureIndicator(after: 2.5)
+                            } else {
+                                self.clearPendingOverlayDismissToken()
                                 self.overlayManager.dismiss()
                             }
 
@@ -1966,6 +1981,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func startDebugOverlay() {
         isDebugOverlayActive = true
+        clearPendingOverlayDismissToken()
         overlayManager.showRecording()
 
         // Simulate audio levels with a timer
@@ -1985,7 +2001,23 @@ final class AppState: ObservableObject, @unchecked Sendable {
         debugOverlayTimer?.invalidate()
         debugOverlayTimer = nil
         isDebugOverlayActive = false
+        clearPendingOverlayDismissToken()
         overlayManager.dismiss()
+    }
+
+    private func clearPendingOverlayDismissToken() {
+        pendingOverlayDismissToken = nil
+    }
+
+    private func scheduleOverlayDismissAfterFailureIndicator(after delay: TimeInterval) {
+        let dismissToken = UUID()
+        pendingOverlayDismissToken = dismissToken
+        overlayManager.showFailureIndicator()
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.pendingOverlayDismissToken == dismissToken else { return }
+            self.pendingOverlayDismissToken = nil
+            self.overlayManager.dismiss()
+        }
     }
 
     func toggleDebugPanel() {
