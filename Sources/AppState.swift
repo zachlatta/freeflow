@@ -1249,7 +1249,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let t0 = CFAbsoluteTimeGetCurrent()
         os_log(.info, log: recordingLog, "startRecording() entered")
         guard !isRecording && !isTranscribing else { return }
-        clearPendingOverlayDismissToken()
         let scheduledSelectionSnapshot = pendingSelectionSnapshot
         let scheduledManualCommandInvocation = pendingManualCommandInvocation
         cancelPendingShortcutStart()
@@ -1316,6 +1315,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func beginRecording(triggerMode: RecordingTriggerMode) {
         os_log(.info, log: recordingLog, "beginRecording() entered")
+        clearPendingOverlayDismissToken()
         errorMessage = nil
 
         isRecording = true
