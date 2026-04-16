@@ -494,68 +494,64 @@ struct GeneralSettingsView: View {
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Transcription Model")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
+                Text("Transcription Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultTranscriptionModel, text: $appState.transcriptionModel)
+                        .textFieldStyle(.roundedBorder)
                     Button("Reset to Default") {
                         appState.transcriptionModel = AppState.defaultTranscriptionModel
                     }
                     .font(.caption)
                 }
-                TextField(AppState.defaultTranscriptionModel, text: $appState.transcriptionModel)
-                    .textFieldStyle(.roundedBorder)
-                Text("Used for requests to `/audio/transcriptions`.")
+                Text("Used for speech-to-text transcription.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Post-Processing Model")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
+                Text("Post-Processing Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultPostProcessingModel, text: $appState.postProcessingModel)
+                        .textFieldStyle(.roundedBorder)
                     Button("Reset to Default") {
                         appState.postProcessingModel = AppState.defaultPostProcessingModel
                     }
                     .font(.caption)
                 }
-                TextField(AppState.defaultPostProcessingModel, text: $appState.postProcessingModel)
-                    .textFieldStyle(.roundedBorder)
                 Text("Used for transcript cleanup and Edit Mode transforms.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Post-Processing Fallback Model")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
+                Text("Post-Processing Fallback Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultPostProcessingFallbackModel, text: $appState.postProcessingFallbackModel)
+                        .textFieldStyle(.roundedBorder)
                     Button("Reset to Default") {
                         appState.postProcessingFallbackModel = AppState.defaultPostProcessingFallbackModel
                     }
                     .font(.caption)
                 }
-                TextField(AppState.defaultPostProcessingFallbackModel, text: $appState.postProcessingFallbackModel)
-                    .textFieldStyle(.roundedBorder)
                 Text("Used as the explicit retry model for transcript cleanup and Edit Mode transforms.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text("Context Model")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
+                Text("Context Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultContextModel, text: $appState.contextModel)
+                        .textFieldStyle(.roundedBorder)
                     Button("Reset to Default") {
                         appState.contextModel = AppState.defaultContextModel
                     }
                     .font(.caption)
                 }
-                TextField(AppState.defaultContextModel, text: $appState.contextModel)
-                    .textFieldStyle(.roundedBorder)
                 Text("Used for context inference, with a text-only retry when screenshot analysis fails.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
