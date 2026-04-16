@@ -165,6 +165,9 @@ private enum SessionIntent {
 final class AppState: ObservableObject, @unchecked Sendable {
     private let apiKeyStorageKey = "groq_api_key"
     private let apiBaseURLStorageKey = "api_base_url"
+    private let transcriptionModelStorageKey = "transcription_model"
+    private let postProcessingModelStorageKey = "post_processing_model"
+    private let contextModelStorageKey = "context_model"
     private let holdShortcutStorageKey = "hold_shortcut"
     private let toggleShortcutStorageKey = "toggle_shortcut"
     private let savedHoldCustomShortcutStorageKey = "saved_hold_custom_shortcut"
@@ -186,6 +189,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let clipboardRestoreDelay: TimeInterval = 0.15
     let maxPipelineHistoryCount = 20
+    static let defaultTranscriptionModel = "whisper-large-v3"
+    static let defaultPostProcessingModel = "openai/gpt-oss-20b"
+    static let defaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
 
     @Published var hasCompletedSetup: Bool {
         didSet {
@@ -196,14 +202,33 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var apiKey: String {
         didSet {
             persistAPIKey(apiKey)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            rebuildContextService()
         }
     }
 
     @Published var apiBaseURL: String {
         didSet {
             persistAPIBaseURL(apiBaseURL)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            rebuildContextService()
+        }
+    }
+
+    @Published var transcriptionModel: String {
+        didSet {
+            UserDefaults.standard.set(transcriptionModel, forKey: transcriptionModelStorageKey)
+        }
+    }
+
+    @Published var postProcessingModel: String {
+        didSet {
+            UserDefaults.standard.set(postProcessingModel, forKey: postProcessingModelStorageKey)
+        }
+    }
+
+    @Published var contextModel: String {
+        didSet {
+            UserDefaults.standard.set(contextModel, forKey: contextModelStorageKey)
+            rebuildContextService()
         }
     }
 
@@ -266,7 +291,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var customContextPrompt: String {
         didSet {
             UserDefaults.standard.set(customContextPrompt, forKey: customContextPromptStorageKey)
-            contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+            rebuildContextService()
         }
     }
 
@@ -379,6 +404,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let hasCompletedSetup = UserDefaults.standard.bool(forKey: "hasCompletedSetup")
         let apiKey = Self.loadStoredAPIKey(account: apiKeyStorageKey)
         let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
+        let transcriptionModel = UserDefaults.standard.string(forKey: transcriptionModelStorageKey) ?? Self.defaultTranscriptionModel
+        let postProcessingModel = UserDefaults.standard.string(forKey: postProcessingModelStorageKey) ?? Self.defaultPostProcessingModel
+        let contextModel = UserDefaults.standard.string(forKey: contextModelStorageKey) ?? Self.defaultContextModel
         let shortcuts = Self.loadShortcutConfiguration(
             holdKey: holdShortcutStorageKey,
             toggleKey: toggleShortcutStorageKey
@@ -434,10 +462,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
-        self.contextService = AppContextService(apiKey: apiKey, baseURL: apiBaseURL, customContextPrompt: customContextPrompt)
+        self.contextService = AppContextService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            customContextPrompt: customContextPrompt,
+            contextModel: contextModel
+        )
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
         self.apiBaseURL = apiBaseURL
+        self.transcriptionModel = transcriptionModel
+        self.postProcessingModel = postProcessingModel
+        self.contextModel = contextModel
         self.holdShortcut = shortcuts.hold
         self.toggleShortcut = shortcuts.toggle
         self.savedHoldCustomShortcut = savedHoldCustomShortcut
@@ -552,6 +588,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private func rebuildContextService() {
+        contextService = AppContextService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            customContextPrompt: customContextPrompt,
+            contextModel: contextModel
+        )
+    }
+
     private func persistShortcut(_ binding: ShortcutBinding, key: String) {
         guard let data = try? JSONEncoder().encode(binding) else { return }
         UserDefaults.standard.set(data, forKey: key)
@@ -647,9 +692,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let transcriptionService = TranscriptionService(
             apiKey: apiKey,
-            baseURL: apiBaseURL
+            baseURL: apiBaseURL,
+            transcriptionModel: transcriptionModel
         )
-        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+        let postProcessingService = PostProcessingService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            preferredModel: postProcessingModel
+        )
         let capturedCustomVocabulary = customVocabulary
         let capturedCustomSystemPrompt = customSystemPrompt
 
@@ -1644,9 +1694,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let transcriptionService = TranscriptionService(
             apiKey: apiKey,
-            baseURL: apiBaseURL
+            baseURL: apiBaseURL,
+            transcriptionModel: transcriptionModel
         )
-        let postProcessingService = PostProcessingService(apiKey: apiKey, baseURL: apiBaseURL)
+        let postProcessingService = PostProcessingService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            preferredModel: postProcessingModel
+        )
 
             self.transcriptionTask?.cancel()
             self.transcriptionTask = Task {

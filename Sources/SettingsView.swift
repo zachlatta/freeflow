@@ -234,6 +234,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("API Key", icon: "key.fill") {
                     apiKeySection
                 }
+                SettingsCard("Models", icon: "cpu.fill") {
+                    modelsSection
+                }
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
@@ -466,6 +469,44 @@ struct GeneralSettingsView: View {
                     appState.apiBaseURL = "https://api.groq.com/openai/v1"
                 }
                 .font(.caption)
+            }
+        }
+    }
+
+    private var modelsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Override the default models used for transcription, cleanup, and context inference.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription Model")
+                    .font(.caption.weight(.semibold))
+                TextField(AppState.defaultTranscriptionModel, text: $appState.transcriptionModel)
+                    .textFieldStyle(.roundedBorder)
+                Text("Used for requests to `/audio/transcriptions`.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Post-Processing Model")
+                    .font(.caption.weight(.semibold))
+                TextField(AppState.defaultPostProcessingModel, text: $appState.postProcessingModel)
+                    .textFieldStyle(.roundedBorder)
+                Text("Used for transcript cleanup and Edit Mode transforms.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Context Model")
+                    .font(.caption.weight(.semibold))
+                TextField(AppState.defaultContextModel, text: $appState.contextModel)
+                    .textFieldStyle(.roundedBorder)
+                Text("Used for context inference, with a text-only retry when screenshot analysis fails.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -1007,7 +1048,11 @@ struct PromptsSettingsView: View {
         systemTestError = nil
         systemTestPrompt = nil
 
-        let service = PostProcessingService(apiKey: appState.apiKey, baseURL: appState.apiBaseURL)
+        let service = PostProcessingService(
+            apiKey: appState.apiKey,
+            baseURL: appState.apiBaseURL,
+            preferredModel: appState.postProcessingModel
+        )
         let input = systemTestInput
         let customPrompt = appState.customSystemPrompt
         let vocabulary = appState.customVocabulary
@@ -1223,7 +1268,8 @@ struct PromptsSettingsView: View {
         let service = AppContextService(
             apiKey: appState.apiKey,
             baseURL: appState.apiBaseURL,
-            customContextPrompt: appState.customContextPrompt
+            customContextPrompt: appState.customContextPrompt,
+            contextModel: appState.contextModel
         )
 
         Task {

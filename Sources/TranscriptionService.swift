@@ -7,15 +7,21 @@ private let transcriptionLog = OSLog(subsystem: "com.zachlatta.freeflow", catego
 class TranscriptionService {
     private let apiKey: String
     private let baseURL: String
-    private let transcriptionModel = "whisper-large-v3"
+    private let transcriptionModel: String
     private let transcriptionResponseFormat = "verbose_json"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
     private let uploadSampleRate = 16_000.0
     private let uploadChannelCount: AVAudioChannelCount = 1
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
+    init(
+        apiKey: String,
+        baseURL: String = "https://api.groq.com/openai/v1",
+        transcriptionModel: String = "whisper-large-v3"
+    ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        let trimmedModel = transcriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
     }
 
     // Validate API key by hitting a lightweight endpoint

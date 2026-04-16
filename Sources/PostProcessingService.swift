@@ -114,14 +114,20 @@ Behavior:
 
     private let apiKey: String
     private let baseURL: String
+    private let preferredModel: String
     private let defaultModel = "openai/gpt-oss-20b"
     private let fallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let postProcessingMaxCompletionTokens = 4096
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
+    init(
+        apiKey: String,
+        baseURL: String = "https://api.groq.com/openai/v1",
+        preferredModel: String = ""
+    ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.preferredModel = preferredModel.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func postProcess(
@@ -218,11 +224,12 @@ Behavior:
         customVocabulary: [String],
         customSystemPrompt: String = ""
     ) async throws -> PostProcessingResult {
+        let primaryModel = preferredModel.isEmpty ? defaultModel : preferredModel
         do {
             return try await process(
                 transcript: transcript,
                 contextSummary: contextSummary,
-                model: defaultModel,
+                model: primaryModel,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt
             )
@@ -257,12 +264,13 @@ Behavior:
         contextSummary: String,
         customVocabulary: [String]
     ) async throws -> PostProcessingResult {
+        let primaryModel = preferredModel.isEmpty ? defaultModel : preferredModel
         do {
             return try await processCommandTransform(
                 selectedText: selectedText,
                 voiceCommand: voiceCommand,
                 contextSummary: contextSummary,
-                model: defaultModel,
+                model: primaryModel,
                 customVocabulary: customVocabulary
             )
         } catch let error as PostProcessingError {
