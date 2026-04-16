@@ -9,7 +9,6 @@ final class RecordingOverlayState: ObservableObject {
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
     @Published var isCommandMode = false
     @Published var showsTranscribingSpinner = false
-    @Published var feedbackMessage: String?
 }
 
 enum OverlayPhase {
@@ -93,7 +92,6 @@ final class RecordingOverlayManager {
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .initializing
             self.overlayState.showsTranscribingSpinner = false
-            self.overlayState.feedbackMessage = nil
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: false)
         }
@@ -106,7 +104,6 @@ final class RecordingOverlayManager {
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .recording
             self.overlayState.showsTranscribingSpinner = false
-            self.overlayState.feedbackMessage = nil
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: true)
         }
@@ -119,7 +116,6 @@ final class RecordingOverlayManager {
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .recording
             self.overlayState.showsTranscribingSpinner = false
-            self.overlayState.feedbackMessage = nil
             self.updateOverlayLayout(animated: true)
         }
     }
@@ -149,9 +145,9 @@ final class RecordingOverlayManager {
         }
     }
 
-    func showFallbackMessage(_ message: String) {
+    func showFailureIndicator() {
         DispatchQueue.main.async {
-            self.showFeedbackPanel(message: message)
+            self.showFeedbackPanel()
         }
     }
 
@@ -206,7 +202,6 @@ final class RecordingOverlayManager {
         lockedOverlayWidth = overlayWindow?.frame.width ?? overlayWidth
         overlayState.phase = .transcribing
         overlayState.showsTranscribingSpinner = showsTranscribingSpinner
-        overlayState.feedbackMessage = nil
         showOverlayPanel(animatedResize: true)
     }
 
@@ -254,8 +249,7 @@ final class RecordingOverlayManager {
         }
 
         if overlayState.phase == .feedback {
-            let approximateTextWidth = CGFloat((overlayState.feedbackMessage?.count ?? 0) * 7)
-            let feedbackWidth = max(168, min(260, 48 + approximateTextWidth))
+            let feedbackWidth: CGFloat = 92
             guard screenHasNotch else { return feedbackWidth }
             return max(notchWidth, feedbackWidth)
         }
@@ -277,10 +271,9 @@ final class RecordingOverlayManager {
         return max(notchWidth, baseWidth)
     }
 
-    private func showFeedbackPanel(message: String) {
+    private func showFeedbackPanel() {
         lockedOverlayWidth = nil
         overlayState.phase = .feedback
-        overlayState.feedbackMessage = message
         showOverlayPanel(animatedResize: true)
     }
 
@@ -288,7 +281,6 @@ final class RecordingOverlayManager {
         lockedOverlayWidth = nil
         overlayState.isCommandMode = false
         overlayState.showsTranscribingSpinner = false
-        overlayState.feedbackMessage = nil
         if let panel = overlayWindow {
             panel.orderOut(nil)
             overlayWindow = nil
@@ -423,49 +415,52 @@ struct RecordingOverlayView: View {
     }
 
     var body: some View {
-        ZStack {
-            Group {
-                if state.phase == .initializing {
-                    InitializingDotsView()
-                        .transition(.opacity)
-                } else if state.phase == .feedback, let feedbackMessage = state.feedbackMessage {
-                    FeedbackMessageView(message: feedbackMessage)
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                } else if showsLiveRecordingContent {
-                    WaveformView(audioLevel: state.audioLevel)
-                        .transition(.opacity)
-                } else {
-                    ProcessingWaveformView()
-                        .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                }
-            }
-
-            HStack {
-                Group {
-                    if state.isCommandMode {
-                        CommandModeIndicator()
-                            .transition(.opacity.combined(with: .scale(scale: 0.96)))
-                    }
-                }
-                .frame(width: leadingAccessoryWidth, alignment: .center)
-                .frame(maxHeight: .infinity, alignment: .center)
-
-                Spacer(minLength: 0)
-
-                Group {
-                    if showsStopButton {
-                        Button(action: onStopButtonPressed) {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 20, height: 20)
-                            .background(Circle().fill(Color.red.opacity(0.92)))
+        Group {
+            if state.phase == .feedback {
+                FailureIndicatorView()
+            } else {
+                ZStack {
+                    Group {
+                        if state.phase == .initializing {
+                            InitializingDotsView()
+                                .transition(.opacity)
+                        } else if showsLiveRecordingContent {
+                            WaveformView(audioLevel: state.audioLevel)
+                                .transition(.opacity)
+                        } else {
+                            ProcessingWaveformView()
+                                .transition(.opacity.combined(with: .scale(scale: 0.96)))
                         }
-                        .buttonStyle(.plain)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+
+                    HStack {
+                        Group {
+                            if state.isCommandMode {
+                                CommandModeIndicator()
+                                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                            }
+                        }
+                        .frame(width: leadingAccessoryWidth, alignment: .center)
+                        .frame(maxHeight: .infinity, alignment: .center)
+
+                        Spacer(minLength: 0)
+
+                        Group {
+                            if showsStopButton {
+                                Button(action: onStopButtonPressed) {
+                                    Image(systemName: "stop.fill")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(.white)
+                                        .frame(width: 20, height: 20)
+                                        .background(Circle().fill(Color.red.opacity(0.92)))
+                                }
+                                .buttonStyle(.plain)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                            }
+                        }
+                        .frame(width: trailingAccessoryWidth, alignment: .trailing)
                     }
                 }
-                .frame(width: trailingAccessoryWidth, alignment: .trailing)
             }
         }
         .padding(.horizontal, 12)
@@ -487,19 +482,13 @@ struct CommandModeIndicator: View {
     }
 }
 
-struct FeedbackMessageView: View {
-    let message: String
-
+struct FailureIndicatorView: View {
     var body: some View {
-        HStack(spacing: 8) {
-            WaveformView(audioLevel: 0.42)
-                .frame(width: 26)
-
-            Text(message)
-                .font(.system(size: 11.5, weight: .medium))
-                .foregroundStyle(.white.opacity(0.92))
-                .lineLimit(1)
-        }
+        Image(systemName: "xmark")
+            .font(.system(size: 12, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 20, height: 20)
+            .background(Circle().fill(Color.red.opacity(0.92)))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

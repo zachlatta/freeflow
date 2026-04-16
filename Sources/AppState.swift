@@ -1721,7 +1721,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         } else {
                             self.statusText = completionStatusText
                             if shouldPersistRawDictationFallback {
-                                self.overlayManager.showFallbackMessage("Used raw dictation")
+                                self.overlayManager.showFailureIndicator()
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                                     self.overlayManager.dismiss()
                                 }
