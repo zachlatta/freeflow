@@ -1,6 +1,6 @@
 import Foundation
 
-enum DictationShortcutAction {
+enum DictationShortcutAction: Equatable {
     case start(RecordingTriggerMode)
     case stop
     case switchedToToggle

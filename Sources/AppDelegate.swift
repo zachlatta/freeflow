@@ -103,6 +103,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+
     func showSetupWindow() {
         NSApp.setActivationPolicy(.regular)
 

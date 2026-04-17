@@ -1,4 +1,6 @@
 import Foundation
 
-// Notification names defined in MenuBarView.swift:
-// .showSetup, .showSettings
+extension Notification.Name {
+    static let showSetup = Notification.Name("showSetup")
+    static let showSettings = Notification.Name("showSettings")
+}
