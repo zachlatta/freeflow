@@ -215,6 +215,27 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         )
     }
 
+    func overlaps(with other: ShortcutBinding) -> Bool {
+        guard !isDisabled, !other.isDisabled else { return false }
+        guard primaryInputOverlaps(with: other) else { return false }
+
+        let orderedModifierKeyCodes = Array(Self.modifierKeyCodes).sorted()
+        let combinations = 1 << orderedModifierKeyCodes.count
+
+        for mask in 0..<combinations {
+            var pressedModifierKeyCodes: Set<UInt16> = []
+            for (index, keyCode) in orderedModifierKeyCodes.enumerated() where (mask & (1 << index)) != 0 {
+                pressedModifierKeyCodes.insert(keyCode)
+            }
+
+            if canActivate(with: pressedModifierKeyCodes) && other.canActivate(with: pressedModifierKeyCodes) {
+                return true
+            }
+        }
+
+        return false
+    }
+
     var modifierDisplayNames: [String] {
         Self.modifierDisplayNames(
             for: modifiers,
@@ -231,6 +252,38 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             filteredModifierKeyCodes = exactModifierKeyCodes
         }
         return Self.normalizedExactModifierKeyCodes(filteredModifierKeyCodes)
+    }
+
+    private func primaryInputOverlaps(with other: ShortcutBinding) -> Bool {
+        guard kind == other.kind else { return false }
+
+        switch kind {
+        case .disabled:
+            return false
+        case .key, .modifierKey:
+            return keyCode == other.keyCode
+        }
+    }
+
+    private func canActivate(with pressedModifierKeyCodes: Set<UInt16>) -> Bool {
+        let currentModifiers = Self.modifiers(for: pressedModifierKeyCodes)
+        guard currentModifiers.isSuperset(of: modifiers) else {
+            return false
+        }
+
+        if let exactModifierKeyCodes = exactModifierKeyCodes,
+           !pressedModifierKeyCodes.isSuperset(of: exactModifierKeyCodes) {
+            return false
+        }
+
+        switch kind {
+        case .disabled:
+            return false
+        case .key:
+            return true
+        case .modifierKey:
+            return pressedModifierKeyCodes.contains(keyCode)
+        }
     }
 
     static let disabled = ShortcutBinding(

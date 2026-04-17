@@ -1005,8 +1005,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if binding.isDisabled && otherBinding.isDisabled {
             return "At least one shortcut must remain enabled."
         }
-        guard binding != otherBinding else {
-            return "Hold and tap shortcuts must be different."
+        guard !binding.overlaps(with: otherBinding) else {
+            return "Hold and tap shortcuts must not overlap."
         }
         if isCommandModeEnabled,
            commandModeStyle == .manual,
@@ -1051,12 +1051,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         let derivedHold = holdBinding.withAddedModifiers(manualModifier)
-        if !holdBinding.isDisabled && derivedHold == toggleBinding {
+        if !holdBinding.isDisabled && derivedHold.overlaps(with: toggleBinding) {
             return "That modifier would make the command hold shortcut overlap an existing dictation shortcut."
         }
 
         let derivedToggle = toggleBinding.withAddedModifiers(manualModifier)
-        if !toggleBinding.isDisabled && derivedToggle == holdBinding {
+        if !toggleBinding.isDisabled && derivedToggle.overlaps(with: holdBinding) {
             return "That modifier would make the command tap shortcut overlap an existing dictation shortcut."
         }
 
@@ -1348,8 +1348,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
         os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        guard ensureScreenCaptureAccess() else { return }
-        os_log(.info, log: recordingLog, "screen capture check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
         let selectionSnapshot = scheduledSelectionSnapshot ?? contextService.collectSelectionSnapshot()
         let manualCommandRequested = scheduledSelectionSnapshot == nil
             ? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
@@ -1359,6 +1357,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
             selectionSnapshot: selectionSnapshot,
             manualCommandRequested: manualCommandRequested
         ) else { return }
+
+        if resolvedIntent.isCommandMode {
+            guard ensureScreenCaptureAccess() else { return }
+            os_log(.info, log: recordingLog, "screen capture check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        } else {
+            hasScreenRecordingPermission = hasScreenCapturePermission()
+        }
+
         currentSessionIntent = resolvedIntent
         overlayManager.setRecordingTriggerMode(triggerMode, animated: false)
         guard ensureMicrophoneAccess() else { return }
@@ -2032,6 +2038,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         if isScreenCapturePermissionError(message) && !hasShownScreenshotPermissionAlert {
             hasScreenRecordingPermission = false
+            guard currentSessionIntent.isCommandMode else { return }
             errorMessage = message
             hasShownScreenshotPermissionAlert = true
 
