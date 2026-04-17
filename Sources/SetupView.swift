@@ -4,6 +4,48 @@ import Combine
 import Foundation
 import ServiceManagement
 
+private struct SetupProviderSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var apiBaseURLInput: String
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Advanced Provider Settings")
+                    .font(.title2.weight(.semibold))
+                Text("Use these fields when pointing FreeFlow at another OpenAI-compatible provider or when you need custom model IDs.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                ProviderSettingsFields(
+                    apiBaseURLInput: $apiBaseURLInput,
+                    showsModelDescription: true
+                )
+                .padding(20)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 560, height: 520)
+    }
+}
+
 struct SetupView: View {
     var onComplete: () -> Void
     @EnvironmentObject var appState: AppState
@@ -28,8 +70,10 @@ struct SetupView: View {
     @State private var micPermissionGranted = false
     @State private var accessibilityGranted = false
     @State private var apiKeyInput: String = ""
+    @State private var apiBaseURLInput: String = ""
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
+    @State private var showingProviderSettingsSheet = false
     @State private var accessibilityTimer: Timer?
     @State private var screenRecordingTimer: Timer?
     @State private var customVocabularyInput: String = ""
@@ -141,6 +185,7 @@ struct SetupView: View {
         .frame(width: 520, height: 680)
         .onAppear {
             apiKeyInput = appState.apiKey
+            apiBaseURLInput = appState.apiBaseURL
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             checkAccessibility()
@@ -152,6 +197,10 @@ struct SetupView: View {
             accessibilityTimer?.invalidate()
             screenRecordingTimer?.invalidate()
             appState.resumeHotkeyMonitoringAfterShortcutCapture()
+        }
+        .sheet(isPresented: $showingProviderSettingsSheet) {
+            SetupProviderSettingsSheet(apiBaseURLInput: $apiBaseURLInput)
+                .environmentObject(appState)
         }
         .onChange(of: isCapturingShortcut) { isCapturing in
             if isCapturing {
@@ -313,57 +362,96 @@ struct SetupView: View {
     }
 
     var apiKeyStep: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.blue)
+        VStack {
+            Spacer(minLength: 0)
 
-            Text("Groq API Key")
-                .font(.title)
-                .fontWeight(.bold)
+            VStack(spacing: 20) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 60))
+                    .foregroundStyle(.blue)
 
-            Text("FreeFlow uses Groq for fast, high-accuracy transcription.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("API Key")
+                    .font(.title)
+                    .fontWeight(.bold)
 
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("How to get a free API key:")
-                        .font(.subheadline.weight(.semibold))
-                    VStack(alignment: .leading, spacing: 2) {
-                        instructionRow(number: "1", text: "Go to [console.groq.com/keys](https://console.groq.com/keys)")
-                        instructionRow(number: "2", text: "Create a free account (if you don't have one)")
-                        instructionRow(number: "3", text: "Click **Create API Key** and copy it")
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.blue.opacity(0.06))
-                )
+                Text("Enter an API key for your OpenAI-compatible provider. If you are not using Groq, expand the advanced provider settings and enter that provider's base URL and model IDs before continuing.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("API Key")
-                        .font(.headline)
-                    SecureField("Paste your Groq API key", text: $apiKeyInput)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                        .disabled(isValidatingKey)
-                        .onChange(of: apiKeyInput) { _ in
-                            keyValidationError = nil
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Using Groq?")
+                            .font(.subheadline.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            instructionRow(number: "1", text: "Go to [console.groq.com/keys](https://console.groq.com/keys)")
+                            instructionRow(number: "2", text: "Create a free account (if you don't have one)")
+                            instructionRow(number: "3", text: "Click **Create API Key** and copy it")
                         }
-
-                    if let error = keyValidationError {
-                        Label(error, systemImage: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                            .font(.caption)
                     }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.blue.opacity(0.06))
+                    )
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("API Key")
+                            .font(.headline)
+                        SecureField("Paste your API key", text: $apiKeyInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .disabled(isValidatingKey)
+                            .onChange(of: apiKeyInput) { _ in
+                                keyValidationError = nil
+                            }
+
+                        if let error = keyValidationError {
+                            Label(error, systemImage: "xmark.circle.fill")
+                                .foregroundStyle(.red)
+                                .font(.caption)
+                        }
+                    }
+
+                    Button {
+                        showingProviderSettingsSheet = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Advanced Provider Settings")
+                                    .foregroundStyle(.primary)
+                                Text("Base URL and model IDs")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 8)
                 }
             }
+            .frame(maxWidth: 440)
 
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     var micPermissionStep: some View {
@@ -963,11 +1051,14 @@ struct SetupView: View {
 
     func validateAndContinue() {
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedBaseURL = baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
+        appState.apiBaseURL = resolvedBaseURL
         isValidatingKey = true
         keyValidationError = nil
 
         Task {
-            let valid = await TranscriptionService.validateAPIKey(key, baseURL: appState.apiBaseURL)
+            let valid = await TranscriptionService.validateAPIKey(key, baseURL: resolvedBaseURL)
             await MainActor.run {
                 isValidatingKey = false
                 if valid {
@@ -976,7 +1067,7 @@ struct SetupView: View {
                         currentStep = nextStep(currentStep)
                     }
                 } else {
-                    keyValidationError = "Invalid API key. Please check and try again."
+                    keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
                 }
             }
         }
@@ -1117,9 +1208,10 @@ struct SetupView: View {
 
                     Task {
                         do {
-                            let service = TranscriptionService(
+                            let service = try TranscriptionService(
                                 apiKey: appState.apiKey,
                                 baseURL: appState.apiBaseURL,
+                                transcriptionModel: appState.transcriptionModel
                             )
                             let transcript = try await service.transcribe(fileURL: url)
                             await MainActor.run {
