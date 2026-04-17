@@ -39,15 +39,13 @@ final class LocalShortcutCaptureBackend {
     }
 
     private func handleFlagsChanged(_ event: NSEvent) {
-        guard ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return }
+        guard ShortcutBinding.modifierKeyCodes.contains(event.keyCode),
+              let isDown = ModifierKeyEventState.isKeyDown(for: event) else { return }
 
-        let isDown: Bool
-        if pressedModifierKeyCodes.contains(event.keyCode) {
-            pressedModifierKeyCodes.remove(event.keyCode)
-            isDown = false
-        } else {
+        if isDown {
             pressedModifierKeyCodes.insert(event.keyCode)
-            isDown = true
+        } else {
+            pressedModifierKeyCodes.remove(event.keyCode)
         }
 
         onInputEvent?(.modifierChanged(keyCode: event.keyCode, isDown: isDown))

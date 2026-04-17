@@ -192,7 +192,10 @@ enum ShortcutMatcher {
     private static func bindingIsActive(_ binding: ShortcutBinding, state: ShortcutInputState) -> Bool {
         guard !binding.isDisabled else { return false }
         let activeModifiers = state.currentModifiers
-        guard activeModifiers.isSuperset(of: binding.modifiers) else {
+        guard binding.modifiersAreActive(
+            pressedModifierKeyCodes: state.pressedModifierKeyCodes,
+            currentModifiers: activeModifiers
+        ) else {
             return false
         }
 
@@ -202,13 +205,7 @@ enum ShortcutMatcher {
         case .key:
             return state.pressedKeyCodes.contains(binding.keyCode)
         case .modifierKey:
-            if binding.requiresExactModifierMatch {
-                return state.pressedModifierKeyCodes.contains(binding.keyCode)
-            }
-            guard let logicalModifier = ShortcutBinding.logicalModifier(forKeyCode: binding.keyCode) else {
-                return state.pressedModifierKeyCodes.contains(binding.keyCode)
-            }
-            return activeModifiers.contains(logicalModifier)
+            return state.pressedModifierKeyCodes.contains(binding.keyCode)
         }
     }
 
@@ -251,36 +248,39 @@ enum ShortcutMatcher {
     }
 
     private static func modifierEvent(for keyCode: UInt16, affects binding: ShortcutBinding) -> Bool {
-        if binding.requiresExactModifierMatch {
-            return binding.keyCode == keyCode
-        }
-
-        guard let eventLogicalModifier = ShortcutBinding.logicalModifier(forKeyCode: keyCode),
-              let bindingLogicalModifier = ShortcutBinding.logicalModifier(forKeyCode: binding.keyCode) else {
-            return binding.keyCode == keyCode
-        }
-
-        return eventLogicalModifier == bindingLogicalModifier
+        return binding.keyCode == keyCode
     }
 }
 
 private extension ShortcutBinding {
+    func modifiersAreActive(
+        pressedModifierKeyCodes: Set<UInt16>,
+        currentModifiers: ShortcutModifiers
+    ) -> Bool {
+        guard currentModifiers.isSuperset(of: modifiers) else {
+            return false
+        }
+
+        guard let exactModifierKeyCodes = exactModifierKeyCodes else {
+            return true
+        }
+
+        return pressedModifierKeyCodes.isSuperset(of: exactModifierKeyCodes)
+    }
+
     func referencesPressedModifiers(
         pressedModifierKeyCodes: Set<UInt16>,
         currentModifiers: ShortcutModifiers
     ) -> Bool {
-        if modifiers.intersection(currentModifiers).isEmpty == false {
+        if let exactModifierKeyCodes = exactModifierKeyCodes {
+            if exactModifierKeyCodes.intersection(pressedModifierKeyCodes).isEmpty == false {
+                return true
+            }
+        } else if modifiers.intersection(currentModifiers).isEmpty == false {
             return true
         }
 
         guard kind == .modifierKey else { return false }
-        if requiresExactModifierMatch {
-            return pressedModifierKeyCodes.contains(keyCode)
-        }
-
-        guard let logicalModifier = ShortcutBinding.logicalModifier(forKeyCode: keyCode) else {
-            return pressedModifierKeyCodes.contains(keyCode)
-        }
-        return currentModifiers.contains(logicalModifier)
+        return pressedModifierKeyCodes.contains(keyCode)
     }
 }

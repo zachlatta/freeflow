@@ -262,7 +262,10 @@ private struct ShortcutCaptureRow: View {
                 return
             }
 
-            guard let binding = ShortcutBinding.from(event: event) else {
+            guard let binding = ShortcutBinding.from(
+                event: event,
+                pressedModifierKeyCodes: captureInputState.pressedModifierKeyCodes
+            ) else {
                 return
             }
 

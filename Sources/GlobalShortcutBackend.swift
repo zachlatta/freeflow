@@ -1,4 +1,18 @@
 import Cocoa
+import os.log
+
+private let shortcutLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Shortcuts")
+
+enum GlobalShortcutBackendError: LocalizedError {
+    case eventTapUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .eventTapUnavailable:
+            return "Global shortcut monitoring could not start. FreeFlow requires keyboard monitoring permission for global shortcuts."
+        }
+    }
+}
 
 final class GlobalShortcutBackend {
     private var eventTap: CFMachPort?
@@ -8,9 +22,9 @@ final class GlobalShortcutBackend {
     var onInputEvent: ((ShortcutInputEvent) -> ShortcutConsumeDecision)?
     var onEscapeKeyPressed: (() -> Bool)?
 
-    func start() {
+    func start() throws {
         stop()
-        installEventTap()
+        try installEventTap()
     }
 
     func stop() {
@@ -29,7 +43,7 @@ final class GlobalShortcutBackend {
         stop()
     }
 
-    private func installEventTap() {
+    private func installEventTap() throws {
         let eventMask = [
             CGEventType.flagsChanged,
             CGEventType.keyDown,
@@ -55,7 +69,8 @@ final class GlobalShortcutBackend {
             callback: callback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            return
+            os_log(.error, log: shortcutLog, "Failed to install global shortcut event tap")
+            throw GlobalShortcutBackendError.eventTapUnavailable
         }
 
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
@@ -101,17 +116,15 @@ final class GlobalShortcutBackend {
     }
 
     private func handleFlagsChanged(_ event: NSEvent) -> Bool {
-        guard ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else {
+        guard ShortcutBinding.modifierKeyCodes.contains(event.keyCode),
+              let isDown = ModifierKeyEventState.isKeyDown(for: event) else {
             return false
         }
 
-        let isDown: Bool
-        if pressedModifierKeyCodes.contains(event.keyCode) {
-            pressedModifierKeyCodes.remove(event.keyCode)
-            isDown = false
-        } else {
+        if isDown {
             pressedModifierKeyCodes.insert(event.keyCode)
-            isDown = true
+        } else {
+            pressedModifierKeyCodes.remove(event.keyCode)
         }
 
         return onInputEvent?(.modifierChanged(keyCode: event.keyCode, isDown: isDown)) == .consume

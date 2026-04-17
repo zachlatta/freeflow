@@ -129,14 +129,34 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     let modifiers: ShortcutModifiers
     let kind: ShortcutBindingKind
     let preset: ShortcutPreset?
+    let exactModifierKeyCodes: Set<UInt16>?
+
+    init(
+        keyCode: UInt16,
+        keyDisplay: String,
+        modifiers: ShortcutModifiers,
+        kind: ShortcutBindingKind,
+        preset: ShortcutPreset?,
+        exactModifierKeyCodes: Set<UInt16>? = nil
+    ) {
+        self.keyCode = keyCode
+        self.keyDisplay = keyDisplay
+        self.modifiers = modifiers
+        self.kind = kind
+        self.preset = preset
+        self.exactModifierKeyCodes = exactModifierKeyCodes
+    }
 
     var id: String {
-        "\(kind.rawValue):\(keyCode):\(modifiers.rawValue):\(preset?.rawValue ?? "custom")"
+        let exactModifierID = Self.orderedExactModifierKeyCodes(
+            exactModifierKeyCodes ?? []
+        ).map(String.init).joined(separator: ",")
+        return "\(kind.rawValue):\(keyCode):\(modifiers.rawValue):\(preset?.rawValue ?? "custom"):\(exactModifierID)"
     }
 
     var displayName: String {
         if isDisabled { return "Disabled" }
-        let parts = modifiers.orderedDisplayNames + [keyDisplay]
+        let parts = modifierDisplayNames + [keyDisplay]
         return parts.joined(separator: " + ")
     }
 
@@ -153,7 +173,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     }
 
     var specificityScore: Int {
-        modifiers.orderedDisplayNames.count
+        modifierDisplayNames.count
     }
 
     var usesFnKey: Bool {
@@ -162,7 +182,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     }
 
     var requiresExactModifierMatch: Bool {
-        kind == .modifierKey
+        kind == .modifierKey || exactModifierKeyCodes != nil
     }
 
     func withAddedModifiers(_ extraModifiers: ShortcutModifiers) -> ShortcutBinding {
@@ -172,12 +192,45 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             keyDisplay: keyDisplay,
             modifiers: modifiers.union(extraModifiers),
             kind: kind,
-            preset: preset
+            preset: preset,
+            exactModifierKeyCodes: exactModifierKeyCodes
         )
     }
 
     func normalizedForStorageMigration() -> ShortcutBinding {
-        self
+        let normalizedExactModifierKeyCodes = Self.normalizedExactModifierKeyCodes(exactModifierKeyCodes)
+        let normalizedModifiers = modifiers.union(Self.modifiers(for: normalizedExactModifierKeyCodes ?? []))
+
+        guard normalizedExactModifierKeyCodes != exactModifierKeyCodes || normalizedModifiers != modifiers else {
+            return self
+        }
+
+        return ShortcutBinding(
+            keyCode: keyCode,
+            keyDisplay: keyDisplay,
+            modifiers: normalizedModifiers,
+            kind: kind,
+            preset: preset,
+            exactModifierKeyCodes: normalizedExactModifierKeyCodes
+        )
+    }
+
+    var modifierDisplayNames: [String] {
+        Self.modifierDisplayNames(
+            for: modifiers,
+            exactModifierKeyCodes: displayedExactModifierKeyCodes
+        )
+    }
+
+    private var displayedExactModifierKeyCodes: Set<UInt16>? {
+        guard let exactModifierKeyCodes else { return nil }
+        let filteredModifierKeyCodes: Set<UInt16>
+        if kind == .modifierKey {
+            filteredModifierKeyCodes = exactModifierKeyCodes.subtracting([keyCode])
+        } else {
+            filteredModifierKeyCodes = exactModifierKeyCodes
+        }
+        return Self.normalizedExactModifierKeyCodes(filteredModifierKeyCodes)
     }
 
     static let disabled = ShortcutBinding(
@@ -250,4 +303,45 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             return "Modifier"
         }
     }
+
+    static func normalizedExactModifierKeyCodes(_ exactModifierKeyCodes: Set<UInt16>?) -> Set<UInt16>? {
+        guard let exactModifierKeyCodes else { return nil }
+        let normalized = exactModifierKeyCodes.filter { modifierKeyCodes.contains($0) }
+        return normalized.isEmpty ? nil : normalized
+    }
+
+    static func orderedExactModifierKeyCodes(_ exactModifierKeyCodes: Set<UInt16>) -> [UInt16] {
+        modifierDisplayOrder.filter(exactModifierKeyCodes.contains)
+    }
+
+    static func modifierDisplayNames(
+        for modifiers: ShortcutModifiers,
+        exactModifierKeyCodes: Set<UInt16>?
+    ) -> [String] {
+        let normalizedExactModifierKeyCodes = normalizedExactModifierKeyCodes(exactModifierKeyCodes) ?? []
+        var names: [String] = []
+
+        for spec in modifierDisplaySpecs {
+            let exactNames = spec.exactDisplayNames.compactMap { keyCode, displayName in
+                normalizedExactModifierKeyCodes.contains(keyCode) ? displayName : nil
+            }
+            if !exactNames.isEmpty {
+                names.append(contentsOf: exactNames)
+            } else if modifiers.contains(spec.logicalModifier) {
+                names.append(spec.genericDisplayName)
+            }
+        }
+
+        return names
+    }
+
+    private static let modifierDisplayOrder: [UInt16] = [55, 54, 59, 62, 58, 61, 56, 60, 63]
+
+    private static let modifierDisplaySpecs: [(logicalModifier: ShortcutModifiers, genericDisplayName: String, exactDisplayNames: [(UInt16, String)])] = [
+        (.command, "⌘", [(55, "⌘"), (54, "⌘ →")]),
+        (.control, "⌃", [(59, "⌃"), (62, "⌃ →")]),
+        (.option, "⌥", [(58, "⌥"), (61, "⌥ →")]),
+        (.shift, "⇧", [(56, "⇧"), (60, "⇧ →")]),
+        (.function, "fn", [(63, "fn")])
+    ]
 }

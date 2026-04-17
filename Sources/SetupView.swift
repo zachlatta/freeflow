@@ -1243,10 +1243,15 @@ struct SetupView: View {
             }
         }
 
-        testHotkeyHarness.start(configuration: ShortcutConfiguration(
-            hold: appState.holdShortcut,
-            toggle: appState.toggleShortcut
-        ), startDelay: appState.shortcutStartDelay)
+        do {
+            try testHotkeyHarness.start(configuration: ShortcutConfiguration(
+                hold: appState.holdShortcut,
+                toggle: appState.toggleShortcut
+            ), startDelay: appState.shortcutStartDelay)
+        } catch {
+            testError = error.localizedDescription
+            testPhase = .done
+        }
     }
 
     private func stopTestHotkeyMonitoring() {

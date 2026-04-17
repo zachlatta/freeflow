@@ -80,6 +80,15 @@ struct MenuBarView: View {
             }
             .disabled(appState.isTranscribing)
 
+            if let hotkeyError = appState.hotkeyMonitoringErrorMessage {
+                Divider()
+                Text(hotkeyError)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .padding(.horizontal, 16)
+                    .lineLimit(3)
+            }
+
             if let error = appState.errorMessage {
                 Divider()
                 Text(error)

@@ -54,19 +54,22 @@ extension ShortcutModifiers {
 }
 
 extension ShortcutBinding {
-    static func from(event: NSEvent) -> ShortcutBinding? {
+    static func from(event: NSEvent, pressedModifierKeyCodes: Set<UInt16>) -> ShortcutBinding? {
         guard !event.isARepeat else { return nil }
         guard !Self.modifierKeyCodes.contains(event.keyCode) else { return nil }
 
         let label = Self.displayLabel(for: event.keyCode, event: event)
         guard !label.isEmpty else { return nil }
 
+        let exactModifierKeyCodes = Self.normalizedExactModifierKeyCodes(pressedModifierKeyCodes)
+
         return ShortcutBinding(
             keyCode: event.keyCode,
             keyDisplay: label,
-            modifiers: ShortcutModifiers(eventFlags: event.modifierFlags),
+            modifiers: Self.modifiers(for: pressedModifierKeyCodes),
             kind: .key,
-            preset: nil
+            preset: nil,
+            exactModifierKeyCodes: exactModifierKeyCodes
         )
     }
 
@@ -96,7 +99,8 @@ extension ShortcutBinding {
             keyDisplay: displayLabel(for: keyCode),
             modifiers: extraModifiers,
             kind: .modifierKey,
-            preset: nil
+            preset: nil,
+            exactModifierKeyCodes: normalizedExactModifierKeyCodes(pressedModifierKeyCodes)
         )
     }
 

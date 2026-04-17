@@ -19,7 +19,7 @@ final class HotkeyManager {
         inputState.hasPressedShortcutInputs(configuration: configuration)
     }
 
-    func start(configuration: ShortcutConfiguration) {
+    func start(configuration: ShortcutConfiguration) throws {
         stop()
         self.configuration = configuration
         backend.onInputEvent = { [weak self] event in
@@ -28,7 +28,14 @@ final class HotkeyManager {
         backend.onEscapeKeyPressed = { [weak self] in
             self?.onEscapeKeyPressed?() ?? false
         }
-        backend.start()
+        do {
+            try backend.start()
+        } catch {
+            backend.onInputEvent = nil
+            backend.onEscapeKeyPressed = nil
+            inputState = ShortcutInputState()
+            throw error
+        }
     }
 
     func stop() {

@@ -10,14 +10,14 @@ final class SetupTestHotkeyHarness: ObservableObject {
     var isTranscribing = false
     var onAction: ((DictationShortcutAction) -> Void)?
 
-    func start(configuration: ShortcutConfiguration, startDelay: TimeInterval) {
+    func start(configuration: ShortcutConfiguration, startDelay: TimeInterval) throws {
         hotkeyManager.onShortcutEvent = { [weak self] event in
             guard let self else { return }
             let action = self.sessionController.handle(event: event, isTranscribing: self.isTranscribing)
             guard let action else { return }
             self.handle(action: action, startDelay: startDelay)
         }
-        hotkeyManager.start(configuration: configuration)
+        try hotkeyManager.start(configuration: configuration)
     }
 
     func stop() {
