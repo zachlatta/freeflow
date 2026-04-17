@@ -1208,7 +1208,7 @@ struct SetupView: View {
 
                     Task {
                         do {
-                            let service = TranscriptionService(
+                            let service = try TranscriptionService(
                                 apiKey: appState.apiKey,
                                 baseURL: appState.apiBaseURL,
                                 transcriptionModel: appState.transcriptionModel

@@ -554,7 +554,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private static let defaultAPIBaseURL = "https://api.groq.com/openai/v1"
+    static let defaultAPIBaseURL = "https://api.groq.com/openai/v1"
 
     private struct StoredShortcutConfiguration {
         let hold: ShortcutBinding
@@ -701,11 +701,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             screenshotError: nil
         )
 
-        let transcriptionService = TranscriptionService(
-            apiKey: apiKey,
-            baseURL: apiBaseURL,
-            transcriptionModel: transcriptionModel
-        )
         let postProcessingService = PostProcessingService(
             apiKey: apiKey,
             baseURL: apiBaseURL,
@@ -717,6 +712,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         Task {
             do {
+                let transcriptionService = try TranscriptionService(
+                    apiKey: apiKey,
+                    baseURL: apiBaseURL,
+                    transcriptionModel: transcriptionModel
+                )
                 let rawTranscript = try await transcriptionService.transcribe(fileURL: audioURL)
 
                 let finalTranscript: String
@@ -1707,11 +1707,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 } catch {}
             }
 
-        let transcriptionService = TranscriptionService(
-            apiKey: apiKey,
-            baseURL: apiBaseURL,
-            transcriptionModel: transcriptionModel
-        )
         let postProcessingService = PostProcessingService(
             apiKey: apiKey,
             baseURL: apiBaseURL,
@@ -1722,6 +1717,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.transcriptionTask?.cancel()
             self.transcriptionTask = Task {
                 do {
+                    let transcriptionService = try TranscriptionService(
+                        apiKey: self.apiKey,
+                        baseURL: self.apiBaseURL,
+                        transcriptionModel: self.transcriptionModel
+                    )
                     async let transcript = transcriptionService.transcribe(fileURL: transcriptionFileURL)
                     let rawTranscript = try await transcript
                     try Task.checkCancellation()

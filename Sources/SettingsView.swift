@@ -41,8 +41,16 @@ private let iso8601DayFormatter: DateFormatter = {
 struct ProviderSettingsFields: View {
     @EnvironmentObject var appState: AppState
     @Binding var apiBaseURLInput: String
+    @FocusState private var isEditingAPIBaseURL: Bool
 
     let showsModelDescription: Bool
+
+    private func commitAPIBaseURL() {
+        let trimmed = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedBaseURL = trimmed.isEmpty ? AppState.defaultAPIBaseURL : trimmed
+        apiBaseURLInput = resolvedBaseURL
+        appState.apiBaseURL = resolvedBaseURL
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -54,19 +62,22 @@ struct ProviderSettingsFields: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
+                TextField(AppState.defaultAPIBaseURL, text: $apiBaseURLInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
-                    .onChange(of: apiBaseURLInput) { newValue in
-                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
-                            appState.apiBaseURL = trimmed
+                    .focused($isEditingAPIBaseURL)
+                    .onSubmit {
+                        commitAPIBaseURL()
+                    }
+                    .onChange(of: isEditingAPIBaseURL) { isEditing in
+                        if !isEditing {
+                            commitAPIBaseURL()
                         }
                     }
 
                 Button("Reset to Default") {
-                    apiBaseURLInput = "https://api.groq.com/openai/v1"
-                    appState.apiBaseURL = "https://api.groq.com/openai/v1"
+                    apiBaseURLInput = AppState.defaultAPIBaseURL
+                    appState.apiBaseURL = AppState.defaultAPIBaseURL
                 }
                 .font(.caption)
             }
@@ -578,7 +589,10 @@ struct GeneralSettingsView: View {
         keyValidationSuccess = false
 
         Task {
-            let valid = await TranscriptionService.validateAPIKey(key, baseURL: baseURL.isEmpty ? "https://api.groq.com/openai/v1" : baseURL)
+            let valid = await TranscriptionService.validateAPIKey(
+                key,
+                baseURL: baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
+            )
             await MainActor.run {
                 isValidatingKey = false
                 if valid {

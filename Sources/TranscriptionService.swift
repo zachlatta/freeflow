@@ -6,7 +6,7 @@ private let transcriptionLog = OSLog(subsystem: "com.zachlatta.freeflow", catego
 
 class TranscriptionService {
     private let apiKey: String
-    private let baseURL: String
+    private let baseURL: URL
     private let transcriptionModel: String
     private let transcriptionResponseFormat = "verbose_json"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
@@ -17,9 +17,9 @@ class TranscriptionService {
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         transcriptionModel: String = "whisper-large-v3"
-    ) {
+    ) throws {
         self.apiKey = apiKey
-        self.baseURL = baseURL
+        self.baseURL = try Self.normalizedBaseURL(from: baseURL)
         let trimmedModel = transcriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
     }
@@ -28,8 +28,9 @@ class TranscriptionService {
     static func validateAPIKey(_ key: String, baseURL: String = "https://api.groq.com/openai/v1") async -> Bool {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        guard let baseURL = try? normalizedBaseURL(from: baseURL) else { return false }
 
-        var request = URLRequest(url: URL(string: "\(baseURL)/models")!)
+        var request = URLRequest(url: baseURL.appendingPathComponent("models"))
         request.timeoutInterval = 10
         request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
 
@@ -64,7 +65,9 @@ class TranscriptionService {
     }
 
     private func transcribeAudioWithURLSession(fileURL: URL) async throws -> String {
-        let url = URL(string: "\(baseURL)/audio/transcriptions")!
+        let url = baseURL
+            .appendingPathComponent("audio")
+            .appendingPathComponent("transcriptions")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = transcriptionTimeoutSeconds
@@ -194,6 +197,42 @@ class TranscriptionService {
             && format.commonFormat == .pcmFormatInt16
     }
 
+    private static func normalizedBaseURL(from baseURL: String) throws -> URL {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw TranscriptionError.invalidBaseURL("Provider URL is empty.")
+        }
+
+        guard var components = URLComponents(string: trimmed) else {
+            throw TranscriptionError.invalidBaseURL("Provider URL is malformed.")
+        }
+
+        guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            throw TranscriptionError.invalidBaseURL("Provider URL must use http or https.")
+        }
+
+        guard let host = components.host, !host.isEmpty else {
+            throw TranscriptionError.invalidBaseURL("Provider URL must include a host.")
+        }
+
+        components.scheme = scheme
+        if components.path == "/" {
+            components.path = ""
+        } else {
+            components.path = components.path.replacingOccurrences(
+                of: "/+$",
+                with: "",
+                options: .regularExpression
+            )
+        }
+
+        guard let normalizedURL = components.url else {
+            throw TranscriptionError.invalidBaseURL("Provider URL is malformed.")
+        }
+
+        return normalizedURL
+    }
+
     // Whisper-large-v3 hallucinates common short phrases on silence/background
     // noise. Drop them when whisper itself reports a high no_speech_prob.
     // Add a new (phrase, minNoSpeechProb) pair here to filter more hallucinations.
@@ -264,6 +303,7 @@ class TranscriptionService {
 }
 
 enum TranscriptionError: LocalizedError {
+    case invalidBaseURL(String)
     case uploadFailed(String)
     case submissionFailed(String)
     case transcriptionFailed(String)
@@ -273,6 +313,7 @@ enum TranscriptionError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case .invalidBaseURL(let msg): return "Invalid provider URL: \(msg)"
         case .uploadFailed(let msg): return "Upload failed: \(msg)"
         case .submissionFailed(let msg): return "Submission failed: \(msg)"
         case .transcriptionTimedOut(let seconds): return "Transcription timed out after \(Int(seconds))s"
