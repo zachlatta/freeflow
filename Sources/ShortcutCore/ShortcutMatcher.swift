@@ -248,7 +248,17 @@ enum ShortcutMatcher {
     }
 
     private static func modifierEvent(for keyCode: UInt16, affects binding: ShortcutBinding) -> Bool {
-        return binding.keyCode == keyCode
+        if binding.keyCode == keyCode {
+            return true
+        }
+
+        if let exactModifierKeyCodes = binding.exactModifierKeyCodes,
+           exactModifierKeyCodes.contains(keyCode) {
+            return true
+        }
+
+        return ShortcutBinding.modifierKeyCodes.contains(keyCode)
+            && ShortcutBinding.logicalModifier(forKeyCode: keyCode).map(binding.modifiers.contains) == true
     }
 }
 
@@ -265,7 +275,7 @@ private extension ShortcutBinding {
             return true
         }
 
-        return pressedModifierKeyCodes.isSuperset(of: exactModifierKeyCodes)
+        return pressedModifierKeyCodes == exactModifierKeyCodes
     }
 
     func referencesPressedModifiers(
