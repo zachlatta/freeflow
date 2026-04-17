@@ -42,6 +42,14 @@ struct ProviderSettingsFields: View {
     @EnvironmentObject var appState: AppState
     @Binding var apiBaseURLInput: String
     @FocusState private var isEditingAPIBaseURL: Bool
+    @FocusState private var isEditingTranscriptionModel: Bool
+    @FocusState private var isEditingPostProcessingModel: Bool
+    @FocusState private var isEditingPostProcessingFallbackModel: Bool
+    @FocusState private var isEditingContextModel: Bool
+    @State private var transcriptionModelDraft: String = ""
+    @State private var postProcessingModelDraft: String = ""
+    @State private var postProcessingFallbackModelDraft: String = ""
+    @State private var contextModelDraft: String = ""
 
     let showsModelDescription: Bool
 
@@ -50,6 +58,34 @@ struct ProviderSettingsFields: View {
         let resolvedBaseURL = trimmed.isEmpty ? AppState.defaultAPIBaseURL : trimmed
         apiBaseURLInput = resolvedBaseURL
         appState.apiBaseURL = resolvedBaseURL
+    }
+
+    private func commitTranscriptionModel() {
+        let trimmed = transcriptionModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        transcriptionModelDraft = trimmed
+        guard appState.transcriptionModel != trimmed else { return }
+        appState.transcriptionModel = trimmed
+    }
+
+    private func commitPostProcessingModel() {
+        let trimmed = postProcessingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        postProcessingModelDraft = trimmed
+        guard appState.postProcessingModel != trimmed else { return }
+        appState.postProcessingModel = trimmed
+    }
+
+    private func commitPostProcessingFallbackModel() {
+        let trimmed = postProcessingFallbackModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        postProcessingFallbackModelDraft = trimmed
+        guard appState.postProcessingFallbackModel != trimmed else { return }
+        appState.postProcessingFallbackModel = trimmed
+    }
+
+    private func commitContextModel() {
+        let trimmed = contextModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        contextModelDraft = trimmed
+        guard appState.contextModel != trimmed else { return }
+        appState.contextModel = trimmed
     }
 
     var body: some View {
@@ -92,9 +128,19 @@ struct ProviderSettingsFields: View {
                 Text("Transcription Model")
                     .font(.caption.weight(.semibold))
                 HStack(spacing: 8) {
-                    TextField(AppState.defaultTranscriptionModel, text: $appState.transcriptionModel)
+                    TextField(AppState.defaultTranscriptionModel, text: $transcriptionModelDraft)
                         .textFieldStyle(.roundedBorder)
+                        .focused($isEditingTranscriptionModel)
+                        .onSubmit {
+                            commitTranscriptionModel()
+                        }
+                        .onChange(of: isEditingTranscriptionModel) { isEditing in
+                            if !isEditing {
+                                commitTranscriptionModel()
+                            }
+                        }
                     Button("Reset to Default") {
+                        transcriptionModelDraft = AppState.defaultTranscriptionModel
                         appState.transcriptionModel = AppState.defaultTranscriptionModel
                     }
                     .font(.caption)
@@ -108,9 +154,19 @@ struct ProviderSettingsFields: View {
                 Text("Post-Processing Model")
                     .font(.caption.weight(.semibold))
                 HStack(spacing: 8) {
-                    TextField(AppState.defaultPostProcessingModel, text: $appState.postProcessingModel)
+                    TextField(AppState.defaultPostProcessingModel, text: $postProcessingModelDraft)
                         .textFieldStyle(.roundedBorder)
+                        .focused($isEditingPostProcessingModel)
+                        .onSubmit {
+                            commitPostProcessingModel()
+                        }
+                        .onChange(of: isEditingPostProcessingModel) { isEditing in
+                            if !isEditing {
+                                commitPostProcessingModel()
+                            }
+                        }
                     Button("Reset to Default") {
+                        postProcessingModelDraft = AppState.defaultPostProcessingModel
                         appState.postProcessingModel = AppState.defaultPostProcessingModel
                     }
                     .font(.caption)
@@ -124,9 +180,19 @@ struct ProviderSettingsFields: View {
                 Text("Post-Processing Fallback Model")
                     .font(.caption.weight(.semibold))
                 HStack(spacing: 8) {
-                    TextField(AppState.defaultPostProcessingFallbackModel, text: $appState.postProcessingFallbackModel)
+                    TextField(AppState.defaultPostProcessingFallbackModel, text: $postProcessingFallbackModelDraft)
                         .textFieldStyle(.roundedBorder)
+                        .focused($isEditingPostProcessingFallbackModel)
+                        .onSubmit {
+                            commitPostProcessingFallbackModel()
+                        }
+                        .onChange(of: isEditingPostProcessingFallbackModel) { isEditing in
+                            if !isEditing {
+                                commitPostProcessingFallbackModel()
+                            }
+                        }
                     Button("Reset to Default") {
+                        postProcessingFallbackModelDraft = AppState.defaultPostProcessingFallbackModel
                         appState.postProcessingFallbackModel = AppState.defaultPostProcessingFallbackModel
                     }
                     .font(.caption)
@@ -140,9 +206,19 @@ struct ProviderSettingsFields: View {
                 Text("Context Model")
                     .font(.caption.weight(.semibold))
                 HStack(spacing: 8) {
-                    TextField(AppState.defaultContextModel, text: $appState.contextModel)
+                    TextField(AppState.defaultContextModel, text: $contextModelDraft)
                         .textFieldStyle(.roundedBorder)
+                        .focused($isEditingContextModel)
+                        .onSubmit {
+                            commitContextModel()
+                        }
+                        .onChange(of: isEditingContextModel) { isEditing in
+                            if !isEditing {
+                                commitContextModel()
+                            }
+                        }
                     Button("Reset to Default") {
+                        contextModelDraft = AppState.defaultContextModel
                         appState.contextModel = AppState.defaultContextModel
                     }
                     .font(.caption)
@@ -150,6 +226,32 @@ struct ProviderSettingsFields: View {
                 Text("Used for context inference, with a text-only retry when screenshot analysis fails.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear {
+            transcriptionModelDraft = appState.transcriptionModel
+            postProcessingModelDraft = appState.postProcessingModel
+            postProcessingFallbackModelDraft = appState.postProcessingFallbackModel
+            contextModelDraft = appState.contextModel
+        }
+        .onChange(of: appState.transcriptionModel) { value in
+            if !isEditingTranscriptionModel {
+                transcriptionModelDraft = value
+            }
+        }
+        .onChange(of: appState.postProcessingModel) { value in
+            if !isEditingPostProcessingModel {
+                postProcessingModelDraft = value
+            }
+        }
+        .onChange(of: appState.postProcessingFallbackModel) { value in
+            if !isEditingPostProcessingFallbackModel {
+                postProcessingFallbackModelDraft = value
+            }
+        }
+        .onChange(of: appState.contextModel) { value in
+            if !isEditingContextModel {
+                contextModelDraft = value
             }
         }
     }

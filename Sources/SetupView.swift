@@ -1052,7 +1052,7 @@ struct SetupView: View {
     func validateAndContinue() {
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedBaseURL = baseURL.isEmpty ? "https://api.groq.com/openai/v1" : baseURL
+        let resolvedBaseURL = baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
         appState.apiBaseURL = resolvedBaseURL
         isValidatingKey = true
         keyValidationError = nil
