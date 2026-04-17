@@ -17,6 +17,9 @@ final class SetupTestHotkeyHarness: ObservableObject {
             guard let action else { return }
             self.handle(action: action, startDelay: startDelay)
         }
+        cancelPendingStart()
+        sessionController.reset()
+        isTranscribing = false
         try hotkeyManager.start(configuration: configuration)
     }
 

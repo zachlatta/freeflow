@@ -273,10 +273,10 @@ private extension ShortcutBinding {
         currentModifiers: ShortcutModifiers
     ) -> Bool {
         if let exactModifierKeyCodes = exactModifierKeyCodes {
-            if exactModifierKeyCodes.intersection(pressedModifierKeyCodes).isEmpty == false {
+            if !exactModifierKeyCodes.isDisjoint(with: pressedModifierKeyCodes) {
                 return true
             }
-        } else if modifiers.intersection(currentModifiers).isEmpty == false {
+        } else if !modifiers.isDisjoint(with: currentModifiers) {
             return true
         }
 

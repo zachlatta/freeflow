@@ -27,7 +27,9 @@ final class DictationShortcutSessionController {
             }
         }
 
-        switch activeMode {
+        guard let mode = activeMode else { return nil }
+
+        switch mode {
         case .hold:
             switch event {
             case .toggleActivated:
@@ -53,9 +55,6 @@ final class DictationShortcutSessionController {
             case .holdActivated, .holdDeactivated:
                 return nil
             }
-
-        case .none:
-            return nil
         }
     }
 

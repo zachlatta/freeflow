@@ -1406,34 +1406,34 @@ final class AppState: ObservableObject, @unchecked Sendable {
             prepareForMicrophonePermissionPrompt(triggerMode: triggerMode)
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 DispatchQueue.main.async {
-                    guard let self else { return }
-                    let pendingTriggerMode = self.pendingMicrophonePermissionTriggerMode
-                    self.pendingMicrophonePermissionTriggerMode = nil
-                    self.isAwaitingMicrophonePermission = false
-                    self.restartHotkeyMonitoring()
+                    guard let strongSelf = self else { return }
+                    let pendingTriggerMode = strongSelf.pendingMicrophonePermissionTriggerMode
+                    strongSelf.pendingMicrophonePermissionTriggerMode = nil
+                    strongSelf.isAwaitingMicrophonePermission = false
+                    strongSelf.restartHotkeyMonitoring()
 
                     guard let triggerMode = pendingTriggerMode else { return }
                     if granted {
-                        self.errorMessage = nil
+                        strongSelf.errorMessage = nil
                         if triggerMode == .toggle {
-                            self.shortcutSessionController.beginManual(mode: .toggle)
-                            self.activeRecordingTriggerMode = .toggle
-                            self.beginRecording(triggerMode: .toggle)
+                            strongSelf.shortcutSessionController.beginManual(mode: .toggle)
+                            strongSelf.activeRecordingTriggerMode = .toggle
+                            strongSelf.beginRecording(triggerMode: .toggle)
                         } else {
-                            self.currentSessionIntent = .dictation
-                            self.statusText = "Microphone access granted. Press and hold again to record."
-                            self.scheduleReadyStatusReset(
+                            strongSelf.currentSessionIntent = .dictation
+                            strongSelf.statusText = "Microphone access granted. Press and hold again to record."
+                            strongSelf.scheduleReadyStatusReset(
                                 after: 2,
                                 matching: ["Microphone access granted. Press and hold again to record."]
                             )
                         }
                     } else {
-                        self.errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
-                        self.statusText = "No Microphone"
-                        self.activeRecordingTriggerMode = nil
-                        self.currentSessionIntent = .dictation
-                        self.shortcutSessionController.reset()
-                        self.showMicrophonePermissionAlert()
+                        strongSelf.errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
+                        strongSelf.statusText = "No Microphone"
+                        strongSelf.activeRecordingTriggerMode = nil
+                        strongSelf.currentSessionIntent = .dictation
+                        strongSelf.shortcutSessionController.reset()
+                        strongSelf.showMicrophonePermissionAlert()
                     }
                 }
             }
