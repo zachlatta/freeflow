@@ -38,6 +38,112 @@ private let iso8601DayFormatter: DateFormatter = {
     return formatter
 }()
 
+struct ProviderSettingsFields: View {
+    @EnvironmentObject var appState: AppState
+    @Binding var apiBaseURLInput: String
+
+    let showsModelDescription: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("API Base URL")
+                .font(.caption.weight(.semibold))
+
+            Text("Change this to use a different OpenAI-compatible API provider.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onChange(of: apiBaseURLInput) { newValue in
+                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            appState.apiBaseURL = trimmed
+                        }
+                    }
+
+                Button("Reset to Default") {
+                    apiBaseURLInput = "https://api.groq.com/openai/v1"
+                    appState.apiBaseURL = "https://api.groq.com/openai/v1"
+                }
+                .font(.caption)
+            }
+
+            if showsModelDescription {
+                Text("If you use another provider, enter that provider's model IDs here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultTranscriptionModel, text: $appState.transcriptionModel)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Reset to Default") {
+                        appState.transcriptionModel = AppState.defaultTranscriptionModel
+                    }
+                    .font(.caption)
+                }
+                Text("Used for speech-to-text transcription.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Post-Processing Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultPostProcessingModel, text: $appState.postProcessingModel)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Reset to Default") {
+                        appState.postProcessingModel = AppState.defaultPostProcessingModel
+                    }
+                    .font(.caption)
+                }
+                Text("Used for transcript cleanup and Edit Mode transforms.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Post-Processing Fallback Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultPostProcessingFallbackModel, text: $appState.postProcessingFallbackModel)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Reset to Default") {
+                        appState.postProcessingFallbackModel = AppState.defaultPostProcessingFallbackModel
+                    }
+                    .font(.caption)
+                }
+                Text("Used as the explicit retry model for transcript cleanup and Edit Mode transforms.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Context Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultContextModel, text: $appState.contextModel)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Reset to Default") {
+                        appState.contextModel = AppState.defaultContextModel
+                    }
+                    .font(.caption)
+                }
+                Text("Used for context inference, with a text-only retry when screenshot analysis fails.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
 // MARK: - Settings
 
 struct SettingsView: View {
@@ -445,33 +551,10 @@ struct GeneralSettingsView: View {
             DisclosureGroup(isExpanded: $advancedProviderSettingsExpanded) {
                 VStack(alignment: .leading, spacing: 12) {
                     Divider()
-
-                    Text("API Base URL")
-                        .font(.caption.weight(.semibold))
-
-                    Text("Change this to use a different OpenAI-compatible API provider.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 8) {
-                        TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                            .onChange(of: apiBaseURLInput) { newValue in
-                                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                                if !trimmed.isEmpty {
-                                    appState.apiBaseURL = trimmed
-                                }
-                            }
-
-                        Button("Reset to Default") {
-                            apiBaseURLInput = "https://api.groq.com/openai/v1"
-                            appState.apiBaseURL = "https://api.groq.com/openai/v1"
-                        }
-                        .font(.caption)
-                    }
-
-                    modelsSection
+                    ProviderSettingsFields(
+                        apiBaseURLInput: $apiBaseURLInput,
+                        showsModelDescription: false
+                    )
                 }
             } label: {
                 HStack {
@@ -484,78 +567,6 @@ struct GeneralSettingsView: View {
                 }
             }
             .padding(.top, 4)
-        }
-    }
-
-    private var modelsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Override the default models used for transcription, cleanup, and context inference.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Transcription Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField(AppState.defaultTranscriptionModel, text: $appState.transcriptionModel)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Reset to Default") {
-                        appState.transcriptionModel = AppState.defaultTranscriptionModel
-                    }
-                    .font(.caption)
-                }
-                Text("Used for speech-to-text transcription.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Post-Processing Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField(AppState.defaultPostProcessingModel, text: $appState.postProcessingModel)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Reset to Default") {
-                        appState.postProcessingModel = AppState.defaultPostProcessingModel
-                    }
-                    .font(.caption)
-                }
-                Text("Used for transcript cleanup and Edit Mode transforms.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Post-Processing Fallback Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField(AppState.defaultPostProcessingFallbackModel, text: $appState.postProcessingFallbackModel)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Reset to Default") {
-                        appState.postProcessingFallbackModel = AppState.defaultPostProcessingFallbackModel
-                    }
-                    .font(.caption)
-                }
-                Text("Used as the explicit retry model for transcript cleanup and Edit Mode transforms.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Context Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField(AppState.defaultContextModel, text: $appState.contextModel)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Reset to Default") {
-                        appState.contextModel = AppState.defaultContextModel
-                    }
-                    .font(.caption)
-                }
-                Text("Used for context inference, with a text-only retry when screenshot analysis fails.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -574,7 +585,7 @@ struct GeneralSettingsView: View {
                     appState.apiKey = key
                     keyValidationSuccess = true
                 } else {
-                    keyValidationError = "Invalid API key. Please check and try again."
+                    keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
                 }
             }
         }
