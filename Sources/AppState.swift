@@ -408,6 +408,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingOverlayDismissToken: UUID?
     private var shouldMonitorHotkeys = false
     private var isCapturingShortcut = false
+    private var isAwaitingMicrophonePermission = false
+    private var pendingMicrophonePermissionTriggerMode: RecordingTriggerMode?
 
     init() {
         UserDefaults.standard.removeObject(forKey: "force_http2_transcription")
@@ -1095,7 +1097,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func restartHotkeyMonitoring() {
-        guard shouldMonitorHotkeys, !isCapturingShortcut else {
+        guard shouldMonitorHotkeys, !isCapturingShortcut, !isAwaitingMicrophonePermission else {
             hotkeyManager.stop()
             return
         }
@@ -1397,18 +1399,41 @@ final class AppState: ObservableObject, @unchecked Sendable {
         case .authorized:
             return true
         case .notDetermined:
+            guard let triggerMode = activeRecordingTriggerMode else {
+                return false
+            }
+
+            prepareForMicrophonePermissionPrompt(triggerMode: triggerMode)
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 DispatchQueue.main.async {
+                    guard let self else { return }
+                    let pendingTriggerMode = self.pendingMicrophonePermissionTriggerMode
+                    self.pendingMicrophonePermissionTriggerMode = nil
+                    self.isAwaitingMicrophonePermission = false
+                    self.restartHotkeyMonitoring()
+
+                    guard let triggerMode = pendingTriggerMode else { return }
                     if granted {
-                        guard let self, let triggerMode = self.activeRecordingTriggerMode else { return }
-                        self.beginRecording(triggerMode: triggerMode)
+                        self.errorMessage = nil
+                        if triggerMode == .toggle {
+                            self.shortcutSessionController.beginManual(mode: .toggle)
+                            self.activeRecordingTriggerMode = .toggle
+                            self.beginRecording(triggerMode: .toggle)
+                        } else {
+                            self.currentSessionIntent = .dictation
+                            self.statusText = "Microphone access granted. Press and hold again to record."
+                            self.scheduleReadyStatusReset(
+                                after: 2,
+                                matching: ["Microphone access granted. Press and hold again to record."]
+                            )
+                        }
                     } else {
-                        self?.errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
-                        self?.statusText = "No Microphone"
-                        self?.activeRecordingTriggerMode = nil
-                        self?.currentSessionIntent = .dictation
-                        self?.shortcutSessionController.reset()
-                        self?.showMicrophonePermissionAlert()
+                        self.errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
+                        self.statusText = "No Microphone"
+                        self.activeRecordingTriggerMode = nil
+                        self.currentSessionIntent = .dictation
+                        self.shortcutSessionController.reset()
+                        self.showMicrophonePermissionAlert()
                     }
                 }
             }
@@ -1422,6 +1447,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
             showMicrophonePermissionAlert()
             return false
         }
+    }
+
+    private func prepareForMicrophonePermissionPrompt(triggerMode: RecordingTriggerMode) {
+        isAwaitingMicrophonePermission = true
+        pendingMicrophonePermissionTriggerMode = triggerMode
+        hotkeyManager.stop()
+        shortcutSessionController.reset()
+        activeRecordingTriggerMode = nil
+        cancelRecordingInitializationTimer()
+        audioRecorder.onRecordingReady = nil
+        audioRecorder.onRecordingFailure = nil
+        audioLevelCancellable?.cancel()
+        audioLevelCancellable = nil
+        overlayManager.dismiss()
     }
 
     private func beginRecording(triggerMode: RecordingTriggerMode) {
