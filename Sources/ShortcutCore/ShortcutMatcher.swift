@@ -252,9 +252,8 @@ enum ShortcutMatcher {
             return true
         }
 
-        if let exactModifierKeyCodes = binding.exactModifierKeyCodes,
-           exactModifierKeyCodes.contains(keyCode) {
-            return true
+        if binding.exactModifierKeyCodes != nil {
+            return ShortcutBinding.modifierKeyCodes.contains(keyCode)
         }
 
         return ShortcutBinding.modifierKeyCodes.contains(keyCode)
