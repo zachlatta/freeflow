@@ -829,6 +829,35 @@ final class AppState: ObservableObject, @unchecked Sendable {
         AXIsProcessTrustedWithOptions(options)
     }
 
+    func openMicrophoneSettings() {
+        let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        if let url = settingsURL {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            completion(true)
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        self?.refreshAvailableMicrophones()
+                    }
+                    completion(granted)
+                }
+            }
+        case .denied, .restricted:
+            openMicrophoneSettings()
+            completion(false)
+        @unknown default:
+            openMicrophoneSettings()
+            completion(false)
+        }
+    }
+
     func hasScreenCapturePermission() -> Bool {
         CGPreflightScreenCaptureAccess()
     }
@@ -1007,8 +1036,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if binding.isDisabled && otherBinding.isDisabled {
             return "At least one shortcut must remain enabled."
         }
-        guard !binding.overlaps(with: otherBinding) else {
-            return "Hold and tap shortcuts must not overlap."
+        guard !binding.conflicts(with: otherBinding) else {
+            return "Hold and tap shortcuts must be distinct."
         }
         if isCommandModeEnabled,
            commandModeStyle == .manual,
@@ -1053,13 +1082,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         let derivedHold = holdBinding.withAddedModifiers(manualModifier)
-        if !holdBinding.isDisabled && derivedHold.overlaps(with: toggleBinding) {
-            return "That modifier would make the command hold shortcut overlap an existing dictation shortcut."
+        if !holdBinding.isDisabled && derivedHold.conflicts(with: toggleBinding) {
+            return "That modifier would make the command hold shortcut conflict with an existing dictation shortcut."
         }
 
         let derivedToggle = toggleBinding.withAddedModifiers(manualModifier)
-        if !toggleBinding.isDisabled && derivedToggle.overlaps(with: holdBinding) {
-            return "That modifier would make the command tap shortcut overlap an existing dictation shortcut."
+        if !toggleBinding.isDisabled && derivedToggle.conflicts(with: holdBinding) {
+            return "That modifier would make the command tap shortcut conflict with an existing dictation shortcut."
         }
 
         return nil
@@ -1606,10 +1635,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
-            let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-            if let url = settingsURL {
-                NSWorkspace.shared.open(url)
-            }
+            openMicrophoneSettings()
         }
     }
 

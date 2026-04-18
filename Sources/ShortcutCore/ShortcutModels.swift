@@ -215,7 +215,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         )
     }
 
-    func overlaps(with other: ShortcutBinding) -> Bool {
+    func conflicts(with other: ShortcutBinding) -> Bool {
         guard !isDisabled, !other.isDisabled else { return false }
         guard primaryInputOverlaps(with: other) else { return false }
 
@@ -228,7 +228,9 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
                 pressedModifierKeyCodes.insert(keyCode)
             }
 
-            if canActivate(with: pressedModifierKeyCodes) && other.canActivate(with: pressedModifierKeyCodes) {
+            let selfActive = isActive(for: pressedModifierKeyCodes)
+            let otherActive = other.isActive(for: pressedModifierKeyCodes)
+            if selfActive && otherActive && specificityScore == other.specificityScore {
                 return true
             }
         }
@@ -265,14 +267,14 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         }
     }
 
-    private func canActivate(with pressedModifierKeyCodes: Set<UInt16>) -> Bool {
+    private func isActive(for pressedModifierKeyCodes: Set<UInt16>) -> Bool {
         let currentModifiers = Self.modifiers(for: pressedModifierKeyCodes)
         guard currentModifiers.isSuperset(of: modifiers) else {
             return false
         }
 
         if let exactModifierKeyCodes = exactModifierKeyCodes,
-           !pressedModifierKeyCodes.isSuperset(of: exactModifierKeyCodes) {
+           pressedModifierKeyCodes != exactModifierKeyCodes {
             return false
         }
 
