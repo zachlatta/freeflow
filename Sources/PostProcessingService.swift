@@ -114,15 +114,24 @@ Behavior:
 
     private let apiKey: String
     private let baseURL: String
+    private let preferredModel: String
+    private let preferredFallbackModel: String
     private let defaultModel = "openai/gpt-oss-20b"
-    private let fallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    private let defaultFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let defaultModelReasoningEffort = "low"
     private let postProcessingMaxCompletionTokens = 4096
     private let postProcessingTimeoutSeconds: TimeInterval = 20
 
-    init(apiKey: String, baseURL: String = "https://api.groq.com/openai/v1") {
+    init(
+        apiKey: String,
+        baseURL: String = "https://api.groq.com/openai/v1",
+        preferredModel: String = "",
+        preferredFallbackModel: String = ""
+    ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
+        self.preferredModel = preferredModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.preferredFallbackModel = preferredFallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func postProcess(
@@ -219,11 +228,13 @@ Behavior:
         customVocabulary: [String],
         customSystemPrompt: String = ""
     ) async throws -> PostProcessingResult {
+        let primaryModel = resolvedPrimaryModel()
+        let retryModel = resolvedRetryModel(for: primaryModel)
         do {
             return try await process(
                 transcript: transcript,
                 contextSummary: contextSummary,
-                model: defaultModel,
+                model: primaryModel,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt
             )
@@ -241,15 +252,19 @@ Behavior:
             guard shouldFallback else {
                 throw error
             }
-        }
 
-        return try await process(
-            transcript: transcript,
-            contextSummary: contextSummary,
-            model: fallbackModel,
-            customVocabulary: customVocabulary,
-            customSystemPrompt: customSystemPrompt
-        )
+            guard let retryModel else {
+                throw error
+            }
+
+            return try await process(
+                transcript: transcript,
+                contextSummary: contextSummary,
+                model: retryModel,
+                customVocabulary: customVocabulary,
+                customSystemPrompt: customSystemPrompt
+            )
+        }
     }
 
     private func processCommandTransformWithFallback(
@@ -258,12 +273,14 @@ Behavior:
         contextSummary: String,
         customVocabulary: [String]
     ) async throws -> PostProcessingResult {
+        let primaryModel = resolvedPrimaryModel()
+        let retryModel = resolvedRetryModel(for: primaryModel)
         do {
             return try await processCommandTransform(
                 selectedText: selectedText,
                 voiceCommand: voiceCommand,
                 contextSummary: contextSummary,
-                model: defaultModel,
+                model: primaryModel,
                 customVocabulary: customVocabulary
             )
         } catch let error as PostProcessingError {
@@ -280,15 +297,36 @@ Behavior:
             guard shouldFallback else {
                 throw error
             }
-        }
 
-        return try await processCommandTransform(
-            selectedText: selectedText,
-            voiceCommand: voiceCommand,
-            contextSummary: contextSummary,
-            model: fallbackModel,
-            customVocabulary: customVocabulary
-        )
+            guard let retryModel else {
+                throw error
+            }
+
+            return try await processCommandTransform(
+                selectedText: selectedText,
+                voiceCommand: voiceCommand,
+                contextSummary: contextSummary,
+                model: retryModel,
+                customVocabulary: customVocabulary
+            )
+        }
+    }
+
+    private func resolvedPrimaryModel() -> String {
+        preferredModel.isEmpty ? defaultModel : preferredModel
+    }
+
+    private func resolvedRetryModel(for primaryModel: String) -> String? {
+        if !preferredFallbackModel.isEmpty {
+            return preferredFallbackModel == primaryModel ? nil : preferredFallbackModel
+        }
+        if primaryModel == defaultModel {
+            return defaultFallbackModel
+        }
+        if primaryModel == defaultFallbackModel {
+            return defaultModel
+        }
+        return nil
     }
 
     private func process(
