@@ -308,6 +308,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @Published var contextScreenshotMaxDimension: Int {
         didSet {
+            let normalizedDimension = Self.normalizedContextScreenshotMaxDimension(contextScreenshotMaxDimension)
+            if normalizedDimension != contextScreenshotMaxDimension {
+                contextScreenshotMaxDimension = normalizedDimension
+                return
+            }
             UserDefaults.standard.set(contextScreenshotMaxDimension, forKey: contextScreenshotMaxDimensionStorageKey)
             rebuildContextService()
         }
@@ -488,12 +493,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
-        self.contextService = AppContextService(
+        self.contextService = Self.makeAppContextService(
             apiKey: apiKey,
             baseURL: apiBaseURL,
             customContextPrompt: customContextPrompt,
             contextModel: contextModel,
-            screenshotMaxDimension: CGFloat(contextScreenshotMaxDimension)
+            contextScreenshotMaxDimension: contextScreenshotMaxDimension
         )
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
@@ -608,14 +613,40 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return try? JSONDecoder().decode(ShortcutBinding.self, from: data)
     }
 
-    private func rebuildContextService() {
-        contextService = AppContextService(
+    static func normalizedContextScreenshotMaxDimension(_ value: Int) -> Int {
+        contextScreenshotDimensionOptions.contains(value)
+            ? value
+            : defaultContextScreenshotMaxDimension
+    }
+
+    static func makeAppContextService(
+        apiKey: String,
+        baseURL: String,
+        customContextPrompt: String,
+        contextModel: String,
+        contextScreenshotMaxDimension: Int
+    ) -> AppContextService {
+        AppContextService(
+            apiKey: apiKey,
+            baseURL: baseURL,
+            customContextPrompt: customContextPrompt,
+            contextModel: contextModel,
+            screenshotMaxDimension: CGFloat(normalizedContextScreenshotMaxDimension(contextScreenshotMaxDimension))
+        )
+    }
+
+    func makeAppContextService() -> AppContextService {
+        Self.makeAppContextService(
             apiKey: apiKey,
             baseURL: apiBaseURL,
             customContextPrompt: customContextPrompt,
             contextModel: contextModel,
-            screenshotMaxDimension: CGFloat(contextScreenshotMaxDimension)
+            contextScreenshotMaxDimension: contextScreenshotMaxDimension
         )
+    }
+
+    private func rebuildContextService() {
+        contextService = makeAppContextService()
     }
 
     private func persistAPIBaseURL(_ value: String) {

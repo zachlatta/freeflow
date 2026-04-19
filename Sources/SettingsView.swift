@@ -1386,6 +1386,7 @@ struct PromptsSettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .accessibilityLabel("Screenshot Resolution")
 
                 HStack {
                     if appState.contextScreenshotMaxDimension == AppState.defaultContextScreenshotMaxDimension {
@@ -1479,13 +1480,7 @@ struct PromptsSettingsView: View {
         contextTestError = nil
         contextTestPrompt = nil
 
-        let service = AppContextService(
-            apiKey: appState.apiKey,
-            baseURL: appState.apiBaseURL,
-            customContextPrompt: appState.customContextPrompt,
-            contextModel: appState.contextModel,
-            screenshotMaxDimension: CGFloat(appState.contextScreenshotMaxDimension)
-        )
+        let service = appState.makeAppContextService()
 
         Task {
             let context = await service.collectContext()
