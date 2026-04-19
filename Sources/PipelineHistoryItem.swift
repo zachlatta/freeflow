@@ -22,6 +22,9 @@ struct PipelineHistoryItem: Identifiable, Codable {
     let debugStatus: String
     let customVocabulary: String
     let audioFileName: String?
+    let contextAppName: String?
+    let contextBundleIdentifier: String?
+    let contextWindowTitle: String?
 
     init(
         intent: PipelineHistoryItemIntent = .dictation,
@@ -38,7 +41,10 @@ struct PipelineHistoryItem: Identifiable, Codable {
         postProcessingStatus: String,
         debugStatus: String,
         customVocabulary: String,
-        audioFileName: String? = nil
+        audioFileName: String? = nil,
+        contextAppName: String? = nil,
+        contextBundleIdentifier: String? = nil,
+        contextWindowTitle: String? = nil
     ) {
         self.intent = intent
         self.selectedText = selectedText
@@ -55,5 +61,8 @@ struct PipelineHistoryItem: Identifiable, Codable {
         self.debugStatus = debugStatus
         self.customVocabulary = customVocabulary
         self.audioFileName = audioFileName
+        self.contextAppName = contextAppName
+        self.contextBundleIdentifier = contextBundleIdentifier
+        self.contextWindowTitle = contextWindowTitle
     }
 }

@@ -198,6 +198,9 @@ final class PipelineHistoryStore {
                 entity.debugStatus = item.debugStatus
                 entity.customVocabulary = item.customVocabulary
                 entity.audioFileName = item.audioFileName
+                entity.contextAppName = item.contextAppName
+                entity.contextBundleIdentifier = item.contextBundleIdentifier
+                entity.contextWindowTitle = item.contextWindowTitle
                 try saveContext()
             } catch {
                 thrownError = error
@@ -269,7 +272,10 @@ final class PipelineHistoryStore {
             postProcessingStatus: entity.postProcessingStatus ?? "",
             debugStatus: entity.debugStatus ?? "",
             customVocabulary: entity.customVocabulary ?? "",
-            audioFileName: entity.audioFileName
+            audioFileName: entity.audioFileName,
+            contextAppName: entity.contextAppName,
+            contextBundleIdentifier: entity.contextBundleIdentifier,
+            contextWindowTitle: entity.contextWindowTitle
         )
     }
 
@@ -295,7 +301,10 @@ final class PipelineHistoryStore {
             makeAttribute(name: "postProcessingStatus", type: .stringAttributeType, isOptional: false),
             makeAttribute(name: "debugStatus", type: .stringAttributeType, isOptional: false),
             makeAttribute(name: "customVocabulary", type: .stringAttributeType, isOptional: false),
-            makeAttribute(name: "audioFileName", type: .stringAttributeType, isOptional: true)
+            makeAttribute(name: "audioFileName", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "contextAppName", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "contextBundleIdentifier", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "contextWindowTitle", type: .stringAttributeType, isOptional: true)
         ]
 
         model.entities = [entity]
@@ -334,4 +343,7 @@ final class PipelineHistoryEntry: NSManagedObject {
     @NSManaged var debugStatus: String?
     @NSManaged var customVocabulary: String?
     @NSManaged var audioFileName: String?
+    @NSManaged var contextAppName: String?
+    @NSManaged var contextBundleIdentifier: String?
+    @NSManaged var contextWindowTitle: String?
 }

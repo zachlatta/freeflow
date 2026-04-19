@@ -368,6 +368,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var lastPostProcessingStatus = ""
     @Published var lastContextScreenshotDataURL: String? = nil
     @Published var lastContextScreenshotStatus = "No screenshot"
+    @Published var lastContextAppName: String = ""
+    @Published var lastContextBundleIdentifier: String = ""
+    @Published var lastContextWindowTitle: String = ""
+    @Published var lastContextSelectedText: String = ""
+    @Published var lastContextLLMPrompt: String = ""
     @Published var hasScreenRecordingPermission = false
     @Published var launchAtLogin: Bool {
         didSet { setLaunchAtLogin(launchAtLogin) }
@@ -1753,6 +1758,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.lastContextScreenshotDataURL = appContext.screenshotDataURL
                         self.lastContextScreenshotStatus = appContext.screenshotError
                             ?? "available (\(appContext.screenshotMimeType ?? "image"))"
+                        self.lastContextAppName = appContext.appName ?? ""
+                        self.lastContextBundleIdentifier = appContext.bundleIdentifier ?? ""
+                        self.lastContextWindowTitle = appContext.windowTitle ?? ""
+                        self.lastContextSelectedText = appContext.selectedText ?? ""
+                        self.lastContextLLMPrompt = appContext.contextPrompt ?? ""
                         let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
                         let trimmedFinalTranscript = result.finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
                         let processingStatus = result.outcome.statusMessage()
@@ -1882,7 +1892,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
             postProcessingStatus: processingStatus,
             debugStatus: debugStatusMessage,
             customVocabulary: customVocabulary,
-            audioFileName: audioFileName
+            audioFileName: audioFileName,
+            contextAppName: context.appName,
+            contextBundleIdentifier: context.bundleIdentifier,
+            contextWindowTitle: context.windowTitle
         )
         do {
             let removedAudioFileNames = try pipelineHistoryStore.append(newEntry, maxCount: maxPipelineHistoryCount)
@@ -1912,6 +1925,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.lastContextScreenshotDataURL = context.screenshotDataURL
                 self.lastContextScreenshotStatus = context.screenshotError
                     ?? "available (\(context.screenshotMimeType ?? "image"))"
+                self.lastContextAppName = context.appName ?? ""
+                self.lastContextBundleIdentifier = context.bundleIdentifier ?? ""
+                self.lastContextWindowTitle = context.windowTitle ?? ""
+                self.lastContextSelectedText = context.selectedText ?? ""
+                self.lastContextLLMPrompt = context.contextPrompt ?? ""
                 self.lastPostProcessingStatus = "App context captured"
                 self.handleScreenshotCaptureIssue(context.screenshotError)
             }

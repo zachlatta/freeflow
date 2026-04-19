@@ -1772,6 +1772,19 @@ struct RunLogEntryView: View {
                             }
                         )
                     }
+
+                    HStack {
+                        Spacer()
+                        Button("Export Test Case…") {
+                            TestCaseExporter.exportWithSavePanel(
+                                item: item,
+                                audioDirURL: AppState.audioStorageDirectory(),
+                                systemPrompt: appState.customSystemPrompt,
+                                contextPromptSetting: appState.customContextPrompt
+                            )
+                        }
+                        .font(.caption)
+                    }
                 }
                 .padding(12)
             }
