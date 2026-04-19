@@ -1584,34 +1584,37 @@ struct RunLogEntryView: View {
                     .help("Retry transcription")
                 }
 
-                Button {
-                    TestCaseExporter.exportWithSavePanel(
-                        item: item,
-                        audioDirURL: AppState.audioStorageDirectory()
-                    )
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Export run log")
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        appState.deleteHistoryEntry(id: item.id)
+                HStack(spacing: 2) {
+                    Button {
+                        TestCaseExporter.exportWithSavePanel(
+                            item: item,
+                            audioDirURL: AppState.audioStorageDirectory()
+                        )
+                    } label: {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 28)
+                            .contentShape(Rectangle())
                     }
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .help("Export run log")
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            appState.deleteHistoryEntry(id: item.id)
+                        }
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Delete this run")
                 }
-                .buttonStyle(.plain)
-                .help("Delete this run")
+                .padding(.leading, 10)
             }
             .padding(12)
 
