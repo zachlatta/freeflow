@@ -839,6 +839,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
+            refreshAvailableMicrophones()
             completion(true)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
