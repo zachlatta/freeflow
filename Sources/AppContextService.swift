@@ -15,6 +15,7 @@ struct AppContext {
     let windowTitle: String?
     let selectedText: String?
     let currentActivity: String
+    let contextSystemPrompt: String?
     let contextPrompt: String?
     let screenshotDataURL: String?
     let screenshotMimeType: String?
@@ -84,6 +85,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 windowTitle: nil,
                 selectedText: nil,
                 currentActivity: "You are dictating in an unrecognized context.",
+                contextSystemPrompt: nil,
                 contextPrompt: nil,
                 screenshotDataURL: nil,
                 screenshotMimeType: nil,
@@ -102,6 +104,9 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             appElement: appElement,
             focusedWindowTitle: windowTitle
         )
+        let contextSystemPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? Self.defaultContextPrompt
+            : customContextPrompt
         let currentActivity: String
         let contextPrompt: String?
         if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -141,6 +146,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             windowTitle: windowTitle,
             selectedText: selectedText,
             currentActivity: currentActivity,
+            contextSystemPrompt: contextSystemPrompt,
             contextPrompt: contextPrompt,
             screenshotDataURL: screenshot.dataURL,
             screenshotMimeType: screenshot.mimeType,

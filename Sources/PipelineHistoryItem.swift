@@ -14,7 +14,9 @@ struct PipelineHistoryItem: Identifiable, Codable {
     let rawTranscript: String
     let postProcessedTranscript: String
     let postProcessingPrompt: String?
+    let systemPrompt: String?
     let contextSummary: String
+    let contextSystemPrompt: String?
     let contextPrompt: String?
     let contextScreenshotDataURL: String?
     let contextScreenshotStatus: String
@@ -34,7 +36,9 @@ struct PipelineHistoryItem: Identifiable, Codable {
         rawTranscript: String,
         postProcessedTranscript: String,
         postProcessingPrompt: String?,
+        systemPrompt: String?,
         contextSummary: String,
+        contextSystemPrompt: String?,
         contextPrompt: String?,
         contextScreenshotDataURL: String?,
         contextScreenshotStatus: String,
@@ -53,7 +57,9 @@ struct PipelineHistoryItem: Identifiable, Codable {
         self.rawTranscript = rawTranscript
         self.postProcessedTranscript = postProcessedTranscript
         self.postProcessingPrompt = postProcessingPrompt
+        self.systemPrompt = systemPrompt
         self.contextSummary = contextSummary
+        self.contextSystemPrompt = contextSystemPrompt
         self.contextPrompt = contextPrompt
         self.contextScreenshotDataURL = contextScreenshotDataURL
         self.contextScreenshotStatus = contextScreenshotStatus

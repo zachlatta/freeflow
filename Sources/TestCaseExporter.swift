@@ -11,13 +11,17 @@ import UniformTypeIdentifiers
 struct TestCaseExporter {
 
     enum ExportError: Error, LocalizedError {
-        case tempDirectoryCreationFailed
+        case tempDirectoryCreationFailed(underlying: Error?)
         case zipFailed(Int32)
         case screenshotDecodeFailed
 
         var errorDescription: String? {
             switch self {
-            case .tempDirectoryCreationFailed: return "Could not create temporary export directory"
+            case .tempDirectoryCreationFailed(let underlying):
+                if let underlying {
+                    return "Could not create temporary export directory: \(underlying.localizedDescription)"
+                }
+                return "Could not create temporary export directory"
             case .zipFailed(let code): return "zip exited with code \(code)"
             case .screenshotDecodeFailed: return "Could not decode screenshot data URL"
             }
@@ -26,11 +30,10 @@ struct TestCaseExporter {
 
     /// Presents a NSSavePanel and writes the ZIP to the chosen location.
     /// Must be called on the main thread.
+    @MainActor
     static func exportWithSavePanel(
         item: PipelineHistoryItem,
-        audioDirURL: URL,
-        systemPrompt: String,
-        contextPromptSetting: String
+        audioDirURL: URL
     ) {
         let timestamp = isoTimestamp(from: item.timestamp)
         let panel = NSSavePanel()
@@ -40,15 +43,21 @@ struct TestCaseExporter {
         panel.message = "Choose where to save the test case ZIP."
         panel.begin { response in
             guard response == .OK, let destination = panel.url else { return }
-            do {
-                try writeZip(item: item, audioDirURL: audioDirURL, systemPrompt: systemPrompt,
-                             contextPromptSetting: contextPromptSetting, timestamp: timestamp, to: destination)
-            } catch {
-                DispatchQueue.main.async {
-                    let alert = NSAlert()
-                    alert.messageText = "Export Failed"
-                    alert.informativeText = error.localizedDescription
-                    alert.runModal()
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try writeZip(
+                        item: item,
+                        audioDirURL: audioDirURL,
+                        timestamp: timestamp,
+                        to: destination
+                    )
+                } catch {
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = "Export Failed"
+                        alert.informativeText = error.localizedDescription
+                        alert.runModal()
+                    }
                 }
             }
         }
@@ -59,8 +68,6 @@ struct TestCaseExporter {
     private static func writeZip(
         item: PipelineHistoryItem,
         audioDirURL: URL,
-        systemPrompt: String,
-        contextPromptSetting: String,
         timestamp: String,
         to destination: URL
     ) throws {
@@ -69,8 +76,10 @@ struct TestCaseExporter {
             .appendingPathComponent("freeflow-case-\(UUID().uuidString)", isDirectory: true)
         defer { try? fm.removeItem(at: tempDir) }
 
-        guard (try? fm.createDirectory(at: tempDir, withIntermediateDirectories: true)) != nil else {
-            throw ExportError.tempDirectoryCreationFailed
+        do {
+            try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        } catch {
+            throw ExportError.tempDirectoryCreationFailed(underlying: error)
         }
 
         // Screenshot
@@ -117,8 +126,8 @@ struct TestCaseExporter {
             "pipeline": pipeline,
             "settings": [
                 "custom_vocabulary": item.customVocabulary,
-                "system_prompt": systemPrompt,
-                "context_prompt": contextPromptSetting
+                "system_prompt": item.systemPrompt ?? "",
+                "context_prompt": item.contextSystemPrompt ?? ""
             ] as [String: Any]
         ]
 

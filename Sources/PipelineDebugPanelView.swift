@@ -2,7 +2,6 @@ import SwiftUI
 
 struct PipelineDebugPanelView: View {
     @EnvironmentObject var appState: AppState
-    @State private var exportStatusMessage: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -47,12 +46,7 @@ struct PipelineDebugPanelView: View {
                     exportTestCase()
                 }
                 .font(.body)
-                .disabled(appState.lastRawTranscript.isEmpty)
-            }
-            if let msg = exportStatusMessage {
-                Text(msg)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .disabled(appState.pipelineHistory.first == nil)
             }
         }
     }
@@ -61,9 +55,7 @@ struct PipelineDebugPanelView: View {
         guard let item = appState.pipelineHistory.first else { return }
         TestCaseExporter.exportWithSavePanel(
             item: item,
-            audioDirURL: AppState.audioStorageDirectory(),
-            systemPrompt: appState.customSystemPrompt,
-            contextPromptSetting: appState.customContextPrompt
+            audioDirURL: AppState.audioStorageDirectory()
         )
     }
 }

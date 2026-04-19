@@ -1239,6 +1239,7 @@ struct PromptsSettingsView: View {
             windowTitle: "System Prompt Test",
             selectedText: nil,
             currentActivity: "User is testing the system prompt in FreeFlow settings.",
+            contextSystemPrompt: nil,
             contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,
@@ -1584,6 +1585,21 @@ struct RunLogEntryView: View {
                 }
 
                 Button {
+                    TestCaseExporter.exportWithSavePanel(
+                        item: item,
+                        audioDirURL: AppState.audioStorageDirectory()
+                    )
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Export run log")
+
+                Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         appState.deleteHistoryEntry(id: item.id)
                     }
@@ -1773,18 +1789,6 @@ struct RunLogEntryView: View {
                         )
                     }
 
-                    HStack {
-                        Spacer()
-                        Button("Export Test Case…") {
-                            TestCaseExporter.exportWithSavePanel(
-                                item: item,
-                                audioDirURL: AppState.audioStorageDirectory(),
-                                systemPrompt: appState.customSystemPrompt,
-                                contextPromptSetting: appState.customContextPrompt
-                            )
-                        }
-                        .font(.caption)
-                    }
                 }
                 .padding(12)
             }

@@ -93,8 +93,13 @@ final class PipelineHistoryStore {
                 entity.rawTranscript = item.rawTranscript
                 entity.postProcessedTranscript = item.postProcessedTranscript
                 entity.postProcessingPrompt = item.postProcessingPrompt
+                entity.systemPrompt = item.systemPrompt
+                entity.contextSystemPrompt = item.contextSystemPrompt
                 entity.postProcessingStatus = item.postProcessingStatus
                 entity.debugStatus = item.debugStatus
+                entity.contextAppName = item.contextAppName
+                entity.contextBundleIdentifier = item.contextBundleIdentifier
+                entity.contextWindowTitle = item.contextWindowTitle
                 try saveContext()
             } catch {
                 thrownError = error
@@ -190,7 +195,9 @@ final class PipelineHistoryStore {
                 entity.rawTranscript = item.rawTranscript
                 entity.postProcessedTranscript = item.postProcessedTranscript
                 entity.postProcessingPrompt = item.postProcessingPrompt
+                entity.systemPrompt = item.systemPrompt
                 entity.contextSummary = item.contextSummary
+                entity.contextSystemPrompt = item.contextSystemPrompt
                 entity.contextPrompt = item.contextPrompt
                 entity.contextScreenshotDataURL = item.contextScreenshotDataURL
                 entity.contextScreenshotStatus = item.contextScreenshotStatus
@@ -265,7 +272,9 @@ final class PipelineHistoryStore {
             rawTranscript: entity.rawTranscript ?? "",
             postProcessedTranscript: entity.postProcessedTranscript ?? "",
             postProcessingPrompt: entity.postProcessingPrompt,
+            systemPrompt: entity.systemPrompt,
             contextSummary: entity.contextSummary ?? "",
+            contextSystemPrompt: entity.contextSystemPrompt,
             contextPrompt: entity.contextPrompt,
             contextScreenshotDataURL: entity.contextScreenshotDataURL,
             contextScreenshotStatus: entity.contextScreenshotStatus ?? "available (image)",
@@ -294,7 +303,9 @@ final class PipelineHistoryStore {
             makeAttribute(name: "rawTranscript", type: .stringAttributeType, isOptional: false),
             makeAttribute(name: "postProcessedTranscript", type: .stringAttributeType, isOptional: false),
             makeAttribute(name: "postProcessingPrompt", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "systemPrompt", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextSummary", type: .stringAttributeType, isOptional: false),
+            makeAttribute(name: "contextSystemPrompt", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextPrompt", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextScreenshotDataURL", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextScreenshotStatus", type: .stringAttributeType, isOptional: false),
@@ -335,7 +346,9 @@ final class PipelineHistoryEntry: NSManagedObject {
     @NSManaged var rawTranscript: String?
     @NSManaged var postProcessedTranscript: String?
     @NSManaged var postProcessingPrompt: String?
+    @NSManaged var systemPrompt: String?
     @NSManaged var contextSummary: String?
+    @NSManaged var contextSystemPrompt: String?
     @NSManaged var contextPrompt: String?
     @NSManaged var contextScreenshotDataURL: String?
     @NSManaged var contextScreenshotStatus: String?
