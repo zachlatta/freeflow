@@ -7,6 +7,8 @@ import ServiceManagement
 private struct SetupProviderSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var apiBaseURLInput: String
+    @Binding var transcriptionAPIURLInput: String
+    @Binding var transcriptionAPIKeyInput: String
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +28,8 @@ private struct SetupProviderSettingsSheet: View {
             ScrollView {
                 ProviderSettingsFields(
                     apiBaseURLInput: $apiBaseURLInput,
+                    transcriptionAPIURLInput: $transcriptionAPIURLInput,
+                    transcriptionAPIKeyInput: $transcriptionAPIKeyInput,
                     showsModelDescription: true
                 )
                 .padding(20)
@@ -71,6 +75,8 @@ struct SetupView: View {
     @State private var accessibilityGranted = false
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
+    @State private var transcriptionAPIURLInput: String = ""
+    @State private var transcriptionAPIKeyInput: String = ""
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
     @State private var showingProviderSettingsSheet = false
@@ -186,6 +192,8 @@ struct SetupView: View {
         .onAppear {
             apiKeyInput = appState.apiKey
             apiBaseURLInput = appState.apiBaseURL
+            transcriptionAPIURLInput = appState.transcriptionAPIURL
+            transcriptionAPIKeyInput = appState.transcriptionAPIKey
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             checkAccessibility()
@@ -199,7 +207,11 @@ struct SetupView: View {
             appState.resumeHotkeyMonitoringAfterShortcutCapture()
         }
         .sheet(isPresented: $showingProviderSettingsSheet) {
-            SetupProviderSettingsSheet(apiBaseURLInput: $apiBaseURLInput)
+            SetupProviderSettingsSheet(
+                apiBaseURLInput: $apiBaseURLInput,
+                transcriptionAPIURLInput: $transcriptionAPIURLInput,
+                transcriptionAPIKeyInput: $transcriptionAPIKeyInput
+            )
                 .environmentObject(appState)
         }
         .onChange(of: isCapturingShortcut) { isCapturing in

@@ -94,6 +94,21 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
 
     var onRecordingReady: (() -> Void)?
     var onRecordingFailure: ((Error) -> Void)?
+    /// Fires on the sample-buffer queue with a 16 kHz mono PCM16 chunk for
+    /// each incoming audio buffer. Set before ``startRecording`` to stream
+    /// audio out-of-band (e.g. to a realtime transcription socket). The
+    /// recorder still writes the original capture format to the audio file
+    /// independently.
+    var onPCM16Samples: ((Data) -> Void)?
+    private let pcm16ConverterLock = OSAllocatedUnfairLock<AVAudioConverter?>(initialState: nil)
+    private let pcm16TargetFormat: AVAudioFormat = {
+        AVAudioFormat(
+            commonFormat: .pcmFormatInt16,
+            sampleRate: 16_000,
+            channels: 1,
+            interleaved: true
+        )!
+    }()
     private var readyFired = false
     private var failureReported = false
     private static let watchdogTimeout: TimeInterval = 2.0
@@ -560,6 +575,70 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         return rms
     }
 
+    private func emitPCM16IfNeeded(from sampleBuffer: CMSampleBuffer) {
+        guard let handler = onPCM16Samples else { return }
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+            return
+        }
+        let sourceFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription)
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frameCount > 0 else { return }
+
+        guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount) else {
+            return
+        }
+        inputBuffer.frameLength = frameCount
+        let copyStatus = CMSampleBufferCopyPCMDataIntoAudioBufferList(
+            sampleBuffer,
+            at: 0,
+            frameCount: Int32(frameCount),
+            into: inputBuffer.mutableAudioBufferList
+        )
+        guard copyStatus == noErr else { return }
+
+        let converter = pcm16ConverterLock.withLock { existing -> AVAudioConverter? in
+            if let existing, existing.inputFormat == sourceFormat {
+                return existing
+            }
+            let new = AVAudioConverter(from: sourceFormat, to: pcm16TargetFormat)
+            existing = new
+            return new
+        }
+        guard let converter else { return }
+
+        // Resampled frame count (ceil) — converter drains as it goes, so we
+        // size for the worst case then trust frameLength after conversion.
+        let ratio = pcm16TargetFormat.sampleRate / sourceFormat.sampleRate
+        let outputCapacity = AVAudioFrameCount(ceil(Double(frameCount) * ratio)) + 32
+        guard let outputBuffer = AVAudioPCMBuffer(
+            pcmFormat: pcm16TargetFormat,
+            frameCapacity: outputCapacity
+        ) else {
+            return
+        }
+
+        var suppliedInput = false
+        var converterError: NSError?
+        let status = converter.convert(to: outputBuffer, error: &converterError) { _, inputStatus in
+            if suppliedInput {
+                inputStatus.pointee = .noDataNow
+                return nil
+            }
+            suppliedInput = true
+            inputStatus.pointee = .haveData
+            return inputBuffer
+        }
+        guard status != .error, converterError == nil else { return }
+
+        let outputFrames = Int(outputBuffer.frameLength)
+        guard outputFrames > 0, let int16Ptr = outputBuffer.int16ChannelData?[0] else {
+            return
+        }
+        let byteCount = outputFrames * MemoryLayout<Int16>.size
+        let data = Data(bytes: int16Ptr, count: byteCount)
+        handler(data)
+    }
+
     func captureOutput(
         _ output: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
@@ -577,6 +656,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             reportRecordingFailure(error)
             return
         }
+
+        emitPCM16IfNeeded(from: sampleBuffer)
 
         let count = _bufferCount.withLock { value -> Int in
             value += 1
