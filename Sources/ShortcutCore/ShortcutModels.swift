@@ -156,7 +156,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
 
     var displayName: String {
         if isDisabled { return "Disabled" }
-        let parts = modifierDisplayNames + [keyDisplay]
+        let parts = modifierDisplayNames + [primaryDisplayName]
         return parts.joined(separator: " + ")
     }
 
@@ -187,19 +187,30 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
 
     func withAddedModifiers(_ extraModifiers: ShortcutModifiers) -> ShortcutBinding {
         guard !isDisabled else { return self }
+        let updatedModifiers = modifiers.union(extraModifiers)
+        let updatedExactModifierKeyCodes = exactModifierKeyCodes.map { existingExactModifierKeyCodes in
+            existingExactModifierKeyCodes.union(Self.exactModifierKeyCodes(for: extraModifiers))
+        }
+
         return ShortcutBinding(
             keyCode: keyCode,
             keyDisplay: keyDisplay,
-            modifiers: modifiers.union(extraModifiers),
+            modifiers: updatedModifiers,
             kind: kind,
             preset: preset,
-            exactModifierKeyCodes: exactModifierKeyCodes
+            exactModifierKeyCodes: updatedExactModifierKeyCodes
         )
     }
 
     func normalizedForStorageMigration() -> ShortcutBinding {
         let normalizedExactModifierKeyCodes = Self.normalizedExactModifierKeyCodes(exactModifierKeyCodes)
-        let normalizedModifiers = modifiers.union(Self.modifiers(for: normalizedExactModifierKeyCodes ?? []))
+        let normalizedExtraModifierKeyCodes: Set<UInt16>
+        if kind == .modifierKey {
+            normalizedExtraModifierKeyCodes = (normalizedExactModifierKeyCodes ?? []).subtracting([keyCode])
+        } else {
+            normalizedExtraModifierKeyCodes = normalizedExactModifierKeyCodes ?? []
+        }
+        let normalizedModifiers = modifiers.union(Self.modifiers(for: normalizedExtraModifierKeyCodes))
 
         guard normalizedExactModifierKeyCodes != exactModifierKeyCodes || normalizedModifiers != modifiers else {
             return self
@@ -243,6 +254,14 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             for: modifiers,
             exactModifierKeyCodes: displayedExactModifierKeyCodes
         )
+    }
+
+    private var primaryDisplayName: String {
+        guard kind == .modifierKey,
+              let exactDisplayName = Self.exactModifierDisplayLabel(for: keyCode) else {
+            return keyDisplay
+        }
+        return exactDisplayName
     }
 
     private var displayedExactModifierKeyCodes: Set<UInt16>? {
@@ -342,6 +361,16 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         }
     }
 
+    static func exactModifierKeyCodes(for modifiers: ShortcutModifiers) -> Set<UInt16> {
+        var keyCodes: Set<UInt16> = []
+        if modifiers.contains(.command) { keyCodes.insert(55) }
+        if modifiers.contains(.control) { keyCodes.insert(59) }
+        if modifiers.contains(.option) { keyCodes.insert(58) }
+        if modifiers.contains(.shift) { keyCodes.insert(56) }
+        if modifiers.contains(.function) { keyCodes.insert(63) }
+        return keyCodes
+    }
+
     static func logicalModifierDisplayLabel(for keyCode: UInt16) -> String {
         switch keyCode {
         case 55:
@@ -356,6 +385,31 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             return "Fn"
         default:
             return "Modifier"
+        }
+    }
+
+    static func exactModifierDisplayLabel(for keyCode: UInt16) -> String? {
+        switch keyCode {
+        case 55:
+            return "\u{2318}"
+        case 54:
+            return "\u{2318} \u{2192}"
+        case 59:
+            return "\u{2303}"
+        case 62:
+            return "\u{2303} \u{2192}"
+        case 58:
+            return "\u{2325}"
+        case 61:
+            return "\u{2325} \u{2192}"
+        case 56:
+            return "\u{21E7}"
+        case 60:
+            return "\u{21E7} \u{2192}"
+        case 63:
+            return "fn"
+        default:
+            return nil
         }
     }
 

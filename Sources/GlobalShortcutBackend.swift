@@ -5,11 +5,14 @@ private let shortcutLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "
 
 enum GlobalShortcutBackendError: LocalizedError {
     case eventTapUnavailable
+    case eventTapRunLoopSourceUnavailable
 
     var errorDescription: String? {
         switch self {
         case .eventTapUnavailable:
             return "Global shortcut monitoring could not start. FreeFlow requires keyboard monitoring permission for global shortcuts."
+        case .eventTapRunLoopSourceUnavailable:
+            return "Global shortcut monitoring could not start because the event tap run loop source could not be created."
         }
     }
 }
@@ -73,7 +76,12 @@ final class GlobalShortcutBackend {
             throw GlobalShortcutBackendError.eventTapUnavailable
         }
 
-        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
+            CFMachPortInvalidate(tap)
+            os_log(.error, log: shortcutLog, "Failed to create run loop source for global shortcut event tap")
+            throw GlobalShortcutBackendError.eventTapRunLoopSourceUnavailable
+        }
+
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
 
