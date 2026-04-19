@@ -58,6 +58,11 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         self.contextModel = trimmedModel.isEmpty ? "meta-llama/llama-4-scout-17b-16e-instruct" : trimmedModel
     }
 
+    private func resolveContextPrompt() -> String {
+        let trimmedPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedPrompt.isEmpty ? Self.defaultContextPrompt : trimmedPrompt
+    }
+
     func collectSelectionSnapshot() -> AppSelectionSnapshot {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             return AppSelectionSnapshot(
@@ -104,9 +109,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             appElement: appElement,
             focusedWindowTitle: windowTitle
         )
-        let contextSystemPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? Self.defaultContextPrompt
-            : customContextPrompt
+        let contextSystemPrompt = resolveContextPrompt()
         let currentActivity: String
         let contextPrompt: String?
         if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -211,9 +214,7 @@ Window: \(windowTitle ?? "Unknown")
 Selected text: \(selectedText ?? "None")
 """
 
-            let systemPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? Self.defaultContextPrompt
-                : customContextPrompt
+            let systemPrompt = resolveContextPrompt()
 
             let textOnlyPrompt = "Analyze the context and infer the user's current activity in exactly two sentences.\n\n\(metadata)"
             var userMessageDescription: String
