@@ -1150,6 +1150,44 @@ struct PromptsSettingsView: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Screenshot Resolution")
+                    .font(.caption.weight(.semibold))
+
+                Text("Controls the maximum image dimension sent for context inference.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: $appState.contextScreenshotMaxDimension) {
+                    ForEach(AppState.contextScreenshotDimensionOptions, id: \.self) { dimension in
+                        Text("\(dimension) px").tag(dimension)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                HStack {
+                    if appState.contextScreenshotMaxDimension == AppState.defaultContextScreenshotMaxDimension {
+                        Label("Using default", systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Label("Using custom value", systemImage: "pencil")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                    Spacer()
+                    if appState.contextScreenshotMaxDimension != AppState.defaultContextScreenshotMaxDimension {
+                        Button("Reset to Default") {
+                            appState.contextScreenshotMaxDimension = AppState.defaultContextScreenshotMaxDimension
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+
+            Divider()
+
             // Test section
             VStack(alignment: .leading, spacing: 8) {
                 Text("Test Context Prompt")
@@ -1223,7 +1261,8 @@ struct PromptsSettingsView: View {
         let service = AppContextService(
             apiKey: appState.apiKey,
             baseURL: appState.apiBaseURL,
-            customContextPrompt: appState.customContextPrompt
+            customContextPrompt: appState.customContextPrompt,
+            screenshotMaxDimension: CGFloat(appState.contextScreenshotMaxDimension)
         )
 
         Task {
