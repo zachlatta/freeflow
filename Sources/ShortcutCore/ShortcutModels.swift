@@ -188,9 +188,6 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     func withAddedModifiers(_ extraModifiers: ShortcutModifiers) -> ShortcutBinding {
         guard !isDisabled else { return self }
         let updatedModifiers = modifiers.union(extraModifiers)
-        let updatedExactModifierKeyCodes = exactModifierKeyCodes.map { existingExactModifierKeyCodes in
-            existingExactModifierKeyCodes.union(Self.exactModifierKeyCodes(for: extraModifiers))
-        }
 
         return ShortcutBinding(
             keyCode: keyCode,
@@ -198,7 +195,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             modifiers: updatedModifiers,
             kind: kind,
             preset: preset,
-            exactModifierKeyCodes: updatedExactModifierKeyCodes
+            exactModifierKeyCodes: exactModifierKeyCodes
         )
     }
 

@@ -20,7 +20,6 @@ enum GlobalShortcutBackendError: LocalizedError {
 final class GlobalShortcutBackend {
     private var eventTap: CFMachPort?
     private var eventTapRunLoopSource: CFRunLoopSource?
-    private var pressedModifierKeyCodes: Set<UInt16> = []
 
     var onInputEvent: ((ShortcutInputEvent) -> ShortcutConsumeDecision)?
     var onEscapeKeyPressed: (() -> Bool)?
@@ -31,15 +30,8 @@ final class GlobalShortcutBackend {
     }
 
     func stop() {
-        if let source = eventTapRunLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
-        }
-        eventTapRunLoopSource = nil
-        if let tap = eventTap {
-            CFMachPortInvalidate(tap)
-        }
-        eventTap = nil
-        pressedModifierKeyCodes.removeAll()
+        tearDownEventTap()
+        notifyBackendReset()
     }
 
     deinit {
@@ -89,11 +81,25 @@ final class GlobalShortcutBackend {
         eventTapRunLoopSource = source
     }
 
+    private func tearDownEventTap() {
+        if let source = eventTapRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+        eventTapRunLoopSource = nil
+        if let tap = eventTap {
+            CFMachPortInvalidate(tap)
+        }
+        eventTap = nil
+    }
+
+    private func notifyBackendReset() {
+        _ = onInputEvent?(.backendReset)
+    }
+
     private func handleEventTap(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            pressedModifierKeyCodes.removeAll()
-            _ = onInputEvent?(.backendReset)
+            notifyBackendReset()
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
@@ -127,12 +133,6 @@ final class GlobalShortcutBackend {
         guard ShortcutBinding.modifierKeyCodes.contains(event.keyCode),
               let isDown = ModifierKeyEventState.isKeyDown(for: event) else {
             return false
-        }
-
-        if isDown {
-            pressedModifierKeyCodes.insert(event.keyCode)
-        } else {
-            pressedModifierKeyCodes.remove(event.keyCode)
         }
 
         return onInputEvent?(.modifierChanged(keyCode: event.keyCode, isDown: isDown)) == .consume
