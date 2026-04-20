@@ -187,6 +187,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let commandModeEnabledStorageKey = "command_mode_enabled"
     private let commandModeStyleStorageKey = "command_mode_style"
     private let commandModeManualModifierStorageKey = "command_mode_manual_modifier"
+    private let outputLanguageStorageKey = "output_language"
     private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let clipboardRestoreDelay: TimeInterval = 0.15
     let maxPipelineHistoryCount = 20
@@ -315,6 +316,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var outputLanguage: String {
+        didSet {
+            UserDefaults.standard.set(outputLanguage, forKey: outputLanguageStorageKey)
+        }
+    }
+
     @Published var shortcutStartDelay: TimeInterval {
         didSet {
             UserDefaults.standard.set(shortcutStartDelay, forKey: shortcutStartDelayStorageKey)
@@ -430,6 +437,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
         let customSystemPromptLastModified = UserDefaults.standard.string(forKey: customSystemPromptLastModifiedStorageKey) ?? ""
         let customContextPromptLastModified = UserDefaults.standard.string(forKey: customContextPromptLastModifiedStorageKey) ?? ""
+        let outputLanguage = UserDefaults.standard.string(forKey: outputLanguageStorageKey) ?? ""
         let shortcutStartDelay = max(0, UserDefaults.standard.double(forKey: shortcutStartDelayStorageKey))
         let isCommandModeEnabled = UserDefaults.standard.object(forKey: commandModeEnabledStorageKey) == nil
             ? false
@@ -497,6 +505,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.customContextPrompt = customContextPrompt
         self.customSystemPromptLastModified = customSystemPromptLastModified
         self.customContextPromptLastModified = customContextPromptLastModified
+        self.outputLanguage = outputLanguage
         self.shortcutStartDelay = shortcutStartDelay
         self.preserveClipboard = preserveClipboard
         self.alertSoundsEnabled = alertSoundsEnabled
@@ -732,7 +741,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     context: restoredContext,
                     postProcessingService: postProcessingService,
                     customVocabulary: capturedCustomVocabulary,
-                    customSystemPrompt: capturedCustomSystemPrompt
+                    customSystemPrompt: capturedCustomSystemPrompt,
+                    outputLanguage: self.outputLanguage
                 )
                 finalTranscript = result.finalTranscript
                 processingStatus = result.outcome.statusMessage(isRetry: true)
@@ -1605,7 +1615,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         context: AppContext,
         postProcessingService: PostProcessingService,
         customVocabulary: String,
-        customSystemPrompt: String
+        customSystemPrompt: String,
+        outputLanguage: String = ""
     ) async -> (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String) {
         let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1619,7 +1630,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     selectedText: selectedText,
                     voiceCommand: rawTranscript,
                     context: context,
-                    customVocabulary: customVocabulary
+                    customVocabulary: customVocabulary,
+                    outputLanguage: outputLanguage
                 )
                 return (result.transcript, .commandModeSucceeded(invocation: invocation), result.prompt)
             } catch {
@@ -1638,7 +1650,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 transcript: trimmedRawTranscript,
                 context: context,
                 customVocabulary: customVocabulary,
-                customSystemPrompt: customSystemPrompt
+                customSystemPrompt: customSystemPrompt,
+                outputLanguage: outputLanguage
             )
             return (result.transcript, .postProcessingSucceeded, result.prompt)
         } catch {
@@ -1743,7 +1756,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         context: appContext,
                         postProcessingService: postProcessingService,
                         customVocabulary: self.customVocabulary,
-                        customSystemPrompt: self.customSystemPrompt
+                        customSystemPrompt: self.customSystemPrompt,
+                        outputLanguage: self.outputLanguage
                     )
                     try Task.checkCancellation()
 
