@@ -40,6 +40,7 @@ final class RealtimeTranscriptionService {
     private var closed: Bool = false
     private var serverEventCount: Int = 0
     private var commitEventCount: Int?
+    private var currentItemID: String?
 
     /// Published on the main queue as partial transcript updates. The service
     /// concatenates all `completed` events and currently-streaming `delta`
@@ -97,7 +98,8 @@ final class RealtimeTranscriptionService {
     // MARK: Producer
 
     /// Append 16-bit little-endian PCM samples. The caller owns rate matching
-    /// (the service defaults to 16 kHz mono per `Configuration.baseURL`).
+    /// (the service declares 24 kHz mono in `session.update`, matching the
+    /// OpenAI Realtime default).
     func appendPCM16(_ data: Data) {
         guard let task = task, !data.isEmpty else { return }
         let audioB64 = data.base64EncodedString()
@@ -186,16 +188,33 @@ final class RealtimeTranscriptionService {
 
         switch eventType {
         case "conversation.item.input_audio_transcription.delta":
+            if let itemID = json["item_id"] as? String {
+                stateQueue.sync {
+                    currentItemID = itemID
+                }
+            }
             if let delta = json["delta"] as? String, !delta.isEmpty {
                 appendDelta(delta)
             }
             resumeIfReadyAfterCommit()
         case "conversation.item.input_audio_transcription.completed":
+            if let itemID = json["item_id"] as? String {
+                stateQueue.sync {
+                    currentItemID = itemID
+                }
+            }
             if let transcript = json["transcript"] as? String {
                 commitSegment(transcript)
             } else {
                 resumeIfReadyAfterCommit()
             }
+        case "input_audio_buffer.committed":
+            if let itemID = json["item_id"] as? String {
+                stateQueue.sync {
+                    currentItemID = itemID
+                }
+            }
+            resumeIfReadyAfterCommit()
         case "error":
             let errObj = json["error"] as? [String: Any]
             let code = errObj?["code"] as? String ?? "unknown"
@@ -258,16 +277,26 @@ final class RealtimeTranscriptionService {
 
     private func sendSessionUpdate() {
         guard let task = task else { return }
-        var inputAudioTranscription: [String: Any] = [:]
+        var transcription: [String: Any] = [:]
         let model = config.model.trimmingCharacters(in: .whitespacesAndNewlines)
         if !model.isEmpty {
-            inputAudioTranscription["model"] = model
+            transcription["model"] = model
         }
         if let language = config.language, !language.isEmpty {
-            inputAudioTranscription["language"] = language
+            transcription["language"] = language
         }
         let session: [String: Any] = [
-            "input_audio_transcription": inputAudioTranscription,
+            "type": "transcription",
+            "audio": [
+                "input": [
+                    "format": [
+                        "type": "audio/pcm",
+                        "rate": 24_000,
+                    ],
+                    "transcription": transcription,
+                    "turn_detection": NSNull(),
+                ],
+            ],
         ]
         send(["type": "session.update", "session": session], over: task)
     }
@@ -302,12 +331,8 @@ final class RealtimeTranscriptionService {
         components.path = path
 
         var queryItems = components.queryItems ?? []
-        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedModel.isEmpty {
-            queryItems.append(URLQueryItem(name: "model", value: trimmedModel))
-        }
-        if let language, !language.isEmpty {
-            queryItems.append(URLQueryItem(name: "language", value: language))
+        if !queryItems.contains(where: { $0.name == "intent" }) {
+            queryItems.append(URLQueryItem(name: "intent", value: "transcription"))
         }
         components.queryItems = queryItems.isEmpty ? nil : queryItems
         return components.url

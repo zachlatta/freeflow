@@ -94,17 +94,17 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
 
     var onRecordingReady: (() -> Void)?
     var onRecordingFailure: ((Error) -> Void)?
-    /// Fires on the sample-buffer queue with a 16 kHz mono PCM16 chunk for
-    /// each incoming audio buffer. Set before ``startRecording`` to stream
-    /// audio out-of-band (e.g. to a realtime transcription socket). The
-    /// recorder still writes the original capture format to the audio file
-    /// independently.
+    /// Fires on the sample-buffer queue with a 24 kHz mono PCM16 chunk for
+    /// each incoming audio buffer (matching OpenAI Realtime's default PCM
+    /// input rate). Set before ``startRecording`` to stream audio out-of-band
+    /// to a realtime transcription socket. The recorder still writes the
+    /// original capture format to the audio file independently.
     var onPCM16Samples: ((Data) -> Void)?
     private let pcm16ConverterLock = OSAllocatedUnfairLock<AVAudioConverter?>(initialState: nil)
     private let pcm16TargetFormat: AVAudioFormat = {
         AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: 16_000,
+            sampleRate: 24_000,
             channels: 1,
             interleaved: true
         )!

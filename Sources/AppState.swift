@@ -191,7 +191,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let commandModeManualModifierStorageKey = "command_mode_manual_modifier"
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
-    private let realtimeUsesTranscriptionEndpointStorageKey = "realtime_uses_transcription_endpoint"
     private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let clipboardRestoreDelay: TimeInterval = 0.15
     let maxPipelineHistoryCount = 20
@@ -356,11 +355,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    @Published var realtimeUsesTranscriptionEndpoint: Bool {
-        didSet {
-            UserDefaults.standard.set(realtimeUsesTranscriptionEndpoint, forKey: realtimeUsesTranscriptionEndpointStorageKey)
-        }
-    }
 
     @Published var preserveClipboard: Bool {
         didSet {
@@ -490,9 +484,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
         let realtimeStreamingEnabled = UserDefaults.standard.bool(forKey: realtimeStreamingEnabledStorageKey)
         let realtimeStreamingModel = UserDefaults.standard.string(forKey: realtimeStreamingModelStorageKey) ?? ""
-        let realtimeUsesTranscriptionEndpoint = UserDefaults.standard.object(forKey: realtimeUsesTranscriptionEndpointStorageKey) == nil
-            ? false
-            : UserDefaults.standard.bool(forKey: realtimeUsesTranscriptionEndpointStorageKey)
         let soundVolume: Float = UserDefaults.standard.object(forKey: soundVolumeStorageKey) != nil
             ? UserDefaults.standard.float(forKey: soundVolumeStorageKey) : 1.0
         let alertSoundsEnabled = UserDefaults.standard.object(forKey: alertSoundsEnabledStorageKey) != nil
@@ -553,7 +544,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.preserveClipboard = preserveClipboard
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
-        self.realtimeUsesTranscriptionEndpoint = realtimeUsesTranscriptionEndpoint
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
         self.voiceMacros = initialMacros
@@ -2012,8 +2002,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func startRealtimeStreamingIfEnabled() {
         guard realtimeStreamingEnabled else { return }
         realtimeFailed = false
-        let trimmedBase = (realtimeUsesTranscriptionEndpoint ? resolvedTranscriptionBaseURL : apiBaseURL)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBase = resolvedTranscriptionBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBase.isEmpty else {
             os_log(.info, log: recordingLog, "realtime streaming requested but base URL is empty — skipping")
             return
@@ -2021,7 +2010,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let model = realtimeStreamingModel.trimmingCharacters(in: .whitespacesAndNewlines)
         let config = RealtimeTranscriptionService.Configuration(
             baseURL: trimmedBase,
-            apiKey: realtimeUsesTranscriptionEndpoint ? resolvedTranscriptionAPIKey : apiKey,
+            apiKey: resolvedTranscriptionAPIKey,
             model: model,
             language: nil
         )
