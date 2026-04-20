@@ -1369,6 +1369,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let scheduledSelectionSnapshot = pendingSelectionSnapshot
         let scheduledManualCommandInvocation = pendingManualCommandInvocation
         cancelPendingShortcutStart()
+        guard prepareRecordingStart(
+            triggerMode: triggerMode,
+            selectionSnapshot: scheduledSelectionSnapshot,
+            manualCommandRequested: scheduledSelectionSnapshot == nil
+                ? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
+                : scheduledManualCommandInvocation,
+            startedAt: t0
+        ) else { return }
+        guard ensureMicrophoneAccess() else { return }
+        os_log(.info, log: recordingLog, "mic access check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        beginRecording(triggerMode: triggerMode)
+        os_log(.info, log: recordingLog, "startRecording() finished: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+    }
+
+    private func prepareRecordingStart(
+        triggerMode: RecordingTriggerMode,
+        selectionSnapshot: AppSelectionSnapshot? = nil,
+        manualCommandRequested: Bool? = nil,
+        startedAt: CFAbsoluteTime? = nil
+    ) -> Bool {
         activeRecordingTriggerMode = triggerMode
         guard hasAccessibility else {
             errorMessage = "Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility."
@@ -1377,32 +1397,33 @@ final class AppState: ObservableObject, @unchecked Sendable {
             currentSessionIntent = .dictation
             shortcutSessionController.reset()
             showAccessibilityAlert()
-            return
+            return false
         }
-        os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        let selectionSnapshot = scheduledSelectionSnapshot ?? contextService.collectSelectionSnapshot()
-        let manualCommandRequested = scheduledSelectionSnapshot == nil
-            ? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
-            : scheduledManualCommandInvocation
+        if let startedAt {
+            os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+        }
+
+        let selectionSnapshot = selectionSnapshot ?? contextService.collectSelectionSnapshot()
+        let manualCommandRequested = manualCommandRequested
+            ?? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
         guard let resolvedIntent = resolveSessionIntent(
             triggerMode: triggerMode,
             selectionSnapshot: selectionSnapshot,
             manualCommandRequested: manualCommandRequested
-        ) else { return }
+        ) else { return false }
 
         if resolvedIntent.isCommandMode {
-            guard ensureScreenCaptureAccess() else { return }
-            os_log(.info, log: recordingLog, "screen capture check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+            guard ensureScreenCaptureAccess() else { return false }
+            if let startedAt {
+                os_log(.info, log: recordingLog, "screen capture check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+            }
         } else {
             hasScreenRecordingPermission = hasScreenCapturePermission()
         }
 
         currentSessionIntent = resolvedIntent
         overlayManager.setRecordingTriggerMode(triggerMode, animated: false)
-        guard ensureMicrophoneAccess() else { return }
-        os_log(.info, log: recordingLog, "mic access check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        beginRecording(triggerMode: triggerMode)
-        os_log(.info, log: recordingLog, "startRecording() finished: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        return true
     }
 
     private func ensureScreenCaptureAccess() -> Bool {
@@ -1446,8 +1467,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     if granted {
                         strongSelf.errorMessage = nil
                         if triggerMode == .toggle {
+                            guard strongSelf.prepareRecordingStart(triggerMode: .toggle) else { return }
                             strongSelf.shortcutSessionController.beginManual(mode: .toggle)
-                            strongSelf.activeRecordingTriggerMode = .toggle
                             strongSelf.beginRecording(triggerMode: .toggle)
                         } else {
                             strongSelf.currentSessionIntent = .dictation
