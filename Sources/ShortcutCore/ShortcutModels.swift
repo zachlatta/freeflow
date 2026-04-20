@@ -188,6 +188,14 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     func withAddedModifiers(_ extraModifiers: ShortcutModifiers) -> ShortcutBinding {
         guard !isDisabled else { return self }
         let updatedModifiers = modifiers.union(extraModifiers)
+        let updatedExactModifierKeyCodes: Set<UInt16>?
+        if let exactModifierKeyCodes, !exactModifierKeyCodes.isEmpty {
+            updatedExactModifierKeyCodes = Self.normalizedExactModifierKeyCodes(
+                exactModifierKeyCodes.union(Self.exactModifierKeyCodes(for: extraModifiers))
+            )
+        } else {
+            updatedExactModifierKeyCodes = exactModifierKeyCodes
+        }
 
         return ShortcutBinding(
             keyCode: keyCode,
@@ -195,7 +203,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             modifiers: updatedModifiers,
             kind: kind,
             preset: preset,
-            exactModifierKeyCodes: exactModifierKeyCodes
+            exactModifierKeyCodes: updatedExactModifierKeyCodes
         )
     }
 
@@ -278,8 +286,10 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         switch kind {
         case .disabled:
             return false
-        case .key, .modifierKey:
+        case .key:
             return keyCode == other.keyCode
+        case .modifierKey:
+            return true
         }
     }
 

@@ -424,12 +424,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
             holdKey: holdShortcutStorageKey,
             toggleKey: toggleShortcutStorageKey
         )
-        let storedSavedHoldCustomShortcut = Self.loadShortcut(forKey: savedHoldCustomShortcutStorageKey)
-        let storedSavedToggleCustomShortcut = Self.loadShortcut(forKey: savedToggleCustomShortcutStorageKey)
-        let savedHoldCustomShortcut = storedSavedHoldCustomShortcut?.binding
-            ?? (shortcuts.hold.isCustom ? shortcuts.hold : nil)
-        let savedToggleCustomShortcut = storedSavedToggleCustomShortcut?.binding
-            ?? (shortcuts.toggle.isCustom ? shortcuts.toggle : nil)
+        let savedHoldCustomShortcut = Self.loadSavedCustomShortcut(
+            forKey: savedHoldCustomShortcutStorageKey,
+            fallback: shortcuts.hold.isCustom ? shortcuts.hold : nil
+        )
+        let savedToggleCustomShortcut = Self.loadSavedCustomShortcut(
+            forKey: savedToggleCustomShortcutStorageKey,
+            fallback: shortcuts.toggle.isCustom ? shortcuts.toggle : nil
+        )
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
@@ -492,8 +494,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.contextModel = contextModel
         self.holdShortcut = shortcuts.hold
         self.toggleShortcut = shortcuts.toggle
-        self.savedHoldCustomShortcut = savedHoldCustomShortcut
-        self.savedToggleCustomShortcut = savedToggleCustomShortcut
+        self.savedHoldCustomShortcut = savedHoldCustomShortcut.binding
+        self.savedToggleCustomShortcut = savedToggleCustomShortcut.binding
         self.isCommandModeEnabled = isCommandModeEnabled
         self.commandModeStyle = commandModeStyle
         self.commandModeManualModifier = commandModeManualModifier
@@ -517,12 +519,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         refreshAvailableMicrophones()
         installAudioDeviceObservers()
 
-        if shortcuts.didUpdateStoredValues {
+        if shortcuts.didUpdateHoldStoredValue {
             persistShortcut(shortcuts.hold, key: holdShortcutStorageKey)
+        }
+        if shortcuts.didUpdateToggleStoredValue {
             persistShortcut(shortcuts.toggle, key: toggleShortcutStorageKey)
         }
-        persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
-        persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
+        if savedHoldCustomShortcut.didUpdateStoredValue {
+            persistOptionalShortcut(savedHoldCustomShortcut.binding, key: savedHoldCustomShortcutStorageKey)
+        }
+        if savedToggleCustomShortcut.didUpdateStoredValue {
+            persistOptionalShortcut(savedToggleCustomShortcut.binding, key: savedToggleCustomShortcutStorageKey)
+        }
 
         overlayManager.onStopButtonPressed = { [weak self] in
             DispatchQueue.main.async {
@@ -564,7 +572,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private struct StoredShortcutConfiguration {
         let hold: ShortcutBinding
         let toggle: ShortcutBinding
-        let didUpdateStoredValues: Bool
+        let didUpdateHoldStoredValue: Bool
+        let didUpdateToggleStoredValue: Bool
+    }
+
+    private struct StoredOptionalShortcut {
+        let binding: ShortcutBinding?
+        let didUpdateStoredValue: Bool
+    }
+
+    private struct StoredShortcutLoadResult {
+        let binding: ShortcutBinding?
+        let hadStoredValue: Bool
+        let didNormalize: Bool
     }
 
     private static func loadStoredAPIBaseURL(account: String) -> String {
@@ -575,32 +595,49 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private static func loadShortcutConfiguration(holdKey: String, toggleKey: String) -> StoredShortcutConfiguration {
-        if let holdResult = loadShortcut(forKey: holdKey),
-           let toggleResult = loadShortcut(forKey: toggleKey) {
-            return StoredShortcutConfiguration(
-                hold: holdResult.binding,
-                toggle: toggleResult.binding,
-                didUpdateStoredValues: holdResult.didNormalize || toggleResult.didNormalize
-            )
-        }
-
         let legacyPreset = ShortcutPreset(
             rawValue: UserDefaults.standard.string(forKey: "hotkey_option") ?? ShortcutPreset.fnKey.rawValue
         ) ?? .fnKey
         let hold = legacyPreset.binding
         let toggle = hold.withAddedModifiers(.command)
-        return StoredShortcutConfiguration(hold: hold, toggle: toggle, didUpdateStoredValues: true)
+        let storedHold = loadShortcut(forKey: holdKey)
+        let storedToggle = loadShortcut(forKey: toggleKey)
+        return StoredShortcutConfiguration(
+            hold: storedHold.binding ?? hold,
+            toggle: storedToggle.binding ?? toggle,
+            didUpdateHoldStoredValue: storedHold.binding == nil || storedHold.didNormalize,
+            didUpdateToggleStoredValue: storedToggle.binding == nil || storedToggle.didNormalize
+        )
     }
 
-    private static func loadShortcut(forKey key: String) -> (binding: ShortcutBinding, didNormalize: Bool)? {
+    private static func loadShortcut(forKey key: String) -> StoredShortcutLoadResult {
         guard let data = UserDefaults.standard.data(forKey: key) else {
-            return nil
+            return StoredShortcutLoadResult(binding: nil, hadStoredValue: false, didNormalize: false)
         }
         guard let decoded = try? JSONDecoder().decode(ShortcutBinding.self, from: data) else {
-            return nil
+            return StoredShortcutLoadResult(binding: nil, hadStoredValue: true, didNormalize: false)
         }
         let normalized = decoded.normalizedForStorageMigration()
-        return (binding: normalized, didNormalize: normalized != decoded)
+        return StoredShortcutLoadResult(
+            binding: normalized,
+            hadStoredValue: true,
+            didNormalize: normalized != decoded
+        )
+    }
+
+    private static func loadSavedCustomShortcut(
+        forKey key: String,
+        fallback: ShortcutBinding?
+    ) -> StoredOptionalShortcut {
+        let stored = loadShortcut(forKey: key)
+        if let binding = stored.binding {
+            return StoredOptionalShortcut(binding: binding, didUpdateStoredValue: stored.didNormalize)
+        }
+
+        return StoredOptionalShortcut(
+            binding: fallback,
+            didUpdateStoredValue: stored.hadStoredValue || fallback != nil
+        )
     }
 
     private func persistAPIBaseURL(_ value: String) {
@@ -840,7 +877,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
             refreshAvailableMicrophones()
-            completion(true)
+            DispatchQueue.main.async {
+                completion(true)
+            }
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 DispatchQueue.main.async {
@@ -852,10 +891,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
         case .denied, .restricted:
             openMicrophoneSettings()
-            completion(false)
+            DispatchQueue.main.async {
+                completion(false)
+            }
         @unknown default:
             openMicrophoneSettings()
-            completion(false)
+            DispatchQueue.main.async {
+                completion(false)
+            }
         }
     }
 
