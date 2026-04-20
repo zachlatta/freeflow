@@ -221,13 +221,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @Published var transcriptionAPIURL: String {
         didSet {
-            persistOptionalAPIURL(transcriptionAPIURL, account: transcriptionAPIURLStorageKey)
+            persistOptionalAPIValue(transcriptionAPIURL, account: transcriptionAPIURLStorageKey)
         }
     }
 
     @Published var transcriptionAPIKey: String {
         didSet {
-            persistOptionalAPIKey(transcriptionAPIKey, account: transcriptionAPIKeyStorageKey)
+            persistOptionalAPIValue(transcriptionAPIKey, account: transcriptionAPIKeyStorageKey)
         }
     }
 
@@ -440,7 +440,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
     private var realtimeService: RealtimeTranscriptionService?
-    private var realtimeFailed: Bool = false
     private var pendingOverlayDismissToken: UUID?
     private var shouldMonitorHotkeys = false
     private var isCapturingShortcut = false
@@ -644,7 +643,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func persistOptionalAPIKey(_ value: String, account: String) {
+    private func persistOptionalAPIValue(_ value: String, account: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             AppSettingsStorage.delete(account: account)
@@ -656,15 +655,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private static func loadOptionalStoredAPIValue(account: String) -> String {
         let stored = AppSettingsStorage.load(account: account) ?? ""
         return stored.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func persistOptionalAPIURL(_ value: String, account: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            AppSettingsStorage.delete(account: account)
-        } else {
-            AppSettingsStorage.save(trimmed, account: account)
-        }
     }
 
     private var resolvedTranscriptionBaseURL: String {
@@ -2001,7 +1991,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func startRealtimeStreamingIfEnabled() {
         guard realtimeStreamingEnabled else { return }
-        realtimeFailed = false
         let trimmedBase = resolvedTranscriptionBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBase.isEmpty else {
             os_log(.info, log: recordingLog, "realtime streaming requested but base URL is empty — skipping")
@@ -2019,7 +2008,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             try service.start()
         } catch {
             os_log(.error, log: recordingLog, "failed to start realtime service: %{public}@", error.localizedDescription)
-            realtimeFailed = true
             return
         }
         realtimeService = service
