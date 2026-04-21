@@ -448,9 +448,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let storedContextScreenshotMaxDimension = UserDefaults.standard.object(forKey: contextScreenshotMaxDimensionStorageKey) != nil
             ? UserDefaults.standard.integer(forKey: contextScreenshotMaxDimensionStorageKey)
             : Self.defaultContextScreenshotMaxDimension
-        let contextScreenshotMaxDimension = Self.contextScreenshotDimensionOptions.contains(storedContextScreenshotMaxDimension)
-            ? storedContextScreenshotMaxDimension
-            : Self.defaultContextScreenshotMaxDimension
+        let contextScreenshotMaxDimension = Self.normalizedContextScreenshotMaxDimension(storedContextScreenshotMaxDimension)
         let shortcutStartDelay = max(0, UserDefaults.standard.double(forKey: shortcutStartDelayStorageKey))
         let isCommandModeEnabled = UserDefaults.standard.object(forKey: commandModeEnabledStorageKey) == nil
             ? false
