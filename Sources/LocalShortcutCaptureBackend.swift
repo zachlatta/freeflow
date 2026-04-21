@@ -11,6 +11,10 @@ final class LocalShortcutCaptureBackend {
     func start() {
         stop()
 
+        if ModifierKeyEventState.currentFunctionKeyIsDown() {
+            pressedModifierKeyCodes.insert(ModifierKeyEventState.fnKeyCode)
+        }
+
         localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.handleFlagsChanged(event)
             return nil

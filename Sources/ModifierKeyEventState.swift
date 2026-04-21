@@ -31,6 +31,13 @@ enum ModifierKeyEventState {
 
     static let fnKeyCode: UInt16 = 63
 
+    /// Reads the current system-wide Fn state. Useful for seeding a backend's
+    /// tracked Fn state at start or after a tap reset, since flagsChanged events
+    /// don't fire for keys already held when a monitor begins.
+    static func currentFunctionKeyIsDown() -> Bool {
+        NSEvent.modifierFlags.contains(.function)
+    }
+
     private static func mappedFlag(for keyCode: UInt16) -> NSEvent.ModifierFlags? {
         switch keyCode {
         case 54:

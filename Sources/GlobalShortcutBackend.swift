@@ -28,6 +28,7 @@ final class GlobalShortcutBackend {
     func start() throws {
         stop()
         try installEventTap()
+        fnKeyIsDown = ModifierKeyEventState.currentFunctionKeyIsDown()
     }
 
     func stop() {
@@ -104,6 +105,7 @@ final class GlobalShortcutBackend {
             notifyBackendReset()
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
+                fnKeyIsDown = ModifierKeyEventState.currentFunctionKeyIsDown()
             }
             return Unmanaged.passUnretained(event)
 
