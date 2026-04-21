@@ -910,10 +910,8 @@ struct GeneralSettingsView: View {
                 icon: "mic.fill",
                 granted: micPermissionGranted,
                 action: {
-                    AVCaptureDevice.requestAccess(for: .audio) { granted in
-                        DispatchQueue.main.async {
-                            micPermissionGranted = granted
-                        }
+                    appState.requestMicrophoneAccess { granted in
+                        micPermissionGranted = granted
                     }
                 }
             )
