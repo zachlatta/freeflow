@@ -1729,7 +1729,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         fileURL: URL
     ) async throws -> String {
         if let realtimeService {
-            return try await realtimeService.commitAndAwaitFinal()
+            do {
+                return try await realtimeService.commitAndAwaitFinal()
+            } catch {
+                return try await fileService.transcribe(fileURL: fileURL)
+            }
         }
         return try await fileService.transcribe(fileURL: fileURL)
     }
@@ -1806,6 +1810,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.audioRecorder.onPCM16Samples = nil
             self.transcriptionTask?.cancel()
             self.transcriptionTask = Task {
+                defer {
+                    activeRealtime?.cancel()
+                }
                 do {
                     let transcriptionService = try TranscriptionService(
                         apiKey: self.resolvedTranscriptionAPIKey,

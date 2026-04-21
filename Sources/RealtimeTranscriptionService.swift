@@ -70,7 +70,9 @@ final class RealtimeTranscriptionService {
         }
 
         let task = session.webSocketTask(with: request)
-        self.task = task
+        stateQueue.sync {
+            self.task = task
+        }
         task.resume()
 
         receiveTask = Task { [weak self] in
@@ -82,6 +84,11 @@ final class RealtimeTranscriptionService {
 
     /// Cancel the socket and any in-flight receive. Safe to call multiple times.
     func cancel() {
+        let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+            let currentTask = task
+            task = nil
+            return currentTask
+        }
         stateQueue.sync {
             guard !closed else { return }
             closed = true
@@ -91,8 +98,7 @@ final class RealtimeTranscriptionService {
             }
         }
         receiveTask?.cancel()
-        task?.cancel(with: .normalClosure, reason: nil)
-        task = nil
+        currentTask?.cancel(with: .normalClosure, reason: nil)
     }
 
     // MARK: Producer
@@ -101,18 +107,24 @@ final class RealtimeTranscriptionService {
     /// (the service declares 24 kHz mono in `session.update`, matching the
     /// OpenAI Realtime default).
     func appendPCM16(_ data: Data) {
-        guard let task = task, !data.isEmpty else { return }
+        let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+            task
+        }
+        guard let currentTask, !data.isEmpty else { return }
         let audioB64 = data.base64EncodedString()
         let message: [String: Any] = [
             "type": "input_audio_buffer.append",
             "audio": audioB64,
         ]
-        send(message, over: task)
+        send(message, over: currentTask)
     }
 
     /// Signal end-of-input, wait for the final transcript, return it.
     func commitAndAwaitFinal() async throws -> String {
-        guard let task = task else {
+        let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+            task
+        }
+        guard let currentTask else {
             throw RealtimeTranscriptionError.notConnected
         }
         let alreadyCommitted: Bool = stateQueue.sync {
@@ -123,7 +135,7 @@ final class RealtimeTranscriptionService {
             return false
         }
         if !alreadyCommitted {
-            send(["type": "input_audio_buffer.commit"], over: task)
+            send(["type": "input_audio_buffer.commit"], over: currentTask)
         }
 
         return try await withCheckedThrowingContinuation { continuation in
@@ -141,7 +153,7 @@ final class RealtimeTranscriptionService {
                 finalContinuation = continuation
             }
             if let immediateResult {
-                task.cancel(with: .normalClosure, reason: nil)
+                currentTask.cancel(with: .normalClosure, reason: nil)
                 continuation.resume(with: immediateResult)
             }
         }
@@ -150,9 +162,13 @@ final class RealtimeTranscriptionService {
     // MARK: Receive loop
 
     private func receiveLoop() async {
-        while let task = task, !Task.isCancelled {
+        while !Task.isCancelled {
+            let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+                task
+            }
+            guard let currentTask else { break }
             do {
-                let message = try await task.receive()
+                let message = try await currentTask.receive()
                 switch message {
                 case .string(let text):
                     handleServerEvent(text)
@@ -289,7 +305,10 @@ final class RealtimeTranscriptionService {
     }
 
     private func sendSessionUpdate() {
-        guard let task = task else { return }
+        let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+            task
+        }
+        guard let currentTask else { return }
         var transcription: [String: Any] = [:]
         let model = config.model.trimmingCharacters(in: .whitespacesAndNewlines)
         if !model.isEmpty {
@@ -311,7 +330,7 @@ final class RealtimeTranscriptionService {
                 ],
             ],
         ]
-        send(["type": "session.update", "session": session], over: task)
+        send(["type": "session.update", "session": session], over: currentTask)
     }
 
     // MARK: URL derivation
@@ -363,7 +382,10 @@ final class RealtimeTranscriptionService {
             pendingResume = (cont, finalText)
         }
         if let (cont, text) = pendingResume {
-            task?.cancel(with: .normalClosure, reason: nil)
+            let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+                task
+            }
+            currentTask?.cancel(with: .normalClosure, reason: nil)
             cont.resume(returning: text)
         }
     }
