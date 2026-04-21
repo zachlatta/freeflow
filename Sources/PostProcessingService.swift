@@ -553,29 +553,7 @@ Model: \(model)
     }
 
     static func applyOutputLanguage(_ prompt: String, language: String) -> String {
-        let translationDirective = "\n\nIMPORTANT: Translate the final cleaned text into \(language). Output ONLY in \(language), regardless of the original spoken language."
-
-        // Try to replace known default prompt lines for a cleaner result
-        var result = prompt.replacingOccurrences(
-            of: "- No translation.",
-            with: "- Translate the final cleaned text into \(language). Output ONLY in \(language)."
-        )
-        result = result.replacingOccurrences(
-            of: "- Preserve the speaker's final intended meaning, tone, and language.",
-            with: "- Preserve the speaker's final intended meaning and tone. Translate into \(language)."
-        )
-        result = result.replacingOccurrences(
-            of: "- Preserve mixed-language text exactly as mixed.",
-            with: "- Translate all text into \(language) regardless of original language."
-        )
-
-        // If the prompt was customized and none of the replacements matched,
-        // append a translation directive to ensure translation always happens.
-        if result == prompt {
-            result += translationDirective
-        }
-
-        return result
+        prompt + "\n\nIMPORTANT: Translate the final cleaned text into \(language). Output ONLY in \(language), regardless of the original spoken language."
     }
 
     private func sanitizePostProcessedTranscript(_ value: String) -> String {
