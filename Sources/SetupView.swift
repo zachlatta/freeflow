@@ -529,13 +529,6 @@ struct SetupView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
 
-            if !accessibilityGranted {
-                Text("Note: If you rebuilt the app, you may need to\nremove and re-add it in Accessibility settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
         }
         .onAppear {
             startAccessibilityPolling()
@@ -1100,10 +1093,8 @@ struct SetupView: View {
     }
 
     func requestMicPermission() {
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            DispatchQueue.main.async {
-                micPermissionGranted = granted
-            }
+        appState.requestMicrophoneAccess { granted in
+            micPermissionGranted = granted
         }
     }
 
@@ -1243,10 +1234,15 @@ struct SetupView: View {
             }
         }
 
-        testHotkeyHarness.start(configuration: ShortcutConfiguration(
-            hold: appState.holdShortcut,
-            toggle: appState.toggleShortcut
-        ), startDelay: appState.shortcutStartDelay)
+        do {
+            try testHotkeyHarness.start(configuration: ShortcutConfiguration(
+                hold: appState.holdShortcut,
+                toggle: appState.toggleShortcut
+            ), startDelay: appState.shortcutStartDelay)
+        } catch {
+            testError = error.localizedDescription
+            testPhase = .done
+        }
     }
 
     private func stopTestHotkeyMonitoring() {

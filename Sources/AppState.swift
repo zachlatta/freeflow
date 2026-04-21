@@ -179,6 +179,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let customContextPromptStorageKey = "custom_context_prompt"
     private let customSystemPromptLastModifiedStorageKey = "custom_system_prompt_last_modified"
     private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
+    private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let preserveClipboardStorageKey = "preserve_clipboard"
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
@@ -191,6 +192,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let clipboardRestoreDelay: TimeInterval = 0.15
     let maxPipelineHistoryCount = 20
+    static let defaultContextScreenshotMaxDimension = Int(AppContextService.defaultScreenshotMaxDimension)
+    static let contextScreenshotDimensionOptions = [1024, 768, 640, 512]
     static let defaultTranscriptionModel = "whisper-large-v3"
     static let defaultPostProcessingModel = "openai/gpt-oss-20b"
     static let defaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -270,18 +273,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var isCommandModeEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isCommandModeEnabled, forKey: commandModeEnabledStorageKey)
+            restartHotkeyMonitoring()
         }
     }
 
     @Published var commandModeStyle: CommandModeStyle {
         didSet {
             UserDefaults.standard.set(commandModeStyle.rawValue, forKey: commandModeStyleStorageKey)
+            restartHotkeyMonitoring()
         }
     }
 
     @Published private(set) var commandModeManualModifier: CommandModeManualModifier {
         didSet {
             UserDefaults.standard.set(commandModeManualModifier.rawValue, forKey: commandModeManualModifierStorageKey)
+            restartHotkeyMonitoring()
         }
     }
 
@@ -300,6 +306,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var customContextPrompt: String {
         didSet {
             UserDefaults.standard.set(customContextPrompt, forKey: customContextPromptStorageKey)
+            rebuildContextService()
+        }
+    }
+
+    @Published var contextScreenshotMaxDimension: Int {
+        didSet {
+            let normalizedDimension = Self.normalizedContextScreenshotMaxDimension(contextScreenshotMaxDimension)
+            if normalizedDimension != contextScreenshotMaxDimension {
+                contextScreenshotMaxDimension = normalizedDimension
+            }
+            UserDefaults.standard.set(contextScreenshotMaxDimension, forKey: contextScreenshotMaxDimensionStorageKey)
             rebuildContextService()
         }
     }
@@ -364,6 +381,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var errorMessage: String?
     @Published var statusText: String = "Ready"
     @Published var hasAccessibility = false
+    @Published var hotkeyMonitoringErrorMessage: String?
     @Published var isDebugOverlayActive = false
     @Published var selectedSettingsTab: SettingsTab? = .general
     @Published var pipelineHistory: [PipelineHistoryItem] = []
@@ -414,6 +432,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingOverlayDismissToken: UUID?
     private var shouldMonitorHotkeys = false
     private var isCapturingShortcut = false
+    private var isAwaitingMicrophonePermission = false
+    private var pendingMicrophonePermissionTriggerMode: RecordingTriggerMode?
 
     init() {
         UserDefaults.standard.removeObject(forKey: "force_http2_transcription")
@@ -428,16 +448,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
             holdKey: holdShortcutStorageKey,
             toggleKey: toggleShortcutStorageKey
         )
-        let savedHoldCustomShortcut = Self.loadShortcut(forKey: savedHoldCustomShortcutStorageKey)
-            ?? (shortcuts.hold.isCustom ? shortcuts.hold : nil)
-        let savedToggleCustomShortcut = Self.loadShortcut(forKey: savedToggleCustomShortcutStorageKey)
-            ?? (shortcuts.toggle.isCustom ? shortcuts.toggle : nil)
+        let savedHoldCustomShortcut = Self.loadSavedCustomShortcut(
+            forKey: savedHoldCustomShortcutStorageKey,
+            fallback: shortcuts.hold.isCustom ? shortcuts.hold : nil
+        )
+        let savedToggleCustomShortcut = Self.loadSavedCustomShortcut(
+            forKey: savedToggleCustomShortcutStorageKey,
+            fallback: shortcuts.toggle.isCustom ? shortcuts.toggle : nil
+        )
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
         let customSystemPromptLastModified = UserDefaults.standard.string(forKey: customSystemPromptLastModifiedStorageKey) ?? ""
         let customContextPromptLastModified = UserDefaults.standard.string(forKey: customContextPromptLastModifiedStorageKey) ?? ""
         let outputLanguage = UserDefaults.standard.string(forKey: outputLanguageStorageKey) ?? ""
+        let storedContextScreenshotMaxDimension = UserDefaults.standard.object(forKey: contextScreenshotMaxDimensionStorageKey) != nil
+            ? UserDefaults.standard.integer(forKey: contextScreenshotMaxDimensionStorageKey)
+            : Self.defaultContextScreenshotMaxDimension
+        let contextScreenshotMaxDimension = Self.normalizedContextScreenshotMaxDimension(storedContextScreenshotMaxDimension)
         let shortcutStartDelay = max(0, UserDefaults.standard.double(forKey: shortcutStartDelayStorageKey))
         let isCommandModeEnabled = UserDefaults.standard.object(forKey: commandModeEnabledStorageKey) == nil
             ? false
@@ -480,11 +508,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
-        self.contextService = AppContextService(
+        self.contextService = Self.makeAppContextService(
             apiKey: apiKey,
             baseURL: apiBaseURL,
             customContextPrompt: customContextPrompt,
-            contextModel: contextModel
+            contextModel: contextModel,
+            contextScreenshotMaxDimension: contextScreenshotMaxDimension
         )
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
@@ -495,14 +524,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.contextModel = contextModel
         self.holdShortcut = shortcuts.hold
         self.toggleShortcut = shortcuts.toggle
-        self.savedHoldCustomShortcut = savedHoldCustomShortcut
-        self.savedToggleCustomShortcut = savedToggleCustomShortcut
+        self.savedHoldCustomShortcut = savedHoldCustomShortcut.binding
+        self.savedToggleCustomShortcut = savedToggleCustomShortcut.binding
         self.isCommandModeEnabled = isCommandModeEnabled
         self.commandModeStyle = commandModeStyle
         self.commandModeManualModifier = commandModeManualModifier
         self.customVocabulary = customVocabulary
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
+        self.contextScreenshotMaxDimension = contextScreenshotMaxDimension
         self.customSystemPromptLastModified = customSystemPromptLastModified
         self.customContextPromptLastModified = customContextPromptLastModified
         self.outputLanguage = outputLanguage
@@ -521,12 +551,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         refreshAvailableMicrophones()
         installAudioDeviceObservers()
 
-        if shortcuts.didMigrateLegacyValue {
+        if shortcuts.didUpdateHoldStoredValue {
             persistShortcut(shortcuts.hold, key: holdShortcutStorageKey)
+        }
+        if shortcuts.didUpdateToggleStoredValue {
             persistShortcut(shortcuts.toggle, key: toggleShortcutStorageKey)
         }
-        persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
-        persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
+        if savedHoldCustomShortcut.didUpdateStoredValue {
+            persistOptionalShortcut(savedHoldCustomShortcut.binding, key: savedHoldCustomShortcutStorageKey)
+        }
+        if savedToggleCustomShortcut.didUpdateStoredValue {
+            persistOptionalShortcut(savedToggleCustomShortcut.binding, key: savedToggleCustomShortcutStorageKey)
+        }
 
         overlayManager.onStopButtonPressed = { [weak self] in
             DispatchQueue.main.async {
@@ -568,7 +604,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private struct StoredShortcutConfiguration {
         let hold: ShortcutBinding
         let toggle: ShortcutBinding
-        let didMigrateLegacyValue: Bool
+        let didUpdateHoldStoredValue: Bool
+        let didUpdateToggleStoredValue: Bool
+    }
+
+    private struct StoredOptionalShortcut {
+        let binding: ShortcutBinding?
+        let didUpdateStoredValue: Bool
+    }
+
+    private struct StoredShortcutLoadResult {
+        let binding: ShortcutBinding?
+        let hadStoredValue: Bool
+        let didNormalize: Bool
     }
 
     private static func loadStoredAPIBaseURL(account: String) -> String {
@@ -579,24 +627,85 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private static func loadShortcutConfiguration(holdKey: String, toggleKey: String) -> StoredShortcutConfiguration {
-        if let hold = loadShortcut(forKey: holdKey),
-           let toggle = loadShortcut(forKey: toggleKey) {
-            return StoredShortcutConfiguration(hold: hold, toggle: toggle, didMigrateLegacyValue: false)
-        }
-
         let legacyPreset = ShortcutPreset(
             rawValue: UserDefaults.standard.string(forKey: "hotkey_option") ?? ShortcutPreset.fnKey.rawValue
         ) ?? .fnKey
         let hold = legacyPreset.binding
         let toggle = hold.withAddedModifiers(.command)
-        return StoredShortcutConfiguration(hold: hold, toggle: toggle, didMigrateLegacyValue: true)
+        let storedHold = loadShortcut(forKey: holdKey)
+        let storedToggle = loadShortcut(forKey: toggleKey)
+        return StoredShortcutConfiguration(
+            hold: storedHold.binding ?? hold,
+            toggle: storedToggle.binding ?? toggle,
+            didUpdateHoldStoredValue: storedHold.binding == nil || storedHold.didNormalize,
+            didUpdateToggleStoredValue: storedToggle.binding == nil || storedToggle.didNormalize
+        )
     }
 
-    private static func loadShortcut(forKey key: String) -> ShortcutBinding? {
+    private static func loadShortcut(forKey key: String) -> StoredShortcutLoadResult {
         guard let data = UserDefaults.standard.data(forKey: key) else {
-            return nil
+            return StoredShortcutLoadResult(binding: nil, hadStoredValue: false, didNormalize: false)
         }
-        return try? JSONDecoder().decode(ShortcutBinding.self, from: data)
+        guard let decoded = try? JSONDecoder().decode(ShortcutBinding.self, from: data) else {
+            return StoredShortcutLoadResult(binding: nil, hadStoredValue: true, didNormalize: false)
+        }
+        let normalized = decoded.normalizedForStorageMigration()
+        return StoredShortcutLoadResult(
+            binding: normalized,
+            hadStoredValue: true,
+            didNormalize: normalized != decoded
+        )
+    }
+
+    private static func loadSavedCustomShortcut(
+        forKey key: String,
+        fallback: ShortcutBinding?
+    ) -> StoredOptionalShortcut {
+        let stored = loadShortcut(forKey: key)
+        if let binding = stored.binding {
+            return StoredOptionalShortcut(binding: binding, didUpdateStoredValue: stored.didNormalize)
+        }
+
+        return StoredOptionalShortcut(
+            binding: fallback,
+            didUpdateStoredValue: stored.hadStoredValue || fallback != nil
+        )
+    }
+
+    static func normalizedContextScreenshotMaxDimension(_ value: Int) -> Int {
+        contextScreenshotDimensionOptions.contains(value)
+            ? value
+            : defaultContextScreenshotMaxDimension
+    }
+
+    static func makeAppContextService(
+        apiKey: String,
+        baseURL: String,
+        customContextPrompt: String,
+        contextModel: String,
+        contextScreenshotMaxDimension: Int
+    ) -> AppContextService {
+        AppContextService(
+            apiKey: apiKey,
+            baseURL: baseURL,
+            customContextPrompt: customContextPrompt,
+            contextModel: contextModel,
+            screenshotMaxDimension: CGFloat(normalizedContextScreenshotMaxDimension(contextScreenshotMaxDimension))
+        )
+    }
+
+    func makeAppContextService() -> AppContextService {
+        Self.makeAppContextService(
+            apiKey: apiKey,
+            baseURL: apiBaseURL,
+            customContextPrompt: customContextPrompt,
+            contextModel: contextModel,
+            contextScreenshotMaxDimension: contextScreenshotMaxDimension
+        )
+    }
+
+    private func rebuildContextService() {
+        contextService = makeAppContextService()
     }
 
     private func persistAPIBaseURL(_ value: String) {
@@ -608,17 +717,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func rebuildContextService() {
-        contextService = AppContextService(
-            apiKey: apiKey,
-            baseURL: apiBaseURL,
-            customContextPrompt: customContextPrompt,
-            contextModel: contextModel
-        )
-    }
-
     private func persistShortcut(_ binding: ShortcutBinding, key: String) {
-        guard let data = try? JSONEncoder().encode(binding) else { return }
+        let normalizedBinding = binding.normalizedForStorageMigration()
+        guard let data = try? JSONEncoder().encode(normalizedBinding) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 
@@ -825,6 +926,42 @@ final class AppState: ObservableObject, @unchecked Sendable {
         AXIsProcessTrustedWithOptions(options)
     }
 
+    func openMicrophoneSettings() {
+        let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        if let url = settingsURL {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            refreshAvailableMicrophones()
+            DispatchQueue.main.async {
+                completion(true)
+            }
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+                DispatchQueue.main.async {
+                    if granted {
+                        self?.refreshAvailableMicrophones()
+                    }
+                    completion(granted)
+                }
+            }
+        case .denied, .restricted:
+            openMicrophoneSettings()
+            DispatchQueue.main.async {
+                completion(false)
+            }
+        @unknown default:
+            openMicrophoneSettings()
+            DispatchQueue.main.async {
+                completion(false)
+            }
+        }
+    }
+
     func hasScreenCapturePermission() -> Bool {
         CGPreflightScreenCaptureAccess()
     }
@@ -930,6 +1067,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     var shortcutStatusText: String {
+        if hotkeyMonitoringErrorMessage != nil {
+            return "Global shortcuts unavailable"
+        }
+
         switch (hasEnabledHoldShortcut, hasEnabledToggleShortcut) {
         case (true, true):
             return "Hold \(holdShortcut.displayName) or tap \(toggleShortcut.displayName) to dictate"
@@ -992,14 +1133,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
+        let binding = binding.normalizedForStorageMigration()
         let nextHoldShortcut = role == .hold ? binding : holdShortcut
         let nextToggleShortcut = role == .toggle ? binding : toggleShortcut
         let otherBinding = role == .hold ? toggleShortcut : holdShortcut
         if binding.isDisabled && otherBinding.isDisabled {
             return "At least one shortcut must remain enabled."
         }
-        guard binding != otherBinding else {
-            return "Hold and tap shortcuts must be different."
+        guard !binding.conflicts(with: otherBinding) else {
+            return "Hold and tap shortcuts must be distinct."
         }
         if isCommandModeEnabled,
            commandModeStyle == .manual,
@@ -1043,16 +1185,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return "That modifier is already part of the tap shortcut."
         }
 
-        let derivedHold = holdBinding.withAddedModifiers(manualModifier)
-        if !holdBinding.isDisabled && derivedHold == toggleBinding {
-            return "That modifier would make the command hold shortcut overlap an existing dictation shortcut."
-        }
-
-        let derivedToggle = toggleBinding.withAddedModifiers(manualModifier)
-        if !toggleBinding.isDisabled && derivedToggle == holdBinding {
-            return "That modifier would make the command tap shortcut overlap an existing dictation shortcut."
-        }
-
         return nil
     }
 
@@ -1071,6 +1203,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     func stopHotkeyMonitoring() {
         shouldMonitorHotkeys = false
+        hotkeyMonitoringErrorMessage = nil
         hotkeyManager.onShortcutEvent = nil
         hotkeyManager.onEscapeKeyPressed = nil
         hotkeyManager.stop()
@@ -1086,13 +1219,34 @@ final class AppState: ObservableObject, @unchecked Sendable {
         restartHotkeyMonitoring()
     }
 
+    private var activeShortcutConfiguration: ShortcutConfiguration {
+        let permittedAdditionalExactMatchModifiers: ShortcutModifiers
+        if isCommandModeEnabled, commandModeStyle == .manual {
+            permittedAdditionalExactMatchModifiers = commandModeManualModifier.shortcutModifier
+        } else {
+            permittedAdditionalExactMatchModifiers = []
+        }
+
+        return ShortcutConfiguration(
+            hold: holdShortcut,
+            toggle: toggleShortcut,
+            permittedAdditionalExactMatchModifiers: permittedAdditionalExactMatchModifiers
+        )
+    }
+
     private func restartHotkeyMonitoring() {
-        guard shouldMonitorHotkeys, !isCapturingShortcut else {
+        guard shouldMonitorHotkeys, !isCapturingShortcut, !isAwaitingMicrophonePermission else {
             hotkeyManager.stop()
             return
         }
 
-        hotkeyManager.start(configuration: ShortcutConfiguration(hold: holdShortcut, toggle: toggleShortcut))
+        do {
+            try hotkeyManager.start(configuration: activeShortcutConfiguration)
+            hotkeyMonitoringErrorMessage = nil
+        } catch {
+            hotkeyMonitoringErrorMessage = error.localizedDescription
+            os_log(.error, log: recordingLog, "Hotkey monitoring failed to start: %{public}@", error.localizedDescription)
+        }
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
@@ -1323,6 +1477,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let scheduledSelectionSnapshot = pendingSelectionSnapshot
         let scheduledManualCommandInvocation = pendingManualCommandInvocation
         cancelPendingShortcutStart()
+        guard prepareRecordingStart(
+            triggerMode: triggerMode,
+            selectionSnapshot: scheduledSelectionSnapshot,
+            manualCommandRequested: scheduledSelectionSnapshot == nil
+                ? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
+                : scheduledManualCommandInvocation,
+            startedAt: t0
+        ) else { return }
+        guard ensureMicrophoneAccess() else { return }
+        os_log(.info, log: recordingLog, "mic access check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        beginRecording(triggerMode: triggerMode)
+        os_log(.info, log: recordingLog, "startRecording() finished: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+    }
+
+    private func prepareRecordingStart(
+        triggerMode: RecordingTriggerMode,
+        selectionSnapshot: AppSelectionSnapshot? = nil,
+        manualCommandRequested: Bool? = nil,
+        startedAt: CFAbsoluteTime? = nil
+    ) -> Bool {
         activeRecordingTriggerMode = triggerMode
         guard hasAccessibility else {
             errorMessage = "Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility."
@@ -1331,24 +1505,51 @@ final class AppState: ObservableObject, @unchecked Sendable {
             currentSessionIntent = .dictation
             shortcutSessionController.reset()
             showAccessibilityAlert()
-            return
+            return false
         }
-        os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        let selectionSnapshot = scheduledSelectionSnapshot ?? contextService.collectSelectionSnapshot()
-        let manualCommandRequested = scheduledSelectionSnapshot == nil
-            ? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
-            : scheduledManualCommandInvocation
+        if let startedAt {
+            os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+        }
+
+        let selectionSnapshot = selectionSnapshot ?? contextService.collectSelectionSnapshot()
+        let manualCommandRequested = manualCommandRequested
+            ?? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
         guard let resolvedIntent = resolveSessionIntent(
             triggerMode: triggerMode,
             selectionSnapshot: selectionSnapshot,
             manualCommandRequested: manualCommandRequested
-        ) else { return }
+        ) else { return false }
+
+        if resolvedIntent.isCommandMode {
+            guard ensureScreenCaptureAccess() else { return false }
+            if let startedAt {
+                os_log(.info, log: recordingLog, "screen capture check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
+            }
+        } else {
+            hasScreenRecordingPermission = hasScreenCapturePermission()
+        }
+
         currentSessionIntent = resolvedIntent
         overlayManager.setRecordingTriggerMode(triggerMode, animated: false)
-        guard ensureMicrophoneAccess() else { return }
-        os_log(.info, log: recordingLog, "mic access check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        beginRecording(triggerMode: triggerMode)
-        os_log(.info, log: recordingLog, "startRecording() finished: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        return true
+    }
+
+    private func ensureScreenCaptureAccess() -> Bool {
+        let granted = hasScreenCapturePermission()
+        hasScreenRecordingPermission = granted
+        guard granted else {
+            let message = "Screen recording permission not granted. Enable in System Settings > Privacy & Security > Screen Recording."
+            errorMessage = message
+            statusText = "Screenshot Required"
+            activeRecordingTriggerMode = nil
+            currentSessionIntent = .dictation
+            shortcutSessionController.reset()
+            playAlertSound(named: "Basso")
+            showScreenshotPermissionAlert(message: message)
+            return false
+        }
+
+        return true
     }
 
     private func ensureMicrophoneAccess() -> Bool {
@@ -1357,18 +1558,41 @@ final class AppState: ObservableObject, @unchecked Sendable {
         case .authorized:
             return true
         case .notDetermined:
+            guard let triggerMode = activeRecordingTriggerMode else {
+                return false
+            }
+
+            prepareForMicrophonePermissionPrompt(triggerMode: triggerMode)
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 DispatchQueue.main.async {
+                    guard let strongSelf = self else { return }
+                    let pendingTriggerMode = strongSelf.pendingMicrophonePermissionTriggerMode
+                    strongSelf.pendingMicrophonePermissionTriggerMode = nil
+                    strongSelf.isAwaitingMicrophonePermission = false
+                    strongSelf.restartHotkeyMonitoring()
+
+                    guard let triggerMode = pendingTriggerMode else { return }
                     if granted {
-                        guard let self, let triggerMode = self.activeRecordingTriggerMode else { return }
-                        self.beginRecording(triggerMode: triggerMode)
+                        strongSelf.errorMessage = nil
+                        if triggerMode == .toggle {
+                            guard strongSelf.prepareRecordingStart(triggerMode: .toggle) else { return }
+                            strongSelf.shortcutSessionController.beginManual(mode: .toggle)
+                            strongSelf.beginRecording(triggerMode: .toggle)
+                        } else {
+                            strongSelf.currentSessionIntent = .dictation
+                            strongSelf.statusText = "Microphone access granted. Press and hold again to record."
+                            strongSelf.scheduleReadyStatusReset(
+                                after: 2,
+                                matching: ["Microphone access granted. Press and hold again to record."]
+                            )
+                        }
                     } else {
-                        self?.errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
-                        self?.statusText = "No Microphone"
-                        self?.activeRecordingTriggerMode = nil
-                        self?.currentSessionIntent = .dictation
-                        self?.shortcutSessionController.reset()
-                        self?.showMicrophonePermissionAlert()
+                        strongSelf.errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
+                        strongSelf.statusText = "No Microphone"
+                        strongSelf.activeRecordingTriggerMode = nil
+                        strongSelf.currentSessionIntent = .dictation
+                        strongSelf.shortcutSessionController.reset()
+                        strongSelf.showMicrophonePermissionAlert()
                     }
                 }
             }
@@ -1382,6 +1606,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
             showMicrophonePermissionAlert()
             return false
         }
+    }
+
+    private func prepareForMicrophonePermissionPrompt(triggerMode: RecordingTriggerMode) {
+        isAwaitingMicrophonePermission = true
+        pendingMicrophonePermissionTriggerMode = triggerMode
+        hotkeyManager.stop()
+        shortcutSessionController.reset()
+        activeRecordingTriggerMode = nil
+        cancelRecordingInitializationTimer()
+        audioRecorder.onRecordingReady = nil
+        audioRecorder.onRecordingFailure = nil
+        audioLevelCancellable?.cancel()
+        audioLevelCancellable = nil
+        overlayManager.dismiss()
     }
 
     private func beginRecording(triggerMode: RecordingTriggerMode) {
@@ -1527,10 +1765,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
-            let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-            if let url = settingsURL {
-                NSWorkspace.shared.open(url)
-            }
+            openMicrophoneSettings()
         }
     }
 
@@ -2001,6 +2236,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         os_log(.error, "Screenshot capture issue: %{public}@", message)
 
         if isScreenCapturePermissionError(message) && !hasShownScreenshotPermissionAlert {
+            hasScreenRecordingPermission = false
+            guard currentSessionIntent.isCommandMode else { return }
+            errorMessage = message
             hasShownScreenshotPermissionAlert = true
 
             // Permission errors are fatal — stop recording

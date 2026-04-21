@@ -944,10 +944,8 @@ struct GeneralSettingsView: View {
                 icon: "mic.fill",
                 granted: micPermissionGranted,
                 action: {
-                    AVCaptureDevice.requestAccess(for: .audio) { granted in
-                        DispatchQueue.main.async {
-                            micPermissionGranted = granted
-                        }
+                    appState.requestMicrophoneAccess { granted in
+                        micPermissionGranted = granted
                     }
                 }
             )
@@ -1405,6 +1403,45 @@ struct PromptsSettingsView: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Screenshot Resolution")
+                    .font(.caption.weight(.semibold))
+
+                Text("Controls the maximum image dimension sent for context inference.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: $appState.contextScreenshotMaxDimension) {
+                    ForEach(AppState.contextScreenshotDimensionOptions, id: \.self) { dimension in
+                        Text("\(dimension) px").tag(dimension)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel("Screenshot Resolution")
+
+                HStack {
+                    if appState.contextScreenshotMaxDimension == AppState.defaultContextScreenshotMaxDimension {
+                        Label("Using default", systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Label("Using custom value", systemImage: "pencil")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                    Spacer()
+                    if appState.contextScreenshotMaxDimension != AppState.defaultContextScreenshotMaxDimension {
+                        Button("Reset to Default") {
+                            appState.contextScreenshotMaxDimension = AppState.defaultContextScreenshotMaxDimension
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+
+            Divider()
+
             // Test section
             VStack(alignment: .leading, spacing: 8) {
                 Text("Test Context Prompt")
@@ -1475,12 +1512,7 @@ struct PromptsSettingsView: View {
         contextTestError = nil
         contextTestPrompt = nil
 
-        let service = AppContextService(
-            apiKey: appState.apiKey,
-            baseURL: appState.apiBaseURL,
-            customContextPrompt: appState.customContextPrompt,
-            contextModel: appState.contextModel
-        )
+        let service = appState.makeAppContextService()
 
         Task {
             let context = await service.collectContext()
