@@ -1,5 +1,10 @@
 import Cocoa
 
+/// Sentinel written to CGEventSource.userData on keystrokes synthesized by the
+/// app (⌘V paste, ⌘C selection-copy fallback). HotkeyManager skips events
+/// bearing this marker so they can't re-trigger the dictation shortcut.
+let appInjectedEventSentinel: Int64 = 0x0F_12_EF_10
+
 final class HotkeyManager {
     private var localFlagsMonitor: Any?
     private var localKeyDownMonitor: Any?
@@ -124,6 +129,9 @@ final class HotkeyManager {
             }
             return Unmanaged.passUnretained(event)
         case .flagsChanged, .keyDown, .keyUp:
+            if event.getIntegerValueField(.eventSourceUserData) == appInjectedEventSentinel {
+                return Unmanaged.passUnretained(event)
+            }
             guard let nsEvent = NSEvent(cgEvent: event) else {
                 return Unmanaged.passUnretained(event)
             }

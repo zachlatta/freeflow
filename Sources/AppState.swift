@@ -187,6 +187,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let commandModeEnabledStorageKey = "command_mode_enabled"
     private let commandModeStyleStorageKey = "command_mode_style"
     private let commandModeManualModifierStorageKey = "command_mode_manual_modifier"
+    private let useCopyFallbackForSelectionStorageKey = "use_copy_fallback_for_selection"
     private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let clipboardRestoreDelay: TimeInterval = 0.15
     let maxPipelineHistoryCount = 20
@@ -281,6 +282,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published private(set) var commandModeManualModifier: CommandModeManualModifier {
         didSet {
             UserDefaults.standard.set(commandModeManualModifier.rawValue, forKey: commandModeManualModifierStorageKey)
+        }
+    }
+
+    @Published var useCopyFallbackForSelection: Bool {
+        didSet {
+            UserDefaults.standard.set(useCopyFallbackForSelection, forKey: useCopyFallbackForSelectionStorageKey)
         }
     }
 
@@ -440,6 +447,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let commandModeManualModifier = CommandModeManualModifier(
             rawValue: UserDefaults.standard.string(forKey: commandModeManualModifierStorageKey) ?? ""
         ) ?? .option
+        let useCopyFallbackForSelection = UserDefaults.standard.object(forKey: useCopyFallbackForSelectionStorageKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: useCopyFallbackForSelectionStorageKey)
         let preserveClipboard = UserDefaults.standard.object(forKey: preserveClipboardStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
@@ -492,6 +502,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.isCommandModeEnabled = isCommandModeEnabled
         self.commandModeStyle = commandModeStyle
         self.commandModeManualModifier = commandModeManualModifier
+        self.useCopyFallbackForSelection = useCopyFallbackForSelection
         self.customVocabulary = customVocabulary
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
@@ -1274,6 +1285,94 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private func resolveSelectionSnapshot(
+        scheduled: AppSelectionSnapshot?,
+        manualCommandRequested: Bool
+    ) -> AppSelectionSnapshot {
+        if let scheduled,
+           let text = scheduled.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !text.isEmpty {
+            return scheduled
+        }
+
+        let baseline = scheduled ?? contextService.collectSelectionSnapshot()
+        let baselineTrimmed = baseline.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !baselineTrimmed.isEmpty {
+            return baseline
+        }
+
+        guard shouldAttemptCopyFallback(manualCommandRequested: manualCommandRequested) else {
+            return baseline
+        }
+
+        guard let copied = captureSelectionViaCopyFallback() else {
+            return baseline
+        }
+
+        return AppSelectionSnapshot(
+            appName: baseline.appName,
+            bundleIdentifier: baseline.bundleIdentifier,
+            windowTitle: baseline.windowTitle,
+            selectedText: copied
+        )
+    }
+
+    private func shouldAttemptCopyFallback(manualCommandRequested: Bool) -> Bool {
+        guard useCopyFallbackForSelection, isCommandModeEnabled else { return false }
+        switch commandModeStyle {
+        case .automatic:
+            return true
+        case .manual:
+            return manualCommandRequested
+        }
+    }
+
+    /// Synthesizes ⌘C, reads the pasteboard, and restores the prior contents.
+    /// Returns the copied selection text (if any), or nil if the copy didn't land.
+    private func captureSelectionViaCopyFallback() -> String? {
+        let pasteboard = NSPasteboard.general
+        let preservedClipboard = PreservedPasteboardSnapshot(pasteboard: pasteboard)
+        let preChangeCount = pasteboard.changeCount
+
+        synthesizeCopyCommand()
+
+        var copied: String? = nil
+        let deadline = Date().addingTimeInterval(0.15)
+        while Date() < deadline {
+            if pasteboard.changeCount != preChangeCount {
+                copied = pasteboard.string(forType: .string)
+                break
+            }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+
+        preservedClipboard.restore(to: pasteboard)
+
+        guard let copied,
+              !copied.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            os_log(.info, log: recordingLog, "copy-fallback: no selection captured")
+            return nil
+        }
+
+        os_log(.info, log: recordingLog, "copy-fallback: captured %d chars", copied.count)
+        return copied
+    }
+
+    private func synthesizeCopyCommand() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        source?.userData = appInjectedEventSentinel
+        if let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: true) {
+            keyDown.flags = .maskCommand
+            keyDown.setIntegerValueField(.eventSourceUserData, value: appInjectedEventSentinel)
+            keyDown.post(tap: .cgSessionEventTap)
+        }
+        if let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 8, keyDown: false) {
+            keyUp.flags = .maskCommand
+            keyUp.setIntegerValueField(.eventSourceUserData, value: appInjectedEventSentinel)
+            keyUp.post(tap: .cgSessionEventTap)
+        }
+    }
+
     private func rejectCommandModeSelectionRequirement(triggerMode: RecordingTriggerMode) {
         currentSessionIntent = .dictation
         activeRecordingTriggerMode = nil
@@ -1324,10 +1423,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
         os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-        let selectionSnapshot = scheduledSelectionSnapshot ?? contextService.collectSelectionSnapshot()
         let manualCommandRequested = scheduledSelectionSnapshot == nil
             ? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
             : scheduledManualCommandInvocation
+        let selectionSnapshot = resolveSelectionSnapshot(
+            scheduled: scheduledSelectionSnapshot,
+            manualCommandRequested: manualCommandRequested
+        )
         guard let resolvedIntent = resolveSessionIntent(
             triggerMode: triggerMode,
             selectionSnapshot: selectionSnapshot,
@@ -2094,13 +2196,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func pasteAtCursor() {
         let source = CGEventSource(stateID: .hidSystemState)
+        source?.userData = appInjectedEventSentinel
 
         let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
         keyDown?.flags = .maskCommand
+        keyDown?.setIntegerValueField(.eventSourceUserData, value: appInjectedEventSentinel)
         keyDown?.post(tap: .cgSessionEventTap)
 
         let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
         keyUp?.flags = .maskCommand
+        keyUp?.setIntegerValueField(.eventSourceUserData, value: appInjectedEventSentinel)
         keyUp?.post(tap: .cgSessionEventTap)
     }
 

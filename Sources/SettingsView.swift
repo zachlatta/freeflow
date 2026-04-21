@@ -803,6 +803,16 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
+
+            Divider()
+
+            Toggle("Use clipboard fallback to read selection", isOn: $appState.useCopyFallbackForSelection)
+                .disabled(!appState.isCommandModeEnabled)
+
+            Text("When the accessibility API can't read the highlighted text (common in Electron apps like VS Code, Slack, and Discord), FreeFlow briefly uses ⌘C to capture the selection, then restores your clipboard. Adds up to ~150 ms before recording starts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .opacity(appState.isCommandModeEnabled ? 1 : 0.5)
         }
     }
 
