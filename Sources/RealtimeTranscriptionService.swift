@@ -40,6 +40,7 @@ final class RealtimeTranscriptionService {
     private var closed: Bool = false
     private var serverEventCount: Int = 0
     private var commitEventCount: Int?
+    private var completionEventCount: Int?
     private var currentItemID: String?
 
     /// Published on the main queue as partial transcript updates. The service
@@ -71,7 +72,6 @@ final class RealtimeTranscriptionService {
         let task = session.webSocketTask(with: request)
         self.task = task
         task.resume()
-        os_log(.info, log: realtimeLog, "opened websocket: %{public}@", wsURL.absoluteString)
 
         receiveTask = Task { [weak self] in
             await self?.receiveLoop()
@@ -119,6 +119,7 @@ final class RealtimeTranscriptionService {
             if commitSent { return true }
             commitSent = true
             commitEventCount = serverEventCount
+            completionEventCount = nil
             return false
         }
         if !alreadyCommitted {
@@ -126,12 +127,22 @@ final class RealtimeTranscriptionService {
         }
 
         return try await withCheckedThrowingContinuation { continuation in
+            var immediateResult: Result<String, Error>?
             stateQueue.sync {
                 if closed {
-                    continuation.resume(throwing: RealtimeTranscriptionError.closedBeforeFinal)
+                    immediateResult = .failure(RealtimeTranscriptionError.closedBeforeFinal)
+                    return
+                }
+                if let finalText = readyCommittedTranscriptLocked() {
+                    closed = true
+                    immediateResult = .success(finalText)
                     return
                 }
                 finalContinuation = continuation
+            }
+            if let immediateResult {
+                task.cancel(with: .normalClosure, reason: nil)
+                continuation.resume(with: immediateResult)
             }
         }
     }
@@ -153,7 +164,6 @@ final class RealtimeTranscriptionService {
                     break
                 }
             } catch {
-                os_log(.info, log: realtimeLog, "receive loop ended: %{public}@", error.localizedDescription)
                 finishWithClose()
                 return
             }
@@ -198,6 +208,9 @@ final class RealtimeTranscriptionService {
             }
             resumeIfReadyAfterCommit()
         case "conversation.item.input_audio_transcription.completed":
+            stateQueue.sync {
+                completionEventCount = serverEventCount
+            }
             if let itemID = json["item_id"] as? String {
                 stateQueue.sync {
                     currentItemID = itemID
@@ -341,12 +354,8 @@ final class RealtimeTranscriptionService {
     private func resumeIfReadyAfterCommit() {
         var pendingResume: (CheckedContinuation<String, Error>, String)?
         stateQueue.sync {
-            guard commitSent,
-                  let cont = finalContinuation,
-                  let commitEventCount,
-                  serverEventCount > commitEventCount,
-                  partialText.isEmpty,
-                  !finalText.isEmpty else {
+            guard let cont = finalContinuation,
+                  let finalText = readyCommittedTranscriptLocked() else {
                 return
             }
             finalContinuation = nil
@@ -357,5 +366,23 @@ final class RealtimeTranscriptionService {
             task?.cancel(with: .normalClosure, reason: nil)
             cont.resume(returning: text)
         }
+    }
+
+    private func readyCommittedTranscriptLocked() -> String? {
+        guard commitSent,
+              let commitEventCount,
+              partialText.isEmpty else {
+            return nil
+        }
+
+        if !finalText.isEmpty, serverEventCount > commitEventCount {
+            return finalText
+        }
+
+        if let completionEventCount, completionEventCount > commitEventCount {
+            return finalText
+        }
+
+        return nil
     }
 }
