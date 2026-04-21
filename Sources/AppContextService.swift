@@ -34,6 +34,7 @@ If details are missing, state uncertainty instead of inventing facts.
 Return only two sentences, no labels, no markdown, no extra commentary.
 """
     static let defaultContextPromptDate = "2026-02-24"
+    static let defaultScreenshotMaxDimension: CGFloat = 1024
 
     private let apiKey: String
     private let baseURL: String
@@ -41,20 +42,24 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     private let contextModel: String
     private let maxScreenshotDataURILength = 500_000
     private let screenshotCompressionPrimary = 0.5
-    private let screenshotMaxDimension: CGFloat = 1024
+    private let screenshotMaxDimension: CGFloat
     private let contextRequestTimeoutSeconds: TimeInterval = 20
 
     init(
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         customContextPrompt: String = "",
-        contextModel: String = "meta-llama/llama-4-scout-17b-16e-instruct"
+        contextModel: String = "meta-llama/llama-4-scout-17b-16e-instruct",
+        screenshotMaxDimension: CGFloat = AppContextService.defaultScreenshotMaxDimension
     ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.customContextPrompt = customContextPrompt
         let trimmedModel = contextModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.contextModel = trimmedModel.isEmpty ? "meta-llama/llama-4-scout-17b-16e-instruct" : trimmedModel
+        self.screenshotMaxDimension = screenshotMaxDimension > 0
+            ? screenshotMaxDimension
+            : AppContextService.defaultScreenshotMaxDimension
     }
 
     func collectSelectionSnapshot() -> AppSelectionSnapshot {
