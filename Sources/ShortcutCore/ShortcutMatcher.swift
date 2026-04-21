@@ -262,7 +262,12 @@ enum ShortcutMatcher {
         configuration: ShortcutConfiguration
     ) -> [ShortcutBinding] {
         [configuration.hold, configuration.toggle].filter { binding in
-            binding.kind == .modifierKey && modifierEvent(for: keyCode, affects: binding)
+            switch binding.kind {
+            case .key, .modifierKey:
+                return modifierEvent(for: keyCode, affects: binding)
+            case .disabled:
+                return false
+            }
         }
     }
 
@@ -294,23 +299,14 @@ private extension ShortcutBinding {
             return true
         }
 
-        if pressedModifierKeyCodes == exactModifierKeyCodes {
+        if ShortcutBinding.exactModifierKeyCodesMatch(
+            pressedModifierKeyCodes,
+            exactModifierKeyCodes: exactModifierKeyCodes,
+            permittedAdditionalExactMatchModifiers: permittedAdditionalExactMatchModifiers
+        ) {
             return true
         }
-
-        guard !permittedAdditionalExactMatchModifiers.isEmpty else {
-            return false
-        }
-
-        let additionalModifierKeyCodes = ShortcutBinding.matchingModifierKeyCodes(
-            for: permittedAdditionalExactMatchModifiers
-        )
-        let extraPressedModifierKeyCodes = pressedModifierKeyCodes.subtracting(exactModifierKeyCodes)
-        guard !extraPressedModifierKeyCodes.isEmpty else {
-            return false
-        }
-
-        return extraPressedModifierKeyCodes.isSubset(of: additionalModifierKeyCodes)
+        return false
     }
 
     func referencesPressedModifiers(

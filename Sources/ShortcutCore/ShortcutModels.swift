@@ -202,7 +202,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         let updatedExactModifierKeyCodes: Set<UInt16>?
         if let exactModifierKeyCodes, !exactModifierKeyCodes.isEmpty {
             updatedExactModifierKeyCodes = Self.normalizedExactModifierKeyCodes(
-                exactModifierKeyCodes.union(Self.exactModifierKeyCodes(for: extraModifiers))
+                exactModifierKeyCodes.union(Self.exactModifierKeyCodesPreservingSides(for: extraModifiers))
             )
         } else {
             updatedExactModifierKeyCodes = exactModifierKeyCodes
@@ -311,7 +311,10 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         }
 
         if let exactModifierKeyCodes = exactModifierKeyCodes,
-           pressedModifierKeyCodes != exactModifierKeyCodes {
+           !Self.exactModifierKeyCodesMatch(
+            pressedModifierKeyCodes,
+            exactModifierKeyCodes: exactModifierKeyCodes
+           ) {
             return false
         }
 
@@ -389,6 +392,16 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         return keyCodes
     }
 
+    static func exactModifierKeyCodesPreservingSides(for modifiers: ShortcutModifiers) -> Set<UInt16> {
+        var keyCodes: Set<UInt16> = []
+        if modifiers.contains(.command) { keyCodes.formUnion([54, 55]) }
+        if modifiers.contains(.control) { keyCodes.formUnion([59, 62]) }
+        if modifiers.contains(.option) { keyCodes.formUnion([58, 61]) }
+        if modifiers.contains(.shift) { keyCodes.formUnion([56, 60]) }
+        if modifiers.contains(.function) { keyCodes.insert(63) }
+        return keyCodes
+    }
+
     static func matchingModifierKeyCodes(for modifiers: ShortcutModifiers) -> Set<UInt16> {
         modifierKeyCodes.filter { keyCode in
             logicalModifier(forKeyCode: keyCode).map(modifiers.contains) == true
@@ -447,6 +460,37 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         modifierDisplayOrder.filter(exactModifierKeyCodes.contains)
     }
 
+    static func exactModifierKeyCodesMatch(
+        _ pressedModifierKeyCodes: Set<UInt16>,
+        exactModifierKeyCodes: Set<UInt16>,
+        permittedAdditionalExactMatchModifiers: ShortcutModifiers = []
+    ) -> Bool {
+        let normalizedExactModifierKeyCodes = normalizedExactModifierKeyCodes(exactModifierKeyCodes) ?? []
+
+        for spec in modifierKeyCodeMatchSpecs {
+            let exactKeyCodes = normalizedExactModifierKeyCodes.intersection(spec.keyCodes)
+            let pressedKeyCodes = pressedModifierKeyCodes.intersection(spec.keyCodes)
+
+            if exactKeyCodes.isEmpty {
+                if !pressedKeyCodes.isEmpty && !permittedAdditionalExactMatchModifiers.contains(spec.logicalModifier) {
+                    return false
+                }
+                continue
+            }
+
+            if exactKeyCodes.count == spec.keyCodes.count {
+                guard !pressedKeyCodes.isEmpty,
+                      pressedKeyCodes.isSubset(of: exactKeyCodes) else {
+                    return false
+                }
+            } else if pressedKeyCodes != exactKeyCodes {
+                return false
+            }
+        }
+
+        return true
+    }
+
     static func modifierDisplayNames(
         for modifiers: ShortcutModifiers,
         exactModifierKeyCodes: Set<UInt16>?
@@ -455,6 +499,13 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         var names: [String] = []
 
         for spec in modifierDisplaySpecs {
+            let exactKeyCodes = Set(spec.exactDisplayNames.map(\.0))
+            let matchingExactKeyCodes = normalizedExactModifierKeyCodes.intersection(exactKeyCodes)
+            if matchingExactKeyCodes.count == exactKeyCodes.count {
+                names.append(spec.genericDisplayName)
+                continue
+            }
+
             let exactNames = spec.exactDisplayNames.compactMap { keyCode, displayName in
                 normalizedExactModifierKeyCodes.contains(keyCode) ? displayName : nil
             }
@@ -469,6 +520,14 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     }
 
     private static let modifierDisplayOrder: [UInt16] = [55, 54, 59, 62, 58, 61, 56, 60, 63]
+
+    private static let modifierKeyCodeMatchSpecs: [(logicalModifier: ShortcutModifiers, keyCodes: Set<UInt16>)] = [
+        (.command, [54, 55]),
+        (.control, [59, 62]),
+        (.option, [58, 61]),
+        (.shift, [56, 60]),
+        (.function, [63])
+    ]
 
     private static let modifierDisplaySpecs: [(logicalModifier: ShortcutModifiers, genericDisplayName: String, exactDisplayNames: [(UInt16, String)])] = [
         (.command, "⌘", [(55, "⌘"), (54, "⌘ →")]),
