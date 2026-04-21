@@ -311,7 +311,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             let normalizedDimension = Self.normalizedContextScreenshotMaxDimension(contextScreenshotMaxDimension)
             if normalizedDimension != contextScreenshotMaxDimension {
                 contextScreenshotMaxDimension = normalizedDimension
-                return
             }
             UserDefaults.standard.set(contextScreenshotMaxDimension, forKey: contextScreenshotMaxDimensionStorageKey)
             rebuildContextService()
