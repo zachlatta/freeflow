@@ -2,6 +2,7 @@ import Foundation
 
 enum ShortcutInputEvent: Equatable {
     case modifierChanged(keyCode: UInt16, isDown: Bool)
+    case modifierSnapshot(Set<UInt16>)
     case keyChanged(keyCode: UInt16, isDown: Bool, isRepeat: Bool)
     case backendReset
 }
@@ -33,14 +34,16 @@ struct ShortcutInputState: Equatable {
 
         if configuration.hold.referencesPressedModifiers(
             pressedModifierKeyCodes: pressedModifierKeyCodes,
-            currentModifiers: currentModifiers
+            currentModifiers: currentModifiers,
+            permittedAdditionalExactMatchModifiers: configuration.permittedAdditionalExactMatchModifiers
         ) {
             return true
         }
 
         if configuration.toggle.referencesPressedModifiers(
             pressedModifierKeyCodes: pressedModifierKeyCodes,
-            currentModifiers: currentModifiers
+            currentModifiers: currentModifiers,
+            permittedAdditionalExactMatchModifiers: configuration.permittedAdditionalExactMatchModifiers
         ) {
             return true
         }
@@ -64,6 +67,17 @@ enum ShortcutMatcher {
         switch event {
         case .backendReset:
             return reduceBackendReset(state: state, configuration: configuration)
+
+        case .modifierSnapshot(let pressedModifierKeyCodes):
+            var nextState = state
+            nextState.pressedModifierKeyCodes = pressedModifierKeyCodes
+
+            let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
+            return ShortcutMatchResult(
+                state: nextState,
+                emittedEvents: emittedEvents,
+                consumeDecision: emittedEvents.isEmpty ? .passthrough : .consume
+            )
 
         case .modifierChanged(let keyCode, let isDown):
             let shouldConsumeBefore = shouldConsumeModifierEvent(
@@ -149,8 +163,8 @@ enum ShortcutMatcher {
         let previousHold = state.holdIsActive
         let previousToggle = state.toggleIsActive
 
-        state.holdIsActive = bindingIsActive(configuration.hold, state: state)
-        state.toggleIsActive = bindingIsActive(configuration.toggle, state: state)
+        state.holdIsActive = bindingIsActive(configuration.hold, state: state, configuration: configuration)
+        state.toggleIsActive = bindingIsActive(configuration.toggle, state: state, configuration: configuration)
 
         return emitChanges(
             previousHold: previousHold,
@@ -189,12 +203,17 @@ enum ShortcutMatcher {
         return orderedActivations + orderedDeactivations
     }
 
-    private static func bindingIsActive(_ binding: ShortcutBinding, state: ShortcutInputState) -> Bool {
+    private static func bindingIsActive(
+        _ binding: ShortcutBinding,
+        state: ShortcutInputState,
+        configuration: ShortcutConfiguration
+    ) -> Bool {
         guard !binding.isDisabled else { return false }
         let activeModifiers = state.currentModifiers
         guard binding.modifiersAreActive(
             pressedModifierKeyCodes: state.pressedModifierKeyCodes,
-            currentModifiers: activeModifiers
+            currentModifiers: activeModifiers,
+            permittedAdditionalExactMatchModifiers: configuration.permittedAdditionalExactMatchModifiers
         ) else {
             return false
         }
@@ -215,7 +234,7 @@ enum ShortcutMatcher {
         configuration: ShortcutConfiguration
     ) -> Bool {
         relevantKeyBindings(for: keyCode, configuration: configuration).contains {
-            bindingIsActive($0, state: state)
+            bindingIsActive($0, state: state, configuration: configuration)
         }
     }
 
@@ -225,7 +244,7 @@ enum ShortcutMatcher {
         configuration: ShortcutConfiguration
     ) -> Bool {
         relevantModifierBindings(for: keyCode, configuration: configuration).contains {
-            bindingIsActive($0, state: state)
+            bindingIsActive($0, state: state, configuration: configuration)
         }
     }
 
@@ -264,7 +283,8 @@ enum ShortcutMatcher {
 private extension ShortcutBinding {
     func modifiersAreActive(
         pressedModifierKeyCodes: Set<UInt16>,
-        currentModifiers: ShortcutModifiers
+        currentModifiers: ShortcutModifiers,
+        permittedAdditionalExactMatchModifiers: ShortcutModifiers
     ) -> Bool {
         guard currentModifiers.isSuperset(of: modifiers) else {
             return false
@@ -274,16 +294,41 @@ private extension ShortcutBinding {
             return true
         }
 
-        return pressedModifierKeyCodes == exactModifierKeyCodes
+        if pressedModifierKeyCodes == exactModifierKeyCodes {
+            return true
+        }
+
+        guard !permittedAdditionalExactMatchModifiers.isEmpty else {
+            return false
+        }
+
+        let additionalModifierKeyCodes = ShortcutBinding.matchingModifierKeyCodes(
+            for: permittedAdditionalExactMatchModifiers
+        )
+        let extraPressedModifierKeyCodes = pressedModifierKeyCodes.subtracting(exactModifierKeyCodes)
+        guard !extraPressedModifierKeyCodes.isEmpty else {
+            return false
+        }
+
+        return extraPressedModifierKeyCodes.isSubset(of: additionalModifierKeyCodes)
     }
 
     func referencesPressedModifiers(
         pressedModifierKeyCodes: Set<UInt16>,
-        currentModifiers: ShortcutModifiers
+        currentModifiers: ShortcutModifiers,
+        permittedAdditionalExactMatchModifiers: ShortcutModifiers
     ) -> Bool {
         if let exactModifierKeyCodes = exactModifierKeyCodes {
             if !exactModifierKeyCodes.isDisjoint(with: pressedModifierKeyCodes) {
                 return true
+            }
+            if !permittedAdditionalExactMatchModifiers.isEmpty {
+                let additionalModifierKeyCodes = ShortcutBinding.matchingModifierKeyCodes(
+                    for: permittedAdditionalExactMatchModifiers
+                )
+                if !additionalModifierKeyCodes.isDisjoint(with: pressedModifierKeyCodes) {
+                    return true
+                }
             }
         } else if !modifiers.isDisjoint(with: currentModifiers) {
             return true

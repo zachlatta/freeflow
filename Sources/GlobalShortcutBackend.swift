@@ -145,11 +145,23 @@ final class GlobalShortcutBackend {
         }
 
         guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return false }
-        return onInputEvent?(.keyChanged(keyCode: event.keyCode, isDown: true, isRepeat: event.isARepeat)) == .consume
+        let snapshotDecision = onInputEvent?(
+            .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(for: event))
+        ) ?? .passthrough
+        let keyDecision = onInputEvent?(
+            .keyChanged(keyCode: event.keyCode, isDown: true, isRepeat: event.isARepeat)
+        ) ?? .passthrough
+        return snapshotDecision == .consume || keyDecision == .consume
     }
 
     private func handleKeyUp(_ event: NSEvent) -> Bool {
         guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return false }
-        return onInputEvent?(.keyChanged(keyCode: event.keyCode, isDown: false, isRepeat: false)) == .consume
+        let snapshotDecision = onInputEvent?(
+            .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(for: event))
+        ) ?? .passthrough
+        let keyDecision = onInputEvent?(
+            .keyChanged(keyCode: event.keyCode, isDown: false, isRepeat: false)
+        ) ?? .passthrough
+        return snapshotDecision == .consume || keyDecision == .consume
     }
 }

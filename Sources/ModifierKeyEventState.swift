@@ -9,6 +9,15 @@ enum ModifierKeyEventState {
         return event.modifierFlags.contains(mappedFlag)
     }
 
+    static func pressedModifierKeyCodes(for event: NSEvent) -> Set<UInt16> {
+        ShortcutBinding.modifierKeyCodes.filter { keyCode in
+            guard let mappedFlag = mappedFlag(for: keyCode) else {
+                return false
+            }
+            return event.modifierFlags.contains(mappedFlag)
+        }
+    }
+
     private static func mappedFlag(for keyCode: UInt16) -> NSEvent.ModifierFlags? {
         switch keyCode {
         case 54:

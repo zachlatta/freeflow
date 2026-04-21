@@ -74,6 +74,17 @@ enum ShortcutEvent: Equatable {
 struct ShortcutConfiguration: Equatable {
     let hold: ShortcutBinding
     let toggle: ShortcutBinding
+    let permittedAdditionalExactMatchModifiers: ShortcutModifiers
+
+    init(
+        hold: ShortcutBinding,
+        toggle: ShortcutBinding,
+        permittedAdditionalExactMatchModifiers: ShortcutModifiers = []
+    ) {
+        self.hold = hold
+        self.toggle = toggle
+        self.permittedAdditionalExactMatchModifiers = permittedAdditionalExactMatchModifiers
+    }
 
     static let disabled = ShortcutConfiguration(hold: .disabled, toggle: .disabled)
 }
@@ -376,6 +387,12 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         if modifiers.contains(.shift) { keyCodes.insert(56) }
         if modifiers.contains(.function) { keyCodes.insert(63) }
         return keyCodes
+    }
+
+    static func matchingModifierKeyCodes(for modifiers: ShortcutModifiers) -> Set<UInt16> {
+        modifierKeyCodes.filter { keyCode in
+            logicalModifier(forKeyCode: keyCode).map(modifiers.contains) == true
+        }
     }
 
     static func logicalModifierDisplayLabel(for keyCode: UInt16) -> String {
