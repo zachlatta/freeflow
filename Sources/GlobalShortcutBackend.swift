@@ -20,6 +20,7 @@ enum GlobalShortcutBackendError: LocalizedError {
 final class GlobalShortcutBackend {
     private var eventTap: CFMachPort?
     private var eventTapRunLoopSource: CFRunLoopSource?
+    private var fnKeyIsDown = false
 
     var onInputEvent: ((ShortcutInputEvent) -> ShortcutConsumeDecision)?
     var onEscapeKeyPressed: (() -> Bool)?
@@ -93,6 +94,7 @@ final class GlobalShortcutBackend {
     }
 
     private func notifyBackendReset() {
+        fnKeyIsDown = false
         _ = onInputEvent?(.backendReset)
     }
 
@@ -135,6 +137,10 @@ final class GlobalShortcutBackend {
             return false
         }
 
+        if event.keyCode == ModifierKeyEventState.fnKeyCode {
+            fnKeyIsDown = isDown
+        }
+
         return onInputEvent?(.modifierChanged(keyCode: event.keyCode, isDown: isDown)) == .consume
     }
 
@@ -146,7 +152,10 @@ final class GlobalShortcutBackend {
 
         guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return false }
         let snapshotDecision = onInputEvent?(
-            .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(for: event))
+            .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(
+                for: event,
+                trustedFunctionKeyIsDown: fnKeyIsDown
+            ))
         ) ?? .passthrough
         let keyDecision = onInputEvent?(
             .keyChanged(keyCode: event.keyCode, isDown: true, isRepeat: event.isARepeat)
@@ -157,7 +166,10 @@ final class GlobalShortcutBackend {
     private func handleKeyUp(_ event: NSEvent) -> Bool {
         guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else { return false }
         let snapshotDecision = onInputEvent?(
-            .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(for: event))
+            .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(
+                for: event,
+                trustedFunctionKeyIsDown: fnKeyIsDown
+            ))
         ) ?? .passthrough
         let keyDecision = onInputEvent?(
             .keyChanged(keyCode: event.keyCode, isDown: false, isRepeat: false)

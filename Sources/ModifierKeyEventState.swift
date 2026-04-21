@@ -9,14 +9,27 @@ enum ModifierKeyEventState {
         return event.modifierFlags.contains(mappedFlag)
     }
 
-    static func pressedModifierKeyCodes(for event: NSEvent) -> Set<UInt16> {
+    static func pressedModifierKeyCodes(
+        for event: NSEvent,
+        trustedFunctionKeyIsDown: Bool? = nil
+    ) -> Set<UInt16> {
         ShortcutBinding.modifierKeyCodes.filter { keyCode in
+            // macOS sets NSEvent.ModifierFlags.function for arrow keys, F-keys,
+            // and navigation keys (Home/End/Page Up/Page Down/Forward Delete)
+            // regardless of whether the physical Fn key is held. When the caller
+            // can provide an authoritative Fn-down state (tracked from
+            // flagsChanged events), prefer it over the unreliable event flag.
+            if keyCode == fnKeyCode, let trustedFunctionKeyIsDown {
+                return trustedFunctionKeyIsDown
+            }
             guard let mappedFlag = mappedFlag(for: keyCode) else {
                 return false
             }
             return event.modifierFlags.contains(mappedFlag)
         }
     }
+
+    static let fnKeyCode: UInt16 = 63
 
     private static func mappedFlag(for keyCode: UInt16) -> NSEvent.ModifierFlags? {
         switch keyCode {

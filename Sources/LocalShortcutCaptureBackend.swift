@@ -53,7 +53,11 @@ final class LocalShortcutCaptureBackend {
 
     private func handleKeyDown(_ event: NSEvent) {
         if !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) {
-            onInputEvent?(.modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(for: event)))
+            let trustedFn = pressedModifierKeyCodes.contains(ModifierKeyEventState.fnKeyCode)
+            onInputEvent?(.modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(
+                for: event,
+                trustedFunctionKeyIsDown: trustedFn
+            )))
             onInputEvent?(.keyChanged(keyCode: event.keyCode, isDown: true, isRepeat: event.isARepeat))
         }
         onKeyDownEvent?(event)
