@@ -487,9 +487,6 @@ struct GeneralSettingsView: View {
                 SettingsCard("Updates", icon: "arrow.triangle.2.circlepath") {
                     updatesSection
                 }
-                SettingsCard("Build", icon: "info.circle.fill") {
-                    buildInfoSection
-                }
                 SettingsCard("API Key", icon: "key.fill") {
                     apiKeySection
                 }
@@ -513,6 +510,9 @@ struct GeneralSettingsView: View {
                 }
                 SettingsCard("Permissions", icon: "lock.shield.fill") {
                     permissionsSection
+                }
+                SettingsCard("Build", icon: "info.circle.fill") {
+                    buildInfoSection
                 }
             }
             .padding(24)
