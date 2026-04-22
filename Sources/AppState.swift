@@ -189,7 +189,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let commandModeStyleStorageKey = "command_mode_style"
     private let commandModeManualModifierStorageKey = "command_mode_manual_modifier"
     private let transcribingIndicatorDelay: TimeInterval = 0.25
-    private let clipboardRestoreDelay: TimeInterval = 0.15
+    private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
+    private let clipboardRestoreDelay: TimeInterval = 1.0
     let maxPipelineHistoryCount = 20
     static let defaultContextScreenshotMaxDimension = Int(AppContextService.defaultScreenshotMaxDimension)
     static let contextScreenshotDimensionOptions = [1024, 768, 640, 512]
@@ -2364,6 +2365,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func restoreClipboardIfNeeded(_ pendingRestore: PendingClipboardRestore?) {
         guard let pendingRestore else { return }
 
+        // Some apps consume Cmd-V asynchronously, so restoring too quickly can paste
+        // the pre-dictation clipboard instead of the transcript.
         DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
             let pasteboard = NSPasteboard.general
             guard pasteboard.changeCount == pendingRestore.expectedChangeCount else { return }
@@ -2380,7 +2383,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + pasteAfterShortcutReleaseDelay) { [weak self] in
             self?.pasteAtCursor()
             completion?()
         }
