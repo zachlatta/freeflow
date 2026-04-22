@@ -893,6 +893,9 @@ struct GeneralSettingsView: View {
                 }
             }
         }
+        .onChange(of: appState.alertSoundsEnabled) { enabled in
+            if !enabled { showMutedHint = false }
+        }
     }
 
     // MARK: Custom Vocabulary
