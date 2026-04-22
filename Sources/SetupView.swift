@@ -1112,8 +1112,7 @@ struct SetupView: View {
     }
 
     func requestAccessibility() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
+        appState.openAccessibilitySettings()
     }
 
     func startScreenRecordingPolling() {
