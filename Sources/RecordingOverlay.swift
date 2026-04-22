@@ -341,7 +341,7 @@ struct WaveformView: View {
     }
 
     private func barAmplitude(for index: Int, pulseTime: TimeInterval?) -> CGFloat {
-        let level = CGFloat(audioLevel)
+        let level = CGFloat(max(audioLevel, 0))
         let baseAmplitude = min(level * Self.multipliers[index], 1.0)
 
         guard let pulseTime else { return baseAmplitude }
