@@ -861,7 +861,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     customSystemPrompt: capturedCustomSystemPrompt
                 )
                 finalTranscript = result.finalTranscript
-                processingStatus = result.outcome.statusMessage(isRetry: true)
+                processingStatus = Self.statusMessage(
+                    for: result.outcome,
+                    parsedTranscript: parsedTranscript,
+                    isRetry: true
+                )
                 postProcessingPrompt = result.prompt
 
                 await MainActor.run {
@@ -1853,6 +1857,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
     }
 
+    private static func statusMessage(
+        for outcome: TranscriptProcessingOutcome,
+        parsedTranscript: TranscriptCommandParsingResult,
+        isRetry: Bool = false
+    ) -> String {
+        let status = outcome.statusMessage(isRetry: isRetry)
+        guard parsedTranscript.shouldPressEnterAfterPaste else { return status }
+        return "\(status); detected press enter command"
+    }
+
     func playAlertSound(named name: String) {
         guard alertSoundsEnabled else { return }
 
@@ -2058,7 +2072,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             ?? "available (\(appContext.screenshotMimeType ?? "image"))"
                         let trimmedRawTranscript = parsedTranscript.transcript
                         let trimmedFinalTranscript = result.finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let processingStatus = result.outcome.statusMessage()
+                        let processingStatus = Self.statusMessage(
+                            for: result.outcome,
+                            parsedTranscript: parsedTranscript
+                        )
                         self.lastPostProcessingPrompt = result.prompt
                         self.lastRawTranscript = trimmedRawTranscript
                         self.lastPostProcessedTranscript = trimmedFinalTranscript
