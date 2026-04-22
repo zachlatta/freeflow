@@ -48,6 +48,8 @@ struct ProviderSettingsFields: View {
     @FocusState private var isEditingPostProcessingModel: Bool
     @FocusState private var isEditingPostProcessingFallbackModel: Bool
     @FocusState private var isEditingContextModel: Bool
+    @FocusState private var transcriptionAPIURLFocused: Bool
+    @FocusState private var transcriptionAPIKeyFocused: Bool
     @State private var transcriptionModelDraft: String = ""
     @State private var postProcessingModelDraft: String = ""
     @State private var postProcessingFallbackModelDraft: String = ""
@@ -88,6 +90,20 @@ struct ProviderSettingsFields: View {
         contextModelDraft = trimmed
         guard appState.contextModel != trimmed else { return }
         appState.contextModel = trimmed
+    }
+
+    private func commitTranscriptionAPIURL() {
+        let trimmed = transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        transcriptionAPIURLInput = trimmed
+        guard appState.transcriptionAPIURL != trimmed else { return }
+        appState.transcriptionAPIURL = trimmed
+    }
+
+    private func commitTranscriptionAPIKey() {
+        let trimmed = transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        transcriptionAPIKeyInput = trimmed
+        guard appState.transcriptionAPIKey != trimmed else { return }
+        appState.transcriptionAPIKey = trimmed
     }
 
     var body: some View {
@@ -237,8 +253,14 @@ struct ProviderSettingsFields: View {
                     TextField("Uses API Base URL when empty", text: $transcriptionAPIURLInput)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
-                        .onChange(of: transcriptionAPIURLInput) { newValue in
-                            appState.transcriptionAPIURL = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .focused($transcriptionAPIURLFocused)
+                        .onSubmit {
+                            commitTranscriptionAPIURL()
+                        }
+                        .onChange(of: transcriptionAPIURLFocused) { isFocused in
+                            if !isFocused {
+                                commitTranscriptionAPIURL()
+                            }
                         }
                     if !transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button("Clear") {
@@ -257,8 +279,14 @@ struct ProviderSettingsFields: View {
                     SecureField("Uses API Key when empty", text: $transcriptionAPIKeyInput)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
-                        .onChange(of: transcriptionAPIKeyInput) { newValue in
-                            appState.transcriptionAPIKey = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        .focused($transcriptionAPIKeyFocused)
+                        .onSubmit {
+                            commitTranscriptionAPIKey()
+                        }
+                        .onChange(of: transcriptionAPIKeyFocused) { isFocused in
+                            if !isFocused {
+                                commitTranscriptionAPIKey()
+                            }
                         }
                     if !transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button("Clear") {

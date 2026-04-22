@@ -1966,7 +1966,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if let realtimeService {
             do {
                 return try await realtimeService.commitAndAwaitFinal()
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
+                try Task.checkCancellation()
                 return try await fileService.transcribe(fileURL: fileURL)
             }
         }
@@ -2362,6 +2365,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             hasShownScreenshotPermissionAlert = true
 
             // Permission errors are fatal — stop recording
+            tearDownRealtimeService()
             audioRecorder.cancelRecording()
             audioLevelCancellable?.cancel()
             audioLevelCancellable = nil
