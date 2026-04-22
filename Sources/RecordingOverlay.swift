@@ -305,15 +305,29 @@ struct WaveformBar: View {
 
 struct WaveformView: View {
     let audioLevel: Float
+    var showsActivityPulse = false
 
     private static let barCount = 9
     private static let multipliers: [CGFloat] = [0.35, 0.55, 0.75, 0.9, 1.0, 0.9, 0.75, 0.55, 0.35]
     private static let centerIndex = CGFloat((barCount - 1) / 2)
 
     var body: some View {
+        Group {
+            if showsActivityPulse {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+                    waveformBars(pulseTime: context.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                waveformBars(pulseTime: nil)
+            }
+        }
+        .frame(height: 20)
+    }
+
+    private func waveformBars(pulseTime: TimeInterval?) -> some View {
         HStack(spacing: 2.5) {
             ForEach(0..<Self.barCount, id: \.self) { index in
-                WaveformBar(amplitude: barAmplitude(for: index))
+                WaveformBar(amplitude: barAmplitude(for: index, pulseTime: pulseTime))
                     .animation(
                         .spring(
                             response: barResponse(for: index),
@@ -324,12 +338,21 @@ struct WaveformView: View {
                     )
             }
         }
-        .frame(height: 20)
     }
 
-    private func barAmplitude(for index: Int) -> CGFloat {
-        let level = CGFloat(audioLevel)
-        return min(level * Self.multipliers[index], 1.0)
+    private func barAmplitude(for index: Int, pulseTime: TimeInterval?) -> CGFloat {
+        let level = CGFloat(max(audioLevel, 0))
+        let baseAmplitude = min(level * Self.multipliers[index], 1.0)
+
+        guard let pulseTime else { return baseAmplitude }
+
+        let travelingWave = CGFloat(0.5 + 0.5 * sin((pulseTime * 6.2) - Double(index) * 0.78))
+        let shimmer = CGFloat(0.5 + 0.5 * sin((pulseTime * 3.1) + Double(index) * 0.5))
+        let pulse = travelingWave * 0.22 + shimmer * 0.06
+
+        let saturationRelief = baseAmplitude * (0.74 + pulse)
+        let quietPulse = (1.0 - baseAmplitude) * (0.04 + pulse * 0.28)
+        return min(saturationRelief + quietPulse, 1.0)
     }
 
     private func barResponse(for index: Int) -> Double {
@@ -425,7 +448,10 @@ struct RecordingOverlayView: View {
                             InitializingDotsView()
                                 .transition(.opacity)
                         } else if showsLiveRecordingContent {
-                            WaveformView(audioLevel: state.audioLevel)
+                            WaveformView(
+                                audioLevel: state.audioLevel,
+                                showsActivityPulse: state.phase == .recording
+                            )
                                 .transition(.opacity)
                         } else {
                             ProcessingWaveformView()
