@@ -41,7 +41,7 @@ final class RealtimeTranscriptionService {
     private var terminalError: Error?
     private var serverEventCount: Int = 0
     private var commitEventCount: Int?
-    private var completionEventCount: Int?
+    private var postCommitCompleted: Bool = false
     private var currentItemID: String?
 
     /// Published on the main queue as partial transcript updates. The service
@@ -132,7 +132,7 @@ final class RealtimeTranscriptionService {
             if commitSent { return true }
             commitSent = true
             commitEventCount = serverEventCount
-            completionEventCount = nil
+            postCommitCompleted = false
             return false
         }
         if !alreadyCommitted {
@@ -197,10 +197,10 @@ final class RealtimeTranscriptionService {
             closed = true
             if let cont = finalContinuation {
                 finalContinuation = nil
-                if finalText.isEmpty {
-                    cont.resume(throwing: RealtimeTranscriptionError.closedBeforeFinal)
-                } else {
+                if postCommitCompleted {
                     cont.resume(returning: finalText)
+                } else {
+                    cont.resume(throwing: RealtimeTranscriptionError.closedBeforeFinal)
                 }
             }
         }
@@ -230,7 +230,9 @@ final class RealtimeTranscriptionService {
             resumeIfReadyAfterCommit()
         case "conversation.item.input_audio_transcription.completed":
             stateQueue.sync {
-                completionEventCount = serverEventCount
+                if let commitEventCount, serverEventCount > commitEventCount {
+                    postCommitCompleted = true
+                }
             }
             if let itemID = json["item_id"] as? String {
                 stateQueue.sync {
@@ -400,19 +402,10 @@ final class RealtimeTranscriptionService {
 
     private func readyCommittedTranscriptLocked() -> String? {
         guard commitSent,
-              let commitEventCount,
-              partialText.isEmpty else {
+              partialText.isEmpty,
+              postCommitCompleted else {
             return nil
         }
-
-        if !finalText.isEmpty, serverEventCount > commitEventCount {
-            return finalText
-        }
-
-        if let completionEventCount, completionEventCount > commitEventCount {
-            return finalText
-        }
-
-        return nil
+        return finalText
     }
 }

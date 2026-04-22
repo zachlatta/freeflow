@@ -2026,6 +2026,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return
             }
 
+            guard self.isTranscribing else {
+                self.tearDownRealtimeService()
+                self.audioRecorder.cleanup()
+                self.refreshAvailableMicrophonesIfNeeded()
+                return
+            }
+
             let savedAudioFile = Self.saveAudioFile(from: fileURL)
             let transcriptionFileURL = savedAudioFile?.fileURL ?? fileURL
             self.transcribingAudioFileName = savedAudioFile?.fileName
@@ -2056,6 +2063,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.realtimeService = nil
             self.audioRecorder.onPCM16Samples = nil
             self.transcriptionTask?.cancel()
+            guard self.isTranscribing else {
+                self.transcribingIndicatorTask?.cancel()
+                self.transcribingIndicatorTask = nil
+                if let savedAudioFile {
+                    Self.deleteAudioFile(savedAudioFile.fileName)
+                }
+                self.transcribingAudioFileName = nil
+                activeRealtime?.cancel()
+                self.audioRecorder.cleanup()
+                self.refreshAvailableMicrophonesIfNeeded()
+                return
+            }
             self.transcriptionTask = Task {
                 defer {
                     activeRealtime?.cancel()
