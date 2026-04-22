@@ -321,6 +321,7 @@ struct GeneralSettingsView: View {
     @State private var keyValidationSuccess = false
     @State private var customVocabularyInput: String = ""
     @State private var micPermissionGranted = false
+    @State private var showMutedHint = false
     @StateObject private var githubCache = GitHubMetadataCache.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     private let freeflowRepoURL = URL(string: "https://github.com/zachlatta/freeflow")!
@@ -868,11 +869,29 @@ struct GeneralSettingsView: View {
             .disabled(!appState.alertSoundsEnabled)
             .opacity(appState.alertSoundsEnabled ? 1 : 0.5)
 
-            Button("Preview") {
-                appState.playAlertSound(named: "Tink")
+            HStack(spacing: 8) {
+                Button("Preview") {
+                    let muted = SystemAudioStatus.isDefaultOutputMuted()
+                    let volume = SystemAudioStatus.defaultOutputVolume()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showMutedHint = muted || (volume ?? 1) < 0.10
+                    }
+                    appState.playAlertSound(named: "Tink")
+                }
+                .font(.caption)
+                .disabled(!appState.alertSoundsEnabled)
+
+                if showMutedHint {
+                    HStack(spacing: 4) {
+                        Image(systemName: "speaker.slash.fill")
+                            .foregroundStyle(.orange)
+                        Text("System volume is muted or very low. Unmute to hear the preview.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                    .transition(.opacity)
+                }
             }
-            .font(.caption)
-            .disabled(!appState.alertSoundsEnabled)
         }
     }
 
