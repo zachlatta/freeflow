@@ -903,6 +903,15 @@ struct GeneralSettingsView: View {
             Text("FreeFlow will temporarily place the transcript on your clipboard to paste it, then restore whatever was there before. If you copy something else before the restore happens, FreeFlow leaves it alone.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Divider()
+                .padding(.vertical, 2)
+
+            Toggle("Say \"press enter\" to submit after paste", isOn: $appState.isPressEnterVoiceCommandEnabled)
+
+            Text("When the transcription ends with \"press enter\", FreeFlow removes those words before cleanup, pastes the remaining transcript, then presses Return.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
