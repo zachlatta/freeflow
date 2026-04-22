@@ -1,67 +1,5 @@
 import AppKit
 
-struct ShortcutModifiers: OptionSet, Hashable, Codable {
-    let rawValue: Int
-
-    static let command = ShortcutModifiers(rawValue: 1 << 0)
-    static let control = ShortcutModifiers(rawValue: 1 << 1)
-    static let option = ShortcutModifiers(rawValue: 1 << 2)
-    static let shift = ShortcutModifiers(rawValue: 1 << 3)
-    static let function = ShortcutModifiers(rawValue: 1 << 4)
-
-    init(rawValue: Int) {
-        self.rawValue = rawValue
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        self.init(rawValue: try container.decode(Int.self))
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(rawValue)
-    }
-
-    init(eventFlags: NSEvent.ModifierFlags) {
-        var value: ShortcutModifiers = []
-        if eventFlags.contains(.command) { value.insert(.command) }
-        if eventFlags.contains(.control) { value.insert(.control) }
-        if eventFlags.contains(.option) { value.insert(.option) }
-        if eventFlags.contains(.shift) { value.insert(.shift) }
-        if eventFlags.contains(.function) { value.insert(.function) }
-        self = value
-    }
-
-    var orderedDisplayNames: [String] {
-        var names: [String] = []
-        if contains(.command) { names.append("⌘") }
-        if contains(.control) { names.append("⌃") }
-        if contains(.option) { names.append("⌥") }
-        if contains(.shift) { names.append("⇧") }
-        if contains(.function) { names.append("fn") }
-        return names
-    }
-}
-
-enum ShortcutBindingKind: String, Codable {
-    case disabled
-    case key
-    case modifierKey
-}
-
-enum RecordingTriggerMode: String, Codable {
-    case hold
-    case toggle
-
-    var badgeTitle: String {
-        switch self {
-        case .hold: return "Hold"
-        case .toggle: return "Tap"
-        }
-    }
-}
-
 enum CommandModeStyle: String, CaseIterable, Codable, Identifiable {
     case automatic
     case manual
@@ -103,147 +41,35 @@ enum CommandModeManualModifier: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-enum ShortcutRole {
-    case hold
-    case toggle
-
-    var title: String {
-        switch self {
-        case .hold: return "Hold to Talk"
-        case .toggle: return "Tap to Toggle"
-        }
+extension ShortcutModifiers {
+    init(eventFlags: NSEvent.ModifierFlags) {
+        var value: ShortcutModifiers = []
+        if eventFlags.contains(.command) { value.insert(.command) }
+        if eventFlags.contains(.control) { value.insert(.control) }
+        if eventFlags.contains(.option) { value.insert(.option) }
+        if eventFlags.contains(.shift) { value.insert(.shift) }
+        if eventFlags.contains(.function) { value.insert(.function) }
+        self = value
     }
 }
 
-enum ShortcutEvent {
-    case holdActivated
-    case holdDeactivated
-    case toggleActivated
-    case toggleDeactivated
-}
-
-struct ShortcutConfiguration {
-    let hold: ShortcutBinding
-    let toggle: ShortcutBinding
-}
-
-enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
-    case fnKey = "fn"
-    case rightOption = "rightOption"
-    case f5 = "f5"
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .fnKey: return "Fn (Globe) Key"
-        case .rightOption: return "Right Option Key"
-        case .f5: return "F5 Key"
-        }
-    }
-
-    var binding: ShortcutBinding {
-        switch self {
-        case .fnKey:
-            return ShortcutBinding(
-                keyCode: 63,
-                keyDisplay: "Fn",
-                modifiers: [],
-                kind: .modifierKey,
-                preset: self
-            )
-        case .rightOption:
-            return ShortcutBinding(
-                keyCode: 61,
-                keyDisplay: "Right Option",
-                modifiers: [],
-                kind: .modifierKey,
-                preset: self
-            )
-        case .f5:
-            return ShortcutBinding(
-                keyCode: 96,
-                keyDisplay: "F5",
-                modifiers: [],
-                kind: .key,
-                preset: self
-            )
-        }
-    }
-}
-
-struct ShortcutBinding: Codable, Hashable, Identifiable {
-    let keyCode: UInt16
-    let keyDisplay: String
-    let modifiers: ShortcutModifiers
-    let kind: ShortcutBindingKind
-    let preset: ShortcutPreset?
-
-    var id: String {
-        "\(kind.rawValue):\(keyCode):\(modifiers.rawValue):\(preset?.rawValue ?? "custom")"
-    }
-
-    var displayName: String {
-        if isDisabled { return "Disabled" }
-        let parts = modifiers.orderedDisplayNames + [keyDisplay]
-        return parts.joined(separator: " + ")
-    }
-
-    var selectionTitle: String {
-        preset?.title ?? displayName
-    }
-
-    var isCustom: Bool {
-        preset == nil && !isDisabled
-    }
-
-    var isDisabled: Bool {
-        kind == .disabled
-    }
-
-    var specificityScore: Int {
-        modifiers.orderedDisplayNames.count
-    }
-
-    var usesFnKey: Bool {
-        guard !isDisabled else { return false }
-        return keyCode == 63 || modifiers.contains(.function)
-    }
-
-    func withAddedModifiers(_ extraModifiers: ShortcutModifiers) -> ShortcutBinding {
-        guard !isDisabled else { return self }
-        return ShortcutBinding(
-            keyCode: keyCode,
-            keyDisplay: keyDisplay,
-            modifiers: modifiers.union(extraModifiers),
-            kind: kind,
-            preset: preset
-        )
-    }
-
-    static let disabled = ShortcutBinding(
-        keyCode: 0,
-        keyDisplay: "Disabled",
-        modifiers: [],
-        kind: .disabled,
-        preset: nil
-    )
-    static let defaultHold = ShortcutPreset.fnKey.binding
-    static let defaultToggle = ShortcutPreset.fnKey.binding.withAddedModifiers(.command)
-
-    static func from(event: NSEvent) -> ShortcutBinding? {
+extension ShortcutBinding {
+    static func from(event: NSEvent, pressedModifierKeyCodes: Set<UInt16>) -> ShortcutBinding? {
         guard !event.isARepeat else { return nil }
         guard !Self.modifierKeyCodes.contains(event.keyCode) else { return nil }
 
         let label = Self.displayLabel(for: event.keyCode, event: event)
         guard !label.isEmpty else { return nil }
 
+        let exactModifierKeyCodes = Self.normalizedExactModifierKeyCodes(pressedModifierKeyCodes)
+
         return ShortcutBinding(
             keyCode: event.keyCode,
             keyDisplay: label,
-            modifiers: ShortcutModifiers(eventFlags: event.modifierFlags),
+            modifiers: Self.modifiers(for: pressedModifierKeyCodes),
             kind: .key,
-            preset: nil
+            preset: nil,
+            exactModifierKeyCodes: exactModifierKeyCodes
         )
     }
 
@@ -253,7 +79,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
         allowBareModifier: Bool = false
     ) -> ShortcutBinding? {
         guard modifierKeyCodes.contains(keyCode),
-              let primaryModifier = modifierFlag(forKeyCode: keyCode) else {
+              let primaryModifier = logicalModifier(forKeyCode: keyCode) else {
             return nil
         }
 
@@ -270,14 +96,13 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
 
         return ShortcutBinding(
             keyCode: keyCode,
-            keyDisplay: modifierDisplayLabel(for: keyCode),
+            keyDisplay: displayLabel(for: keyCode),
             modifiers: extraModifiers,
             kind: .modifierKey,
-            preset: nil
+            preset: nil,
+            exactModifierKeyCodes: normalizedExactModifierKeyCodes(pressedModifierKeyCodes)
         )
     }
-
-    static let modifierKeyCodes: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62, 63]
 
     static func displayLabel(for keyCode: UInt16, event: NSEvent? = nil) -> String {
         if let modifierName = modifierKeyNames[keyCode] {
@@ -298,37 +123,6 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
             return trimmed.uppercased()
         }
         return trimmed
-    }
-
-    private static func modifierFlag(forKeyCode keyCode: UInt16) -> ShortcutModifiers? {
-        switch keyCode {
-        case 54, 55:
-            return .command
-        case 59, 62:
-            return .control
-        case 58, 61:
-            return .option
-        case 56, 60:
-            return .shift
-        case 63:
-            return .function
-        default:
-            return nil
-        }
-    }
-
-    private static func modifiers(for pressedModifierKeyCodes: Set<UInt16>) -> ShortcutModifiers {
-        var modifiers: ShortcutModifiers = []
-        for keyCode in pressedModifierKeyCodes {
-            if let modifier = modifierFlag(forKeyCode: keyCode) {
-                modifiers.insert(modifier)
-            }
-        }
-        return modifiers
-    }
-
-    private static func modifierDisplayLabel(for keyCode: UInt16) -> String {
-        modifierKeyNames[keyCode] ?? "Modifier"
     }
 
     private static let modifierKeyNames: [UInt16: String] = [
