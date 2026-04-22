@@ -151,6 +151,15 @@ private enum SessionIntent {
         }
     }
 
+    var isManualCommand: Bool {
+        switch self {
+        case .command(invocation: .manual, _):
+            return true
+        default:
+            return false
+        }
+    }
+
     static func fromPersisted(intent: PipelineHistoryItemIntent, selectedText: String?) -> SessionIntent {
         if intent == .commandAutomatic, let selectedText {
             return .command(invocation: .automatic, selectedText: selectedText)
@@ -432,6 +441,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var isCapturingShortcut = false
     private var isAwaitingMicrophonePermission = false
     private var pendingMicrophonePermissionTriggerMode: RecordingTriggerMode?
+    private var pendingMicrophonePermissionSelectionSnapshot: AppSelectionSnapshot?
+    private var pendingMicrophonePermissionManualCommandRequested: Bool?
 
     init() {
         UserDefaults.standard.removeObject(forKey: "force_http2_transcription")
@@ -1570,12 +1581,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return false
             }
 
-            prepareForMicrophonePermissionPrompt(triggerMode: triggerMode)
+            prepareForMicrophonePermissionPrompt(
+                triggerMode: triggerMode,
+                selectionSnapshot: pendingSelectionSnapshot ?? contextService.collectSelectionSnapshot(),
+                manualCommandRequested: currentSessionIntent.isManualCommand
+            )
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 DispatchQueue.main.async {
                     guard let strongSelf = self else { return }
                     let pendingTriggerMode = strongSelf.pendingMicrophonePermissionTriggerMode
+                    let pendingSelectionSnapshot = strongSelf.pendingMicrophonePermissionSelectionSnapshot
+                    let pendingManualCommandRequested = strongSelf.pendingMicrophonePermissionManualCommandRequested
                     strongSelf.pendingMicrophonePermissionTriggerMode = nil
+                    strongSelf.pendingMicrophonePermissionSelectionSnapshot = nil
+                    strongSelf.pendingMicrophonePermissionManualCommandRequested = nil
                     strongSelf.isAwaitingMicrophonePermission = false
                     strongSelf.restartHotkeyMonitoring()
 
@@ -1583,7 +1602,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     if granted {
                         strongSelf.errorMessage = nil
                         if triggerMode == .toggle {
-                            guard strongSelf.prepareRecordingStart(triggerMode: .toggle) else { return }
+                            guard strongSelf.prepareRecordingStart(
+                                triggerMode: .toggle,
+                                selectionSnapshot: pendingSelectionSnapshot,
+                                manualCommandRequested: pendingManualCommandRequested
+                            ) else { return }
                             strongSelf.shortcutSessionController.beginManual(mode: .toggle)
                             strongSelf.beginRecording(triggerMode: .toggle)
                         } else {
@@ -1616,9 +1639,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func prepareForMicrophonePermissionPrompt(triggerMode: RecordingTriggerMode) {
+    private func prepareForMicrophonePermissionPrompt(
+        triggerMode: RecordingTriggerMode,
+        selectionSnapshot: AppSelectionSnapshot?,
+        manualCommandRequested: Bool?
+    ) {
         isAwaitingMicrophonePermission = true
         pendingMicrophonePermissionTriggerMode = triggerMode
+        pendingMicrophonePermissionSelectionSnapshot = selectionSnapshot
+        pendingMicrophonePermissionManualCommandRequested = manualCommandRequested
         hotkeyManager.stop()
         shortcutSessionController.reset()
         activeRecordingTriggerMode = nil
@@ -2206,12 +2235,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
             windowTitle: windowTitle,
             selectedText: nil,
             currentActivity: "Could not refresh app context at stop time; using text-only post-processing.",
-            contextSystemPrompt: nil,
+            contextSystemPrompt: resolvedContextSystemPrompt(),
             contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,
             screenshotError: "No app context captured before stop"
         )
+    }
+
+    private func resolvedContextSystemPrompt() -> String {
+        let trimmedPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedPrompt.isEmpty ? AppContextService.defaultContextPrompt : trimmedPrompt
     }
 
     private func focusedWindowTitle(for app: NSRunningApplication?) -> String? {

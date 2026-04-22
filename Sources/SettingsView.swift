@@ -1550,6 +1550,7 @@ struct RunLogView: View {
 // MARK: - Run Log Entry
 
 struct RunLogEntryView: View {
+    private let actionIconSize: CGFloat = 28
     let item: PipelineHistoryItem
     @EnvironmentObject var appState: AppState
     @State private var isExpanded = false
@@ -1559,6 +1560,26 @@ struct RunLogEntryView: View {
 
     private var isError: Bool {
         item.postProcessingStatus.hasPrefix("Error:")
+    }
+
+    @ViewBuilder
+    private func actionIconButton(
+        systemName: String,
+        color: Color = .secondary,
+        help: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.caption)
+                .foregroundStyle(color)
+                .frame(width: actionIconSize, height: actionIconSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .help(help)
     }
 
     var body: some View {
@@ -1586,67 +1607,63 @@ struct RunLogEntryView: View {
                                 .truncationMode(.tail)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
-                if isError && item.audioFileName != nil {
-                    Button {
-                        appState.retryTranscription(item: item)
-                    } label: {
-                        if isRetrying {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .frame(width: 28, height: 28)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
+                HStack(spacing: 4) {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            isExpanded.toggle()
                         }
+                    }) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: actionIconSize, height: actionIconSize)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(isRetrying)
-                    .help("Retry transcription")
-                }
 
-                HStack(spacing: 2) {
-                    Button {
+                    if isError && item.audioFileName != nil {
+                        Button {
+                            appState.retryTranscription(item: item)
+                        } label: {
+                            if isRetrying {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .frame(width: actionIconSize, height: actionIconSize)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .frame(width: actionIconSize, height: actionIconSize)
+                                    .contentShape(Rectangle())
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isRetrying)
+                        .help("Retry transcription")
+                    } else {
+                        Color.clear
+                            .frame(width: actionIconSize, height: actionIconSize)
+                    }
+
+                    actionIconButton(systemName: "square.and.arrow.up", help: "Export run log") {
                         TestCaseExporter.exportWithSavePanel(
                             item: item,
                             audioDirURL: AppState.audioStorageDirectory()
                         )
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, height: 28)
-                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .help("Export run log")
 
-                    Button {
+                    actionIconButton(systemName: "trash", help: "Delete this run") {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             appState.deleteHistoryEntry(id: item.id)
                         }
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, height: 28)
-                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .help("Delete this run")
                 }
-                .padding(.leading, 10)
             }
             .padding(12)
 
