@@ -794,7 +794,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         postProcessingStatus: "Error: \(error.localizedDescription)",
                         debugStatus: "Retry failed",
                         customVocabulary: item.customVocabulary,
-                        audioFileName: item.audioFileName
+                        audioFileName: item.audioFileName,
+                        contextAppName: item.contextAppName,
+                        contextBundleIdentifier: item.contextBundleIdentifier,
+                        contextWindowTitle: item.contextWindowTitle
                     )
                     do {
                         try pipelineHistoryStore.update(updatedItem)
@@ -1782,7 +1785,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             rawTranscript: trimmedRawTranscript,
                             postProcessedTranscript: trimmedFinalTranscript,
                             postProcessingPrompt: result.prompt,
-                            systemPrompt: self.customSystemPrompt,
+                            systemPrompt: Self.resolvedSystemPrompt(self.customSystemPrompt),
                             context: appContext,
                             processingStatus: processingStatus,
                             intent: sessionIntent,
@@ -1864,7 +1867,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             rawTranscript: "",
                             postProcessedTranscript: "",
                             postProcessingPrompt: "",
-                            systemPrompt: self.customSystemPrompt,
+                            systemPrompt: Self.resolvedSystemPrompt(self.customSystemPrompt),
                             context: resolvedContext,
                             processingStatus: "Error: \(error.localizedDescription)",
                             intent: sessionIntent,
@@ -1876,6 +1879,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    static func resolvedSystemPrompt(_ customSystemPrompt: String) -> String {
+        customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? PostProcessingService.defaultSystemPrompt
+            : customSystemPrompt
     }
 
     private func recordPipelineHistoryEntry(

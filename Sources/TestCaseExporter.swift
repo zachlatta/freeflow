@@ -117,6 +117,9 @@ struct TestCaseExporter {
         let json: [String: Any] = [
             "id": "case-\(timestamp)",
             "exported_at": ISO8601DateFormatter().string(from: Date()),
+            "intent": item.intent.rawValue,
+            "run_uuid": item.id.uuidString,
+            "run_timestamp": ISO8601DateFormatter().string(from: item.timestamp),
             "metadata": [
                 "app_name": item.contextAppName ?? "",
                 "bundle_identifier": item.contextBundleIdentifier ?? "",
