@@ -913,14 +913,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     func openAccessibilitySettings() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
+        let trusted = AXIsProcessTrustedWithOptions(options)
+        if !trusted {
+            openPrivacySettingsPane("Privacy_Accessibility")
+        }
     }
 
     func openMicrophoneSettings() {
-        let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
-        if let url = settingsURL {
-            NSWorkspace.shared.open(url)
-        }
+        openPrivacySettingsPane("Privacy_Microphone")
     }
 
     func requestMicrophoneAccess(completion: @escaping (Bool) -> Void) {
@@ -962,7 +962,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         // running app (unlike the legacy CGWindowListCreateImage path).
         SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: false) { [weak self] _, _ in
             DispatchQueue.main.async {
-                self?.hasScreenRecordingPermission = CGPreflightScreenCaptureAccess()
+                let granted = CGPreflightScreenCaptureAccess()
+                self?.hasScreenRecordingPermission = granted
+                if !granted {
+                    self?.openScreenCaptureSettings()
+                }
             }
         }
 
@@ -970,7 +974,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     func openScreenCaptureSettings() {
-        let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        openPrivacySettingsPane("Privacy_ScreenCapture")
+    }
+
+    private func openPrivacySettingsPane(_ pane: String) {
+        let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")
         if let url = settingsURL {
             NSWorkspace.shared.open(url)
         }
