@@ -148,9 +148,8 @@ private struct ShortcutCaptureRow: View {
     let onSelectSaved: (ShortcutBinding) -> Void
     let onCapture: (ShortcutBinding) -> Void
 
-    @State private var localKeyMonitor: Any?
-    @State private var localFlagsMonitor: Any?
-    @State private var pressedModifierKeyCodes: Set<UInt16> = []
+    @State private var captureBackend: LocalShortcutCaptureBackend?
+    @State private var captureInputState = ShortcutInputState()
     @State private var currentBinding: ShortcutBinding?
 
     var body: some View {
@@ -225,52 +224,55 @@ private struct ShortcutCaptureRow: View {
     private func startCapture() {
         stopCapture(clearCaptureState: false)
         isCapturing = true
-        pressedModifierKeyCodes.removeAll()
+        captureInputState = ShortcutInputState()
         currentBinding = nil
 
-        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
-            if ShortcutBinding.modifierKeyCodes.contains(event.keyCode) {
-                if pressedModifierKeyCodes.contains(event.keyCode) {
-                    pressedModifierKeyCodes.remove(event.keyCode)
-                } else {
-                    pressedModifierKeyCodes.insert(event.keyCode)
-                }
-            }
+        let backend = LocalShortcutCaptureBackend()
+        backend.onInputEvent = { inputEvent in
+            let result = ShortcutMatcher.reduce(
+                state: captureInputState,
+                event: inputEvent,
+                configuration: .disabled
+            )
+            captureInputState = result.state
 
+            guard case .modifierChanged(let keyCode, _) = inputEvent else { return }
             if let binding = ShortcutBinding.fromModifierKeyCode(
-                event.keyCode,
-                pressedModifierKeyCodes: pressedModifierKeyCodes,
+                keyCode,
+                pressedModifierKeyCodes: captureInputState.pressedModifierKeyCodes,
                 allowBareModifier: true
             ) {
                 currentBinding = binding
             }
-            return nil
         }
-
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        backend.onKeyDownEvent = { event in
             let isReturnKey = event.keyCode == 36 || event.keyCode == 76
             let hasPendingCapture = currentBinding != nil
 
             if isReturnKey && hasPendingCapture {
                 finishCapture()
-                return nil
+                return
             }
             if event.keyCode == 53 && hasPendingCapture {
                 finishCapture()
-                return nil
+                return
             }
 
             guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else {
-                return nil
+                return
             }
 
-            guard let binding = ShortcutBinding.from(event: event) else {
-                return nil
+            guard let binding = ShortcutBinding.from(
+                event: event,
+                pressedModifierKeyCodes: captureInputState.pressedModifierKeyCodes
+            ) else {
+                return
             }
 
             currentBinding = binding
-            return nil
         }
+        backend.start()
+        captureBackend = backend
     }
 
     private func finishCapture() {
@@ -287,15 +289,9 @@ private struct ShortcutCaptureRow: View {
     }
 
     private func stopCapture(clearCaptureState: Bool) {
-        if let monitor = localKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-            localKeyMonitor = nil
-        }
-        if let monitor = localFlagsMonitor {
-            NSEvent.removeMonitor(monitor)
-            localFlagsMonitor = nil
-        }
-        pressedModifierKeyCodes.removeAll()
+        captureBackend?.stop()
+        captureBackend = nil
+        captureInputState = ShortcutInputState()
         currentBinding = nil
         if clearCaptureState {
             isCapturing = false
