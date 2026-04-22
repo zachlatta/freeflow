@@ -1211,11 +1211,7 @@ struct SetupView: View {
 
                     Task {
                         do {
-                            let service = try TranscriptionService(
-                                apiKey: appState.apiKey,
-                                baseURL: appState.apiBaseURL,
-                                transcriptionModel: appState.transcriptionModel
-                            )
+                            let service = try appState.makeTranscriptionService()
                             let transcript = try await service.transcribe(fileURL: url)
                             await MainActor.run {
                                 testHotkeyHarness.isTranscribing = false

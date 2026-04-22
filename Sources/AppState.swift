@@ -776,6 +776,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return trimmed.isEmpty ? apiKey : trimmed
     }
 
+    func makeTranscriptionService() throws -> TranscriptionService {
+        try TranscriptionService(
+            apiKey: resolvedTranscriptionAPIKey,
+            baseURL: resolvedTranscriptionBaseURL,
+            transcriptionModel: transcriptionModel
+        )
+    }
+
     private func persistShortcut(_ binding: ShortcutBinding, key: String) {
         let normalizedBinding = binding.normalizedForStorageMigration()
         guard let data = try? JSONEncoder().encode(normalizedBinding) else { return }
@@ -881,11 +889,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         Task {
             do {
-                let transcriptionService = try TranscriptionService(
-                    apiKey: resolvedTranscriptionAPIKey,
-                    baseURL: resolvedTranscriptionBaseURL,
-                    transcriptionModel: transcriptionModel
-                )
+                let transcriptionService = try makeTranscriptionService()
                 let rawTranscript = try await transcriptionService.transcribe(fileURL: audioURL)
 
                 let finalTranscript: String
@@ -1965,7 +1969,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     ) async throws -> String {
         if let realtimeService {
             do {
-                return try await realtimeService.commitAndAwaitFinal()
+                try Task.checkCancellation()
+                return try await withTaskCancellationHandler {
+                    try await realtimeService.commitAndAwaitFinal()
+                } onCancel: {
+                    realtimeService.cancel()
+                }
             } catch is CancellationError {
                 throw CancellationError()
             } catch {
@@ -2052,11 +2061,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     activeRealtime?.cancel()
                 }
                 do {
-                    let transcriptionService = try TranscriptionService(
-                        apiKey: self.resolvedTranscriptionAPIKey,
-                        baseURL: self.resolvedTranscriptionBaseURL,
-                        transcriptionModel: self.transcriptionModel
-                    )
+                    let transcriptionService = try self.makeTranscriptionService()
                     async let transcript = Self.resolveRawTranscript(
                         realtimeService: activeRealtime,
                         fileService: transcriptionService,

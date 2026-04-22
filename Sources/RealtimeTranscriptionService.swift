@@ -38,6 +38,7 @@ final class RealtimeTranscriptionService {
     private var finalContinuation: CheckedContinuation<String, Error>?
     private var commitSent: Bool = false
     private var closed: Bool = false
+    private var terminalError: Error?
     private var serverEventCount: Int = 0
     private var commitEventCount: Int?
     private var completionEventCount: Int?
@@ -141,6 +142,10 @@ final class RealtimeTranscriptionService {
         return try await withCheckedThrowingContinuation { continuation in
             var immediateResult: Result<String, Error>?
             stateQueue.sync {
+                if let terminalError {
+                    immediateResult = .failure(terminalError)
+                    return
+                }
                 if closed {
                     immediateResult = .failure(RealtimeTranscriptionError.closedBeforeFinal)
                     return
@@ -249,10 +254,13 @@ final class RealtimeTranscriptionService {
             let code = errObj?["code"] as? String ?? "unknown"
             let message = errObj?["message"] as? String ?? "unknown realtime error"
             os_log(.error, log: realtimeLog, "server error [%{public}@]: %{public}@", code, message)
+            let error = RealtimeTranscriptionError.serverError(code: code, message: message)
             stateQueue.sync {
+                terminalError = error
+                closed = true
                 if let cont = finalContinuation {
                     finalContinuation = nil
-                    cont.resume(throwing: RealtimeTranscriptionError.serverError(code: code, message: message))
+                    cont.resume(throwing: error)
                 }
             }
         default:
