@@ -322,9 +322,46 @@ struct GeneralSettingsView: View {
     @State private var customVocabularyInput: String = ""
     @State private var micPermissionGranted = false
     @State private var showMutedHint = false
+    @State private var copiedBuildInfo = false
+    @State private var copiedBuildInfoResetWorkItem: DispatchWorkItem?
     @StateObject private var githubCache = GitHubMetadataCache.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     private let freeflowRepoURL = URL(string: "https://github.com/zachlatta/freeflow")!
+
+    private var appDisplayName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+            ?? "FreeFlow"
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    }
+
+    private var appBuildNumber: String {
+        Bundle.main.object(forInfoDictionaryKey: "FreeFlowBuildTag") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            ?? "unknown"
+    }
+
+    private var macOSVersion: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+    }
+
+    private var appArchitecture: String {
+        #if arch(arm64)
+        return "arm64"
+        #elseif arch(x86_64)
+        return "x86_64"
+        #else
+        return "unknown"
+        #endif
+    }
+
+    private var buildDiagnosticsText: String {
+        "\(appDisplayName) \(appVersion) (\(appBuildNumber))\nmacOS \(macOSVersion) (\(appArchitecture))"
+    }
 
     var body: some View {
         ScrollView {
@@ -339,7 +376,7 @@ struct GeneralSettingsView: View {
                     Text("FreeFlow")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
 
-                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
+                    Text("v\(appVersion)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -475,6 +512,9 @@ struct GeneralSettingsView: View {
                 }
                 SettingsCard("Permissions", icon: "lock.shield.fill") {
                     permissionsSection
+                }
+                SettingsCard("Build", icon: "info.circle.fill") {
+                    buildInfoSection
                 }
             }
             .padding(24)
@@ -626,6 +666,53 @@ struct GeneralSettingsView: View {
                 .cornerRadius(6)
             }
         }
+    }
+
+    // MARK: Build
+
+    private var buildInfoSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Build number")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(appBuildNumber)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                Text(buildDiagnosticsText)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                Spacer()
+
+                Button {
+                    copyBuildDiagnostics()
+                } label: {
+                    Label(copiedBuildInfo ? "Copied" : "Copy", systemImage: copiedBuildInfo ? "checkmark" : "doc.on.doc")
+                }
+                .font(.caption)
+            }
+        }
+    }
+
+    private func copyBuildDiagnostics() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(buildDiagnosticsText, forType: .string)
+        copiedBuildInfo = true
+
+        copiedBuildInfoResetWorkItem?.cancel()
+
+        let resetWorkItem = DispatchWorkItem {
+            copiedBuildInfo = false
+            copiedBuildInfoResetWorkItem = nil
+        }
+        copiedBuildInfoResetWorkItem = resetWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
     }
 
     // MARK: API Key
