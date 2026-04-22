@@ -45,12 +45,14 @@ struct ProviderSettingsFields: View {
     @Binding var transcriptionAPIKeyInput: String
     @FocusState private var isEditingAPIBaseURL: Bool
     @FocusState private var isEditingTranscriptionModel: Bool
+    @FocusState private var isEditingRealtimeStreamingModel: Bool
     @FocusState private var isEditingPostProcessingModel: Bool
     @FocusState private var isEditingPostProcessingFallbackModel: Bool
     @FocusState private var isEditingContextModel: Bool
     @FocusState private var transcriptionAPIURLFocused: Bool
     @FocusState private var transcriptionAPIKeyFocused: Bool
     @State private var transcriptionModelDraft: String = ""
+    @State private var realtimeStreamingModelDraft: String = ""
     @State private var postProcessingModelDraft: String = ""
     @State private var postProcessingFallbackModelDraft: String = ""
     @State private var contextModelDraft: String = ""
@@ -69,6 +71,13 @@ struct ProviderSettingsFields: View {
         transcriptionModelDraft = trimmed
         guard appState.transcriptionModel != trimmed else { return }
         appState.transcriptionModel = trimmed
+    }
+
+    private func commitRealtimeStreamingModel() {
+        let trimmed = realtimeStreamingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        realtimeStreamingModelDraft = trimmed
+        guard appState.realtimeStreamingModel != trimmed else { return }
+        appState.realtimeStreamingModel = trimmed
     }
 
     private func commitPostProcessingModel() {
@@ -307,9 +316,38 @@ struct ProviderSettingsFields: View {
             Text("Streams audio through the provider's OpenAI-compatible /v1/realtime WebSocket so transcription runs while you speak.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Realtime Transcription Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField("Required by some providers, e.g. gpt-4o-transcribe", text: $realtimeStreamingModelDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isEditingRealtimeStreamingModel)
+                        .onSubmit {
+                            commitRealtimeStreamingModel()
+                        }
+                        .onChange(of: isEditingRealtimeStreamingModel) { isEditing in
+                            if !isEditing {
+                                commitRealtimeStreamingModel()
+                            }
+                        }
+                    if !realtimeStreamingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Reset") {
+                            realtimeStreamingModelDraft = ""
+                            appState.realtimeStreamingModel = ""
+                        }
+                        .font(.caption)
+                    }
+                }
+                Text("Used only for realtime streaming. Leave empty for providers that supply a server default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .onAppear {
             transcriptionModelDraft = appState.transcriptionModel
+            realtimeStreamingModelDraft = appState.realtimeStreamingModel
             postProcessingModelDraft = appState.postProcessingModel
             postProcessingFallbackModelDraft = appState.postProcessingFallbackModel
             contextModelDraft = appState.contextModel
@@ -317,6 +355,11 @@ struct ProviderSettingsFields: View {
         .onChange(of: appState.transcriptionModel) { value in
             if !isEditingTranscriptionModel {
                 transcriptionModelDraft = value
+            }
+        }
+        .onChange(of: appState.realtimeStreamingModel) { value in
+            if !isEditingRealtimeStreamingModel {
+                realtimeStreamingModelDraft = value
             }
         }
         .onChange(of: appState.postProcessingModel) { value in
