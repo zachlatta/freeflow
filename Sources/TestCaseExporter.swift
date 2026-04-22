@@ -130,7 +130,7 @@ struct TestCaseExporter {
             "settings": [
                 "custom_vocabulary": item.customVocabulary,
                 "system_prompt": item.systemPrompt ?? "",
-                "context_prompt": item.contextSystemPrompt ?? ""
+                "context_system_prompt": item.contextSystemPrompt ?? ""
             ] as [String: Any]
         ]
 
