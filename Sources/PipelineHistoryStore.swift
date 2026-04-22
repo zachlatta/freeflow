@@ -90,6 +90,7 @@ final class PipelineHistoryStore {
                 guard let entity = try container.viewContext.fetch(request).first else { return }
                 entity.intent = item.intent.rawValue
                 entity.selectedText = item.selectedText
+                entity.capturedSelection = item.capturedSelection
                 entity.rawTranscript = item.rawTranscript
                 entity.postProcessedTranscript = item.postProcessedTranscript
                 entity.postProcessingPrompt = item.postProcessingPrompt
@@ -191,6 +192,7 @@ final class PipelineHistoryStore {
                 entity.id = item.id
                 entity.intent = item.intent.rawValue
                 entity.selectedText = item.selectedText
+                entity.capturedSelection = item.capturedSelection
                 entity.timestamp = item.timestamp
                 entity.rawTranscript = item.rawTranscript
                 entity.postProcessedTranscript = item.postProcessedTranscript
@@ -267,6 +269,7 @@ final class PipelineHistoryStore {
         PipelineHistoryItem(
             intent: PipelineHistoryItemIntent(rawValue: entity.intent ?? "") ?? .dictation,
             selectedText: entity.selectedText,
+            capturedSelection: entity.capturedSelection,
             id: entity.id,
             timestamp: entity.timestamp ?? Date(),
             rawTranscript: entity.rawTranscript ?? "",
@@ -298,6 +301,7 @@ final class PipelineHistoryStore {
         entity.properties = [
             makeAttribute(name: "intent", type: .stringAttributeType, isOptional: true, defaultValue: "dictation"),
             makeAttribute(name: "selectedText", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "capturedSelection", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "id", type: .UUIDAttributeType, isOptional: false),
             makeAttribute(name: "timestamp", type: .dateAttributeType, isOptional: false),
             makeAttribute(name: "rawTranscript", type: .stringAttributeType, isOptional: false),
@@ -342,6 +346,7 @@ final class PipelineHistoryEntry: NSManagedObject {
     @NSManaged var id: UUID
     @NSManaged var intent: String?
     @NSManaged var selectedText: String?
+    @NSManaged var capturedSelection: String?
     @NSManaged var timestamp: Date?
     @NSManaged var rawTranscript: String?
     @NSManaged var postProcessedTranscript: String?

@@ -9,6 +9,7 @@ enum PipelineHistoryItemIntent: String, Codable {
 struct PipelineHistoryItem: Identifiable, Codable {
     let intent: PipelineHistoryItemIntent
     let selectedText: String?
+    let capturedSelection: String?
     let id: UUID
     let timestamp: Date
     let rawTranscript: String
@@ -31,6 +32,7 @@ struct PipelineHistoryItem: Identifiable, Codable {
     init(
         intent: PipelineHistoryItemIntent = .dictation,
         selectedText: String? = nil,
+        capturedSelection: String? = nil,
         id: UUID = UUID(),
         timestamp: Date,
         rawTranscript: String,
@@ -52,6 +54,7 @@ struct PipelineHistoryItem: Identifiable, Codable {
     ) {
         self.intent = intent
         self.selectedText = selectedText
+        self.capturedSelection = capturedSelection
         self.id = id
         self.timestamp = timestamp
         self.rawTranscript = rawTranscript

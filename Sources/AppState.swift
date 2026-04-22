@@ -849,6 +849,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let updatedItem = PipelineHistoryItem(
                         intent: item.intent,
                         selectedText: item.selectedText,
+                        capturedSelection: item.capturedSelection,
                         id: item.id,
                         timestamp: item.timestamp,
                         rawTranscript: rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -881,6 +882,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let updatedItem = PipelineHistoryItem(
                         intent: item.intent,
                         selectedText: item.selectedText,
+                        capturedSelection: item.capturedSelection,
                         id: item.id,
                         timestamp: item.timestamp,
                         rawTranscript: item.rawTranscript,
@@ -2135,6 +2137,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let newEntry = PipelineHistoryItem(
             intent: intent.persistedIntent,
             selectedText: intent.persistedSelectedText,
+            capturedSelection: context.selectedText,
             timestamp: Date(),
             rawTranscript: rawTranscript,
             postProcessedTranscript: postProcessedTranscript,

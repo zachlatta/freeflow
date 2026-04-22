@@ -14,6 +14,7 @@ struct TestCaseExporter {
         case tempDirectoryCreationFailed(underlying: Error?)
         case zipFailed(Int32)
         case screenshotDecodeFailed
+        case missingAudioFile(String)
 
         var errorDescription: String? {
             switch self {
@@ -24,6 +25,7 @@ struct TestCaseExporter {
                 return "Could not create temporary export directory"
             case .zipFailed(let code): return "zip exited with code \(code)"
             case .screenshotDecodeFailed: return "Could not decode screenshot data URL"
+            case .missingAudioFile(let fileName): return "Missing audio file for export: \(fileName)"
             }
         }
     }
@@ -95,10 +97,11 @@ struct TestCaseExporter {
         var audioPath: String? = nil
         if let audioFileName = item.audioFileName {
             let src = audioDirURL.appendingPathComponent(audioFileName)
-            if fm.fileExists(atPath: src.path) {
-                try fm.copyItem(at: src, to: tempDir.appendingPathComponent(audioFileName))
-                audioPath = "./\(audioFileName)"
+            guard fm.fileExists(atPath: src.path) else {
+                throw ExportError.missingAudioFile(audioFileName)
             }
+            try fm.copyItem(at: src, to: tempDir.appendingPathComponent(audioFileName))
+            audioPath = "./\(audioFileName)"
         }
 
         // Build pipeline dict
@@ -124,7 +127,7 @@ struct TestCaseExporter {
                 "app_name": item.contextAppName ?? "",
                 "bundle_identifier": item.contextBundleIdentifier ?? "",
                 "window_title": item.contextWindowTitle ?? "",
-                "selected_text": item.selectedText ?? ""
+                "selected_text": item.capturedSelection ?? item.selectedText ?? ""
             ] as [String: Any],
             "pipeline": pipeline,
             "settings": [
@@ -137,14 +140,23 @@ struct TestCaseExporter {
         let jsonData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
         try jsonData.write(to: tempDir.appendingPathComponent("case.json"))
 
-        try? fm.removeItem(at: destination)
+        let archiveWorkDir = tempDir.appendingPathComponent("__archive-work", isDirectory: true)
+        try fm.createDirectory(at: archiveWorkDir, withIntermediateDirectories: true)
+        let destinationTemp = archiveWorkDir.appendingPathComponent("\(UUID().uuidString).zip")
+        let archiveContents = try fm.contentsOfDirectory(atPath: tempDir.path)
+            .filter { $0 != archiveWorkDir.lastPathComponent }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
-        process.arguments = ["-r", destination.path, "."]
+        process.arguments = ["-r", destinationTemp.path] + archiveContents
         process.currentDirectoryURL = tempDir
         try process.run()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { throw ExportError.zipFailed(process.terminationStatus) }
+        if fm.fileExists(atPath: destination.path) {
+            _ = try fm.replaceItemAt(destination, withItemAt: destinationTemp)
+        } else {
+            try fm.moveItem(at: destinationTemp, to: destination)
+        }
     }
 
     private static func decodeDataURL(_ dataURL: String) -> Data? {
