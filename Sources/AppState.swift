@@ -120,6 +120,20 @@ private enum CommandInvocation: String {
     case manual
 }
 
+enum DictationAudioInterruptionMode: String, CaseIterable, Identifiable {
+    case mute
+    case pause
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .mute: return "Mute"
+        case .pause: return "Pause"
+        }
+    }
+}
+
 private enum SessionIntent {
     case dictation
     case command(invocation: CommandInvocation, selectedText: String)
@@ -177,6 +191,11 @@ private enum SessionIntent {
 }
 
 final class AppState: ObservableObject, @unchecked Sendable {
+    private enum ActiveAudioInterruption {
+        case muted(previouslyMuted: Bool)
+        case paused
+    }
+
     private let apiKeyStorageKey = "groq_api_key"
     private let apiBaseURLStorageKey = "api_base_url"
     private let transcriptionModelStorageKey = "transcription_model"
@@ -207,6 +226,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let commandModeManualModifierStorageKey = "command_mode_manual_modifier"
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
+    private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
+    private let dictationAudioInterruptionModeStorageKey = "dictation_audio_interruption_mode"
     private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
@@ -392,6 +413,23 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var dictationAudioInterruptionEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                dictationAudioInterruptionEnabled,
+                forKey: dictationAudioInterruptionEnabledStorageKey
+            )
+        }
+    }
+
+    @Published var dictationAudioInterruptionMode: DictationAudioInterruptionMode {
+        didSet {
+            UserDefaults.standard.set(
+                dictationAudioInterruptionMode.rawValue,
+                forKey: dictationAudioInterruptionModeStorageKey
+            )
+        }
+    }
 
     @Published var preserveClipboard: Bool {
         didSet {
@@ -489,6 +527,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
     private var realtimeService: RealtimeTranscriptionService?
+    private var activeAudioInterruption: ActiveAudioInterruption?
     private var pendingOverlayDismissToken: UUID?
     private var shouldMonitorHotkeys = false
     private var isCapturingShortcut = false
@@ -544,6 +583,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
         let realtimeStreamingEnabled = UserDefaults.standard.bool(forKey: realtimeStreamingEnabledStorageKey)
         let realtimeStreamingModel = UserDefaults.standard.string(forKey: realtimeStreamingModelStorageKey) ?? ""
+        let dictationAudioInterruptionEnabled = UserDefaults.standard.bool(
+            forKey: dictationAudioInterruptionEnabledStorageKey
+        )
+        let dictationAudioInterruptionMode = DictationAudioInterruptionMode(
+            rawValue: UserDefaults.standard.string(forKey: dictationAudioInterruptionModeStorageKey) ?? ""
+        ) ?? .mute
         let isPressEnterVoiceCommandEnabled = UserDefaults.standard.object(forKey: pressEnterVoiceCommandStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: pressEnterVoiceCommandStorageKey)
@@ -609,6 +654,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.preserveClipboard = preserveClipboard
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
+        self.dictationAudioInterruptionEnabled = dictationAudioInterruptionEnabled
+        self.dictationAudioInterruptionMode = dictationAudioInterruptionMode
         self.isPressEnterVoiceCommandEnabled = isPressEnterVoiceCommandEnabled
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
@@ -1456,6 +1503,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         overlayManager.dismiss()
         tearDownRealtimeService()
         audioRecorder.cancelRecording()
+        restoreAudioInterruptionIfNeeded()
         refreshAvailableMicrophonesIfNeeded()
         if !isRecording && !isTranscribing && statusText == "Cancelled" {
             scheduleReadyStatusReset(after: 2, matching: ["Cancelled"])
@@ -1616,6 +1664,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         ) else { return }
         guard ensureMicrophoneAccess() else { return }
         os_log(.info, log: recordingLog, "mic access check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+        applyAudioInterruptionIfNeeded()
         beginRecording(triggerMode: triggerMode)
         os_log(.info, log: recordingLog, "startRecording() finished: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
     }
@@ -1718,6 +1767,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                                 manualCommandRequested: pendingManualCommandRequested
                             ) else { return }
                             strongSelf.shortcutSessionController.beginManual(mode: .toggle)
+                            strongSelf.applyAudioInterruptionIfNeeded()
                             strongSelf.beginRecording(triggerMode: .toggle)
                         } else {
                             strongSelf.currentSessionIntent = .dictation
@@ -1767,6 +1817,38 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioLevelCancellable?.cancel()
         audioLevelCancellable = nil
         overlayManager.dismiss()
+    }
+
+    private func applyAudioInterruptionIfNeeded() {
+        guard dictationAudioInterruptionEnabled, activeAudioInterruption == nil else { return }
+
+        switch dictationAudioInterruptionMode {
+        case .mute:
+            let wasMuted = SystemAudioStatus.isDefaultOutputMuted()
+            if wasMuted {
+                activeAudioInterruption = .muted(previouslyMuted: true)
+            } else if SystemAudioStatus.setDefaultOutputMuted(true) {
+                activeAudioInterruption = .muted(previouslyMuted: false)
+            }
+        case .pause:
+            guard SystemAudioStatus.isDefaultOutputRunningSomewhere() else { return }
+            SystemAudioStatus.sendMediaPlayPauseKey()
+            activeAudioInterruption = .paused
+        }
+    }
+
+    private func restoreAudioInterruptionIfNeeded() {
+        guard let activeAudioInterruption else { return }
+        self.activeAudioInterruption = nil
+
+        switch activeAudioInterruption {
+        case .muted(let previouslyMuted):
+            if !previouslyMuted {
+                _ = SystemAudioStatus.setDefaultOutputMuted(false)
+            }
+        case .paused:
+            SystemAudioStatus.sendMediaPlayPauseKey()
+        }
     }
 
     private func beginRecording(triggerMode: RecordingTriggerMode) {
@@ -1867,6 +1949,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         capturedContext = nil
         tearDownRealtimeService()
         audioRecorder.cleanup()
+        restoreAudioInterruptionIfNeeded()
         isRecording = false
         isTranscribing = false
         transcriptionTask?.cancel()
@@ -2134,6 +2217,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         lastContextScreenshotDataURL = nil
         lastContextScreenshotStatus = "No screenshot"
         isRecording = false
+        restoreAudioInterruptionIfNeeded()
         isTranscribing = true
         statusText = "Preparing audio..."
         errorMessage = nil
@@ -2571,6 +2655,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             contextCaptureTask = nil
             capturedContext = nil
             isRecording = false
+            restoreAudioInterruptionIfNeeded()
             shortcutSessionController.reset()
             activeRecordingTriggerMode = nil
             statusText = "Screenshot Required"

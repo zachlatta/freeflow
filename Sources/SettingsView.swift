@@ -620,6 +620,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
+                SettingsCard("Audio During Dictation", icon: "speaker.slash.fill") {
+                    dictationAudioSection
+                }
                 SettingsCard("Edit Mode", icon: "pencil") {
                     commandModeSection
                 }
@@ -968,6 +971,28 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var dictationAudioSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(
+                "Mute or pause audio when dictation starts",
+                isOn: $appState.dictationAudioInterruptionEnabled
+            )
+
+            Picker("Audio Action", selection: $appState.dictationAudioInterruptionMode) {
+                ForEach(DictationAudioInterruptionMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!appState.dictationAudioInterruptionEnabled)
+            .opacity(appState.dictationAudioInterruptionEnabled ? 1 : 0.5)
+
+            Text("FreeFlow restores the audio state it changed when dictation ends.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
