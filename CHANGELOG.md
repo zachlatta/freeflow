@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [0.3.2] - 2026-04-23
+
+### Fixed
+
+- Removed the pause-based audio interruption mode that could misfire and resume playback unexpectedly; dictation now only mutes audio.
+
 ## [0.3.1] - 2026-04-23
 
 ### Added
