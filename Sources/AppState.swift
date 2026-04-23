@@ -156,6 +156,15 @@ private enum SessionIntent {
         }
     }
 
+    var isManualCommand: Bool {
+        switch self {
+        case .command(invocation: .manual, _):
+            return true
+        default:
+            return false
+        }
+    }
+
     static func fromPersisted(intent: PipelineHistoryItemIntent, selectedText: String?) -> SessionIntent {
         if intent == .commandAutomatic, let selectedText {
             return .command(invocation: .automatic, selectedText: selectedText)
@@ -438,6 +447,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var lastPostProcessingStatus = ""
     @Published var lastContextScreenshotDataURL: String? = nil
     @Published var lastContextScreenshotStatus = "No screenshot"
+    @Published var lastContextAppName: String = ""
+    @Published var lastContextBundleIdentifier: String = ""
+    @Published var lastContextWindowTitle: String = ""
+    @Published var lastContextSelectedText: String = ""
+    @Published var lastContextLLMPrompt: String = ""
     @Published var hasScreenRecordingPermission = false
     @Published var launchAtLogin: Bool {
         didSet { setLaunchAtLogin(launchAtLogin) }
@@ -480,6 +494,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var isCapturingShortcut = false
     private var isAwaitingMicrophonePermission = false
     private var pendingMicrophonePermissionTriggerMode: RecordingTriggerMode?
+    private var pendingMicrophonePermissionSelectionSnapshot: AppSelectionSnapshot?
+    private var pendingMicrophonePermissionManualCommandRequested: Bool?
 
     init() {
         UserDefaults.standard.removeObject(forKey: "force_http2_transcription")
@@ -893,6 +909,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             windowTitle: nil,
             selectedText: nil,
             currentActivity: item.contextSummary,
+            contextSystemPrompt: item.contextSystemPrompt,
             contextPrompt: item.contextPrompt,
             screenshotDataURL: item.contextScreenshotDataURL,
             screenshotMimeType: item.contextScreenshotDataURL != nil ? "image/jpeg" : nil,
@@ -944,19 +961,25 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let updatedItem = PipelineHistoryItem(
                         intent: item.intent,
                         selectedText: item.selectedText,
+                        capturedSelection: item.capturedSelection,
                         id: item.id,
                         timestamp: item.timestamp,
                         rawTranscript: parsedTranscript.transcript,
                         postProcessedTranscript: finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
                         postProcessingPrompt: postProcessingPrompt,
+                        systemPrompt: item.systemPrompt,
                         contextSummary: item.contextSummary,
+                        contextSystemPrompt: item.contextSystemPrompt,
                         contextPrompt: item.contextPrompt,
                         contextScreenshotDataURL: item.contextScreenshotDataURL,
                         contextScreenshotStatus: item.contextScreenshotStatus,
                         postProcessingStatus: processingStatus,
                         debugStatus: "Retried",
                         customVocabulary: item.customVocabulary,
-                        audioFileName: item.audioFileName
+                        audioFileName: item.audioFileName,
+                        contextAppName: item.contextAppName,
+                        contextBundleIdentifier: item.contextBundleIdentifier,
+                        contextWindowTitle: item.contextWindowTitle
                     )
                     do {
                         try pipelineHistoryStore.update(updatedItem)
@@ -971,19 +994,25 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let updatedItem = PipelineHistoryItem(
                         intent: item.intent,
                         selectedText: item.selectedText,
+                        capturedSelection: item.capturedSelection,
                         id: item.id,
                         timestamp: item.timestamp,
                         rawTranscript: item.rawTranscript,
                         postProcessedTranscript: item.postProcessedTranscript,
                         postProcessingPrompt: item.postProcessingPrompt,
+                        systemPrompt: item.systemPrompt,
                         contextSummary: item.contextSummary,
+                        contextSystemPrompt: item.contextSystemPrompt,
                         contextPrompt: item.contextPrompt,
                         contextScreenshotDataURL: item.contextScreenshotDataURL,
                         contextScreenshotStatus: item.contextScreenshotStatus,
                         postProcessingStatus: "Error: \(error.localizedDescription)",
                         debugStatus: "Retry failed",
                         customVocabulary: item.customVocabulary,
-                        audioFileName: item.audioFileName
+                        audioFileName: item.audioFileName,
+                        contextAppName: item.contextAppName,
+                        contextBundleIdentifier: item.contextBundleIdentifier,
+                        contextWindowTitle: item.contextWindowTitle
                     )
                     do {
                         try pipelineHistoryStore.update(updatedItem)
@@ -1662,12 +1691,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return false
             }
 
-            prepareForMicrophonePermissionPrompt(triggerMode: triggerMode)
+            prepareForMicrophonePermissionPrompt(
+                triggerMode: triggerMode,
+                selectionSnapshot: pendingSelectionSnapshot ?? contextService.collectSelectionSnapshot(),
+                manualCommandRequested: currentSessionIntent.isManualCommand
+            )
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 DispatchQueue.main.async {
                     guard let strongSelf = self else { return }
                     let pendingTriggerMode = strongSelf.pendingMicrophonePermissionTriggerMode
+                    let pendingSelectionSnapshot = strongSelf.pendingMicrophonePermissionSelectionSnapshot
+                    let pendingManualCommandRequested = strongSelf.pendingMicrophonePermissionManualCommandRequested
                     strongSelf.pendingMicrophonePermissionTriggerMode = nil
+                    strongSelf.pendingMicrophonePermissionSelectionSnapshot = nil
+                    strongSelf.pendingMicrophonePermissionManualCommandRequested = nil
                     strongSelf.isAwaitingMicrophonePermission = false
                     strongSelf.restartHotkeyMonitoring()
 
@@ -1675,7 +1712,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     if granted {
                         strongSelf.errorMessage = nil
                         if triggerMode == .toggle {
-                            guard strongSelf.prepareRecordingStart(triggerMode: .toggle) else { return }
+                            guard strongSelf.prepareRecordingStart(
+                                triggerMode: .toggle,
+                                selectionSnapshot: pendingSelectionSnapshot,
+                                manualCommandRequested: pendingManualCommandRequested
+                            ) else { return }
                             strongSelf.shortcutSessionController.beginManual(mode: .toggle)
                             strongSelf.beginRecording(triggerMode: .toggle)
                         } else {
@@ -1708,9 +1749,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func prepareForMicrophonePermissionPrompt(triggerMode: RecordingTriggerMode) {
+    private func prepareForMicrophonePermissionPrompt(
+        triggerMode: RecordingTriggerMode,
+        selectionSnapshot: AppSelectionSnapshot?,
+        manualCommandRequested: Bool?
+    ) {
         isAwaitingMicrophonePermission = true
         pendingMicrophonePermissionTriggerMode = triggerMode
+        pendingMicrophonePermissionSelectionSnapshot = selectionSnapshot
+        pendingMicrophonePermissionManualCommandRequested = manualCommandRequested
         hotkeyManager.stop()
         shortcutSessionController.reset()
         activeRecordingTriggerMode = nil
@@ -2198,6 +2245,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.lastContextScreenshotDataURL = appContext.screenshotDataURL
                         self.lastContextScreenshotStatus = appContext.screenshotError
                             ?? "available (\(appContext.screenshotMimeType ?? "image"))"
+                        self.lastContextAppName = appContext.appName ?? ""
+                        self.lastContextBundleIdentifier = appContext.bundleIdentifier ?? ""
+                        self.lastContextWindowTitle = appContext.windowTitle ?? ""
+                        self.lastContextSelectedText = appContext.selectedText ?? ""
+                        self.lastContextLLMPrompt = appContext.contextPrompt ?? ""
                         let trimmedRawTranscript = parsedTranscript.transcript
                         let trimmedFinalTranscript = result.finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
                         let processingStatus = Self.statusMessage(
@@ -2212,6 +2264,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             rawTranscript: trimmedRawTranscript,
                             postProcessedTranscript: trimmedFinalTranscript,
                             postProcessingPrompt: result.prompt,
+                            systemPrompt: Self.resolvedSystemPrompt(self.customSystemPrompt),
                             context: appContext,
                             processingStatus: processingStatus,
                             intent: sessionIntent,
@@ -2304,6 +2357,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             rawTranscript: "",
                             postProcessedTranscript: "",
                             postProcessingPrompt: "",
+                            systemPrompt: Self.resolvedSystemPrompt(self.customSystemPrompt),
                             context: resolvedContext,
                             processingStatus: "Error: \(error.localizedDescription)",
                             intent: sessionIntent,
@@ -2317,10 +2371,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    static func resolvedSystemPrompt(_ customSystemPrompt: String) -> String {
+        customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? PostProcessingService.defaultSystemPrompt
+            : customSystemPrompt
+    }
+
     private func recordPipelineHistoryEntry(
         rawTranscript: String,
         postProcessedTranscript: String,
         postProcessingPrompt: String,
+        systemPrompt: String,
         context: AppContext,
         processingStatus: String,
         intent: SessionIntent,
@@ -2329,11 +2390,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let newEntry = PipelineHistoryItem(
             intent: intent.persistedIntent,
             selectedText: intent.persistedSelectedText,
+            capturedSelection: context.selectedText,
             timestamp: Date(),
             rawTranscript: rawTranscript,
             postProcessedTranscript: postProcessedTranscript,
             postProcessingPrompt: postProcessingPrompt,
+            systemPrompt: systemPrompt,
             contextSummary: context.contextSummary,
+            contextSystemPrompt: context.contextSystemPrompt,
             contextPrompt: context.contextPrompt,
             contextScreenshotDataURL: context.screenshotDataURL,
             contextScreenshotStatus: context.screenshotError
@@ -2341,7 +2405,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
             postProcessingStatus: processingStatus,
             debugStatus: debugStatusMessage,
             customVocabulary: customVocabulary,
-            audioFileName: audioFileName
+            audioFileName: audioFileName,
+            contextAppName: context.appName,
+            contextBundleIdentifier: context.bundleIdentifier,
+            contextWindowTitle: context.windowTitle
         )
         do {
             let removedAudioFileNames = try pipelineHistoryStore.append(newEntry, maxCount: maxPipelineHistoryCount)
@@ -2404,6 +2471,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.lastContextScreenshotDataURL = context.screenshotDataURL
                 self.lastContextScreenshotStatus = context.screenshotError
                     ?? "available (\(context.screenshotMimeType ?? "image"))"
+                self.lastContextAppName = context.appName ?? ""
+                self.lastContextBundleIdentifier = context.bundleIdentifier ?? ""
+                self.lastContextWindowTitle = context.windowTitle ?? ""
+                self.lastContextSelectedText = context.selectedText ?? ""
+                self.lastContextLLMPrompt = context.contextPrompt ?? ""
                 self.lastPostProcessingStatus = "App context captured"
                 self.handleScreenshotCaptureIssue(context.screenshotError)
             }
@@ -2420,11 +2492,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
             windowTitle: windowTitle,
             selectedText: nil,
             currentActivity: "Could not refresh app context at stop time; using text-only post-processing.",
+            contextSystemPrompt: resolvedContextSystemPrompt(),
             contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,
             screenshotError: "No app context captured before stop"
         )
+    }
+
+    private func resolvedContextSystemPrompt() -> String {
+        let trimmedPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedPrompt.isEmpty ? AppContextService.defaultContextPrompt : trimmedPrompt
     }
 
     private func focusedWindowTitle(for app: NSRunningApplication?) -> String? {
