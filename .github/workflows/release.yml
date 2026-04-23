@@ -22,8 +22,8 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
 
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
-            echo "Release tags must use semantic versioning, for example v0.3.1 or v1.0.0-beta.1." >&2
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must use semantic versioning, for example v0.3.1." >&2
             exit 1
           fi
 
@@ -46,7 +46,7 @@ jobs:
             echo
             echo "## Download"
             echo
-            echo "**[FreeFlow.dmg](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg)** — Universal build for all Macs (Apple Silicon + Intel)."
+            echo "**[FreeFlow.dmg](https://github.com/zachlatta/freeflow/releases/download/${{ steps.version.outputs.tag }}/FreeFlow.dmg)** — Universal build for all Macs (Apple Silicon + Intel)."
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 

@@ -34,7 +34,9 @@ struct SemanticVersion: Comparable, Equatable {
         }
 
         let withoutBuildMetadata = normalized.split(separator: "+", maxSplits: 1).first.map(String.init) ?? normalized
-        let versionAndPrerelease = withoutBuildMetadata.split(separator: "-", maxSplits: 1).map(String.init)
+        let versionAndPrerelease = withoutBuildMetadata
+            .split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+            .map(String.init)
         let coreComponents = versionAndPrerelease[0].split(separator: ".").map(String.init)
 
         guard coreComponents.count == 3,
@@ -44,12 +46,22 @@ struct SemanticVersion: Comparable, Equatable {
             return nil
         }
 
+        let parsedPrerelease: [String]
+        if versionAndPrerelease.count > 1 {
+            let prereleaseRaw = versionAndPrerelease[1]
+            guard !prereleaseRaw.isEmpty else { return nil }
+            parsedPrerelease = prereleaseRaw
+                .split(separator: ".", omittingEmptySubsequences: false)
+                .map(String.init)
+            guard parsedPrerelease.allSatisfy({ !$0.isEmpty }) else { return nil }
+        } else {
+            parsedPrerelease = []
+        }
+
         self.major = major
         self.minor = minor
         self.patch = patch
-        prerelease = versionAndPrerelease.count > 1
-            ? versionAndPrerelease[1].split(separator: ".").map(String.init)
-            : []
+        prerelease = parsedPrerelease
     }
 
     static func < (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {

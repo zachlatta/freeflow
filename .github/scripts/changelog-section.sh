@@ -25,7 +25,7 @@ awk -v version="$version" '
       exit
     }
 
-    if ($0 ~ "^## \\[?" version "\\]?([[:space:]-]|$)") {
+    if ($0 ~ "^## \\[" version "\\]([[:space:]-]|$)") {
       in_section = 1
       found = 1
       print

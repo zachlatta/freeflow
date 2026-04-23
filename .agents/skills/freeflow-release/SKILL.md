@@ -62,7 +62,7 @@ Use this skill to prepare a FreeFlow release from the local repository. FreeFlow
 5. Validate locally before commit/tag:
    ```bash
    .github/scripts/changelog-section.sh <version>
-   ~/.codex/skills/freeflow-release/scripts/freeflow-release-check.sh <version>
+   .agents/skills/freeflow-release/scripts/freeflow-release-check.sh <version>
    git diff --check
    make clean
    make ARCH="$(uname -m)" CODESIGN_IDENTITY=-
@@ -90,4 +90,4 @@ Use this skill to prepare a FreeFlow release from the local repository. FreeFlow
 
 ## Helper Script
 
-Run `scripts/freeflow-release-check.sh <version>` from the FreeFlow repo root to check release preconditions. It validates semver shape, required files, changelog extraction, workflow trigger basics, and tag availability.
+Run `.agents/skills/freeflow-release/scripts/freeflow-release-check.sh <version>` from the FreeFlow repo root to check release preconditions. It validates semver shape, required files, changelog extraction, workflow trigger basics, and tag availability.

@@ -10,7 +10,7 @@ fi
 version="$1"
 tag="v$version"
 
-if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "Invalid semantic version: $version" >&2
   exit 1
 fi
@@ -27,9 +27,19 @@ if git rev-parse "$tag" >/dev/null 2>&1; then
   exit 1
 fi
 
-if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+set +e
+git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1
+ls_remote_status=$?
+set -e
+
+if [[ $ls_remote_status -eq 0 ]]; then
   echo "Tag already exists on origin: $tag" >&2
   exit 1
+elif [[ $ls_remote_status -eq 2 ]]; then
+  :
+else
+  echo "git ls-remote failed while checking origin tag $tag" >&2
+  exit "$ls_remote_status"
 fi
 
 if ! grep -q 'tags:' .github/workflows/release.yml || ! grep -q 'v\*\.\*\.\*' .github/workflows/release.yml; then
