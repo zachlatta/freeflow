@@ -441,7 +441,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    @Published var isRecording = false
+    @Published var isRecording = false {
+        didSet {
+            guard oldValue != isRecording else { return }
+            AppState.writeRecordingStateFlag(isRecording)
+        }
+    }
     @Published var isTranscribing = false
     @Published var retryingItemIDs: Set<UUID> = []
     @Published var lastTranscript: String = ""
@@ -665,10 +670,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self?.handleUpdateOverlayPressed()
             }
         }
+
+        // Clear any stale recording flag left over from an unclean exit.
+        AppState.writeRecordingStateFlag(false)
     }
 
     deinit {
         removeAudioDeviceObservers()
+        AppState.writeRecordingStateFlag(false)
     }
 
     private func removeAudioDeviceObservers() {
@@ -872,6 +881,37 @@ final class AppState: ObservableObject, @unchecked Sendable {
             try? FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
         }
         return audioDir
+    }
+
+    /// URL of the flag file written while FreeFlow is actively recording.
+    ///
+    /// External tools (voice assistants, TTS barge-in pipelines, conversation
+    /// apps) can poll this file to know when the user is dictating. The file
+    /// exists while `isRecording` is true and is removed when it flips false.
+    /// Contents are the UNIX timestamp (seconds, float) of when recording
+    /// started — useful for stale-flag detection after an unclean exit.
+    ///
+    /// Path: `~/Library/Application Support/FreeFlow/is-recording`
+    /// (or `FreeFlow Dev/is-recording` when running the dev bundle).
+    static func recordingStateFlagURL() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "FreeFlow"
+        return appSupport.appendingPathComponent("\(appName)/is-recording")
+    }
+
+    /// Write or clear the `is-recording` flag file. Called from the
+    /// `isRecording` didSet. Failures are swallowed — this is advisory IPC
+    /// and must never interrupt the recording pipeline.
+    static func writeRecordingStateFlag(_ recording: Bool) {
+        let url = recordingStateFlagURL()
+        if recording {
+            let dir = url.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let timestamp = String(Date().timeIntervalSince1970)
+            try? timestamp.write(to: url, atomically: true, encoding: .utf8)
+        } else {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     static func saveAudioFile(from tempURL: URL) -> SavedAudioFile? {
