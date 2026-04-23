@@ -137,9 +137,20 @@ final class UpdateManager: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "updateSkippedVersion") }
     }
 
+    private var lastPostTranscriptionReminderVersion: String? {
+        get { UserDefaults.standard.string(forKey: "updateLastPostTranscriptionReminderVersion") }
+        set { UserDefaults.standard.set(newValue, forKey: "updateLastPostTranscriptionReminderVersion") }
+    }
+
+    private var lastPostTranscriptionReminderDate: Date? {
+        get { UserDefaults.standard.object(forKey: "updateLastPostTranscriptionReminderDate") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "updateLastPostTranscriptionReminderDate") }
+    }
+
     private let releasesURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/releases/latest")!
     private let stabilityBufferDays: TimeInterval = 3
     private let checkIntervalSeconds: TimeInterval = 7 * 24 * 60 * 60 // 7 days
+    private let postTranscriptionReminderInterval: TimeInterval = 24 * 60 * 60 // 1 day
     private var periodicTimer: Timer?
     private var activeDownloadTask: Task<Void, Never>?
 
@@ -322,6 +333,40 @@ final class UpdateManager: ObservableObject {
         }
     }
 
+    func shouldShowPostTranscriptionReminder() -> Bool {
+        guard updateAvailable,
+              let release = latestRelease,
+              updateStatus == .idle,
+              skippedVersion != release.tagName else {
+            return false
+        }
+
+        guard lastPostTranscriptionReminderVersion == release.tagName,
+              let lastReminder = lastPostTranscriptionReminderDate else {
+            return true
+        }
+
+        return Date().timeIntervalSince(lastReminder) > postTranscriptionReminderInterval
+    }
+
+    func markPostTranscriptionReminderShown() {
+        guard let release = latestRelease else { return }
+        lastPostTranscriptionReminderVersion = release.tagName
+        lastPostTranscriptionReminderDate = Date()
+    }
+
+    private func suppressPostTranscriptionReminder(for tagName: String) {
+        lastPostTranscriptionReminderVersion = tagName
+        lastPostTranscriptionReminderDate = Date()
+    }
+
+    private func clearAvailableUpdate() {
+        updateAvailable = false
+        latestRelease = nil
+        latestReleaseVersion = ""
+        latestReleaseDate = ""
+    }
+
     // MARK: - Alerts
 
     func showUpdateAlert() {
@@ -346,13 +391,10 @@ final class UpdateManager: ObservableObject {
             showReleaseNotes(for: release)
             showUpdateAlert()
         case .alertThirdButtonReturn:
-            break // Remind me later — do nothing
+            suppressPostTranscriptionReminder(for: release.tagName)
         case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
             skippedVersion = release.tagName
-            updateAvailable = false
-            latestRelease = nil
-            latestReleaseVersion = ""
-            latestReleaseDate = ""
+            clearAvailableUpdate()
         default:
             break
         }
