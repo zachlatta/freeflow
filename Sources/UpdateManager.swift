@@ -6,6 +6,7 @@ import AppKit
 struct GitHubRelease: Decodable {
     let tagName: String
     let name: String?
+    let body: String?
     let htmlUrl: String
     let publishedAt: String
     let assets: [GitHubReleaseAsset]
@@ -13,9 +14,73 @@ struct GitHubRelease: Decodable {
     enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
         case name
+        case body
         case htmlUrl = "html_url"
         case publishedAt = "published_at"
         case assets
+    }
+}
+
+struct SemanticVersion: Comparable, Equatable {
+    let major: Int
+    let minor: Int
+    let patch: Int
+    let prerelease: [String]
+
+    init?(_ value: String) {
+        var normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("v") || normalized.hasPrefix("V") {
+            normalized.removeFirst()
+        }
+
+        let withoutBuildMetadata = normalized.split(separator: "+", maxSplits: 1).first.map(String.init) ?? normalized
+        let versionAndPrerelease = withoutBuildMetadata.split(separator: "-", maxSplits: 1).map(String.init)
+        let coreComponents = versionAndPrerelease[0].split(separator: ".").map(String.init)
+
+        guard coreComponents.count == 3,
+              let major = Int(coreComponents[0]),
+              let minor = Int(coreComponents[1]),
+              let patch = Int(coreComponents[2]) else {
+            return nil
+        }
+
+        self.major = major
+        self.minor = minor
+        self.patch = patch
+        prerelease = versionAndPrerelease.count > 1
+            ? versionAndPrerelease[1].split(separator: ".").map(String.init)
+            : []
+    }
+
+    static func < (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {
+        if lhs.major != rhs.major { return lhs.major < rhs.major }
+        if lhs.minor != rhs.minor { return lhs.minor < rhs.minor }
+        if lhs.patch != rhs.patch { return lhs.patch < rhs.patch }
+
+        if lhs.prerelease.isEmpty && rhs.prerelease.isEmpty { return false }
+        if lhs.prerelease.isEmpty { return false }
+        if rhs.prerelease.isEmpty { return true }
+
+        for index in 0..<min(lhs.prerelease.count, rhs.prerelease.count) {
+            let left = lhs.prerelease[index]
+            let right = rhs.prerelease[index]
+            if left == right { continue }
+
+            let leftNumber = Int(left)
+            let rightNumber = Int(right)
+            switch (leftNumber, rightNumber) {
+            case let (leftNumber?, rightNumber?):
+                return leftNumber < rightNumber
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                return left < right
+            }
+        }
+
+        return lhs.prerelease.count < rhs.prerelease.count
     }
 }
 
@@ -49,6 +114,7 @@ final class UpdateManager: ObservableObject {
 
     @Published var updateAvailable = false
     @Published var latestRelease: GitHubRelease?
+    @Published var latestReleaseVersion: String = ""
     @Published var latestReleaseDate: String = ""
     @Published var isChecking = false
     @Published var downloadProgress: Double?
@@ -116,6 +182,7 @@ final class UpdateManager: ObservableObject {
 
     func checkForUpdates(userInitiated: Bool) async {
         let currentBuildTag = Bundle.main.infoDictionary?["FreeFlowBuildTag"] as? String
+        let currentVersionString = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
 
         // Dev builds (no embedded tag): skip auto-checks, but allow manual checks
         if !userInitiated && currentBuildTag == nil {
@@ -142,6 +209,8 @@ final class UpdateManager: ObservableObject {
                 lastCheckDate = Date()
                 updateAvailable = false
                 latestRelease = nil
+                latestReleaseVersion = ""
+                latestReleaseDate = ""
                 if userInitiated { showUpToDateAlert() }
                 return
             }
@@ -154,6 +223,23 @@ final class UpdateManager: ObservableObject {
             let decoder = JSONDecoder()
             let release = try decoder.decode(GitHubRelease.self, from: data)
             lastCheckDate = Date()
+            let releaseVersionString = release.tagName.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(
+                of: "^v",
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+
+            guard let latestVersion = SemanticVersion(release.tagName),
+                  let currentVersion = SemanticVersion(currentVersionString) else {
+                updateAvailable = false
+                latestRelease = nil
+                latestReleaseVersion = ""
+                latestReleaseDate = ""
+                if userInitiated {
+                    showErrorAlert("The latest release does not use a semantic version tag.")
+                }
+                return
+            }
 
             // Parse the published date
             let iso8601 = ISO8601DateFormatter()
@@ -173,10 +259,21 @@ final class UpdateManager: ObservableObject {
             dateFormatter.timeStyle = .none
             let releaseDateString = dateFormatter.string(from: publishedDate)
 
-            // If this is the same build we're running, no update available
+            // If this is the same or an older semantic version, no update is available.
             if let currentTag = currentBuildTag, release.tagName == currentTag {
                 updateAvailable = false
                 latestRelease = nil
+                latestReleaseVersion = ""
+                latestReleaseDate = ""
+                if userInitiated { showUpToDateAlert() }
+                return
+            }
+
+            if latestVersion <= currentVersion {
+                updateAvailable = false
+                latestRelease = nil
+                latestReleaseVersion = ""
+                latestReleaseDate = ""
                 if userInitiated { showUpToDateAlert() }
                 return
             }
@@ -187,10 +284,14 @@ final class UpdateManager: ObservableObject {
                 if !userInitiated {
                     // Auto-check: silently skip, too new
                     updateAvailable = false
+                    latestRelease = nil
+                    latestReleaseVersion = ""
+                    latestReleaseDate = ""
                     return
                 }
                 // Manual check: let user know and offer the update anyway
                 latestRelease = release
+                latestReleaseVersion = releaseVersionString
                 latestReleaseDate = releaseDateString
                 updateAvailable = true
                 showRecentReleaseAlert(daysSincePublished: daysSincePublished)
@@ -200,10 +301,14 @@ final class UpdateManager: ObservableObject {
             // Check if user skipped this version (only for auto checks)
             if !userInitiated && skippedVersion == release.tagName {
                 updateAvailable = false
+                latestRelease = nil
+                latestReleaseVersion = ""
+                latestReleaseDate = ""
                 return
             }
 
             latestRelease = release
+            latestReleaseVersion = releaseVersionString
             latestReleaseDate = releaseDateString
             updateAvailable = true
 
@@ -224,10 +329,12 @@ final class UpdateManager: ObservableObject {
 
         let alert = NSAlert()
         alert.messageText = "A New Version is Available"
-        alert.informativeText = "A new version of FreeFlow (released \(latestReleaseDate)) is available.\n\nWould you like to download the update?"
+        let versionText = latestReleaseVersion.isEmpty ? release.tagName : "v\(latestReleaseVersion)"
+        alert.informativeText = "FreeFlow \(versionText) was released \(latestReleaseDate).\n\nWould you like to download the update?"
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "Download Update")
+        alert.addButton(withTitle: "What's New")
         alert.addButton(withTitle: "Remind Me Later")
         alert.addButton(withTitle: "Skip This Version")
 
@@ -235,12 +342,19 @@ final class UpdateManager: ObservableObject {
         switch response {
         case .alertFirstButtonReturn:
             downloadAndInstall(release: release)
+        case .alertSecondButtonReturn:
+            showReleaseNotes(for: release)
+            showUpdateAlert()
         case .alertThirdButtonReturn:
+            break // Remind me later — do nothing
+        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
             skippedVersion = release.tagName
             updateAvailable = false
             latestRelease = nil
+            latestReleaseVersion = ""
+            latestReleaseDate = ""
         default:
-            break // Remind me later — do nothing
+            break
         }
     }
 
@@ -252,15 +366,23 @@ final class UpdateManager: ObservableObject {
 
         let alert = NSAlert()
         alert.messageText = "New Release Available"
-        alert.informativeText = "A new version of FreeFlow was released \(ageText). It's very recent — you can download it now or wait a few days for stability.\n\nWould you like to download it?"
+        let versionText = latestReleaseVersion.isEmpty ? release.tagName : "v\(latestReleaseVersion)"
+        alert.informativeText = "FreeFlow \(versionText) was released \(ageText). It's very recent — you can download it now or wait a few days for stability.\n\nWould you like to download it?"
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "Download Now")
+        alert.addButton(withTitle: "What's New")
         alert.addButton(withTitle: "Wait")
 
         let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
+        switch response {
+        case .alertFirstButtonReturn:
             downloadAndInstall(release: release)
+        case .alertSecondButtonReturn:
+            showReleaseNotes(for: release)
+            showRecentReleaseAlert(daysSincePublished: daysSincePublished)
+        default:
+            break
         }
     }
 
@@ -272,6 +394,64 @@ final class UpdateManager: ObservableObject {
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    func showReleaseNotes() {
+        guard let release = latestRelease else { return }
+        showReleaseNotes(for: release)
+    }
+
+    private func showReleaseNotes(for release: GitHubRelease) {
+        let alert = NSAlert()
+        let versionText = latestReleaseVersion.isEmpty ? release.tagName : "v\(latestReleaseVersion)"
+        alert.messageText = "What's New in FreeFlow \(versionText)"
+        alert.informativeText = "Release notes from GitHub."
+        alert.alertStyle = .informational
+        alert.icon = NSApp.applicationIconImage
+        alert.accessoryView = releaseNotesView(text: releaseNotesText(for: release))
+        alert.addButton(withTitle: "OK")
+
+        if let releaseURL = URL(string: release.htmlUrl) {
+            alert.addButton(withTitle: "Open on GitHub")
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                NSWorkspace.shared.open(releaseURL)
+            }
+        } else {
+            alert.runModal()
+        }
+    }
+
+    private func releaseNotesText(for release: GitHubRelease) -> String {
+        guard let body = release.body?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !body.isEmpty else {
+            return "No release notes were published for this version."
+        }
+
+        if let downloadRange = body.range(of: "\n## Download") {
+            return String(body[..<downloadRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        return body
+    }
+
+    private func releaseNotesView(text: String) -> NSView {
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 280))
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .bezelBorder
+
+        let textView = NSTextView(frame: scrollView.bounds)
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = true
+        textView.backgroundColor = .textBackgroundColor
+        textView.textColor = .textColor
+        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.string = text
+
+        scrollView.documentView = textView
+        return scrollView
     }
 
     private func showErrorAlert(_ message: String) {
