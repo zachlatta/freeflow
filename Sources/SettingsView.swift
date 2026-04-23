@@ -983,18 +983,9 @@ struct GeneralSettingsView: View {
     private var dictationAudioSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(
-                "Mute or pause audio when dictation starts",
+                "Mute audio when dictation starts",
                 isOn: $appState.dictationAudioInterruptionEnabled
             )
-
-            Picker("Audio Action", selection: $appState.dictationAudioInterruptionMode) {
-                ForEach(DictationAudioInterruptionMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .disabled(!appState.dictationAudioInterruptionEnabled)
-            .opacity(appState.dictationAudioInterruptionEnabled ? 1 : 0.5)
 
             Text("FreeFlow restores the audio state it changed when dictation ends.")
                 .font(.caption)

@@ -120,20 +120,6 @@ private enum CommandInvocation: String {
     case manual
 }
 
-enum DictationAudioInterruptionMode: String, CaseIterable, Identifiable {
-    case mute
-    case pause
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .mute: return "Mute"
-        case .pause: return "Pause"
-        }
-    }
-}
-
 private enum SessionIntent {
     case dictation
     case command(invocation: CommandInvocation, selectedText: String)
@@ -193,7 +179,6 @@ private enum SessionIntent {
 final class AppState: ObservableObject, @unchecked Sendable {
     private enum ActiveAudioInterruption {
         case muted(previouslyMuted: Bool)
-        case paused
     }
 
     private let apiKeyStorageKey = "groq_api_key"
@@ -227,7 +212,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
-    private let dictationAudioInterruptionModeStorageKey = "dictation_audio_interruption_mode"
     private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
@@ -422,15 +406,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    @Published var dictationAudioInterruptionMode: DictationAudioInterruptionMode {
-        didSet {
-            UserDefaults.standard.set(
-                dictationAudioInterruptionMode.rawValue,
-                forKey: dictationAudioInterruptionModeStorageKey
-            )
-        }
-    }
-
     @Published var preserveClipboard: Bool {
         didSet {
             UserDefaults.standard.set(preserveClipboard, forKey: preserveClipboardStorageKey)
@@ -587,9 +562,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let dictationAudioInterruptionEnabled = UserDefaults.standard.bool(
             forKey: dictationAudioInterruptionEnabledStorageKey
         )
-        let dictationAudioInterruptionMode = DictationAudioInterruptionMode(
-            rawValue: UserDefaults.standard.string(forKey: dictationAudioInterruptionModeStorageKey) ?? ""
-        ) ?? .mute
         let isPressEnterVoiceCommandEnabled = UserDefaults.standard.object(forKey: pressEnterVoiceCommandStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: pressEnterVoiceCommandStorageKey)
@@ -656,7 +628,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
         self.dictationAudioInterruptionEnabled = dictationAudioInterruptionEnabled
-        self.dictationAudioInterruptionMode = dictationAudioInterruptionMode
         self.isPressEnterVoiceCommandEnabled = isPressEnterVoiceCommandEnabled
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
@@ -1828,18 +1799,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func applyAudioInterruptionIfNeeded() {
         guard dictationAudioInterruptionEnabled, activeAudioInterruption == nil else { return }
 
-        switch dictationAudioInterruptionMode {
-        case .mute:
-            let wasMuted = SystemAudioStatus.isDefaultOutputMuted()
-            if wasMuted {
-                activeAudioInterruption = .muted(previouslyMuted: true)
-            } else if SystemAudioStatus.setDefaultOutputMuted(true) {
-                activeAudioInterruption = .muted(previouslyMuted: false)
-            }
-        case .pause:
-            guard SystemAudioStatus.isDefaultOutputRunningSomewhere() else { return }
-            SystemAudioStatus.sendMediaPlayPauseKey()
-            activeAudioInterruption = .paused
+        let wasMuted = SystemAudioStatus.isDefaultOutputMuted()
+        if wasMuted {
+            activeAudioInterruption = .muted(previouslyMuted: true)
+        } else if SystemAudioStatus.setDefaultOutputMuted(true) {
+            activeAudioInterruption = .muted(previouslyMuted: false)
         }
     }
 
@@ -1852,8 +1816,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             if !previouslyMuted {
                 _ = SystemAudioStatus.setDefaultOutputMuted(false)
             }
-        case .paused:
-            SystemAudioStatus.sendMediaPlayPauseKey()
         }
     }
 
