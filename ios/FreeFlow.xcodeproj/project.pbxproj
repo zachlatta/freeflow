@@ -1,0 +1,517 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03B929F9291B33EE54FA1AE3 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A56C48713CB1CF97D4066365 /* SetupView.swift */; };
+		0408E6DCD9D4E2723CD598DC /* DarwinObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4D267D86E1C5A735E56E3D /* DarwinObserver.swift */; };
+		08104799B64FC48878240C8D /* Prompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBCA9AD16A6CF28D55F75AE8 /* Prompts.swift */; };
+		08AF2AD818468B9A2FAFEC3D /* TranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CAE4DBE1B356CEDC2A377FF /* TranscriptionService.swift */; };
+		1E0E9A1E1A27E1CACB6D6BC4 /* AudioNormalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB419908A9DC9BB6B4DCF0EE /* AudioNormalization.swift */; };
+		4B958E1A4AAB21C3E63D875D /* Prompts.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBCA9AD16A6CF28D55F75AE8 /* Prompts.swift */; };
+		5127E6291D681F8A7C8C631E /* PipelineHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A15BA367D4008C4E1182035 /* PipelineHistory.swift */; };
+		530FB870D2D479DB0D5F7854 /* LLMAPITransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8CBBC260BF913C17445B9B9 /* LLMAPITransport.swift */; };
+		5F10C0F25D559F1847799059 /* FreeFlowKeyboard.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C7DBE9538EDBE15C16EC7495 /* FreeFlowKeyboard.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		63C725E8D035F44C4935D1EB /* FreeFlowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C442D8FB7849A17E6345A93F /* FreeFlowApp.swift */; };
+		64E7F782EB131F6BA1604F2D /* PostProcessingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5298E57403C1E801FB541D5F /* PostProcessingService.swift */; };
+		70A5F93906ACA05A3F5F7413 /* LLMAPITransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8CBBC260BF913C17445B9B9 /* LLMAPITransport.swift */; };
+		73D8301BB830E667A4609B03 /* RecordingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EC3A16ACE3BC92DE8A6662C /* RecordingSession.swift */; };
+		7B7E84C37DE864E90E45D84E /* VoiceMacros.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDC962279E3FCE51DAFFC2BB /* VoiceMacros.swift */; };
+		888C4EB24CCEC1E4B9871330 /* TranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CAE4DBE1B356CEDC2A377FF /* TranscriptionService.swift */; };
+		89E529B3573DBB80FE4AC752 /* PostProcessingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5298E57403C1E801FB541D5F /* PostProcessingService.swift */; };
+		90D4A607F57DAD857C9400E0 /* DarwinObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4D267D86E1C5A735E56E3D /* DarwinObserver.swift */; };
+		9E2D0CF4C25EB464716C08A2 /* KeyboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F923D79DA1E102281CFCB5B /* KeyboardView.swift */; };
+		A015E33BD744480BD9F69BB5 /* AudioNormalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB419908A9DC9BB6B4DCF0EE /* AudioNormalization.swift */; };
+		A0C27E5638249392C8FA4F76 /* KeyboardPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33315A2C7BA3FC944DA797E /* KeyboardPipeline.swift */; };
+		BA019CF2762DBCE6C3E394DF /* PipelineHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A15BA367D4008C4E1182035 /* PipelineHistory.swift */; };
+		D080A82C8EA00682846F8EBD /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BE7C1BC0D727773DFF7FDC /* SharedStorage.swift */; };
+		DC3FFA24818A17D292578108 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078652E230F788CD9A858CB7 /* SettingsView.swift */; };
+		E01D017DF0C913CBD2E1D4B2 /* SharedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9BE7C1BC0D727773DFF7FDC /* SharedStorage.swift */; };
+		E5E58F997BE6C924773893C4 /* KeyboardPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33315A2C7BA3FC944DA797E /* KeyboardPipeline.swift */; };
+		E6623B6B3C0F43FBBF0E2C55 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6E99A690191F4D4673B20DC /* HistoryView.swift */; };
+		ED0F15461AF06E2D1D56CC67 /* VoiceMacros.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDC962279E3FCE51DAFFC2BB /* VoiceMacros.swift */; };
+		F5E01050E456A44C4978ABDC /* KeyboardViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B74CF43C51FC03C270EEC8EA /* KeyboardViewController.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		6355A49712232A2E079DD40C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9B6F5D6AE2205A2A210C7385 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C4489DE97665A71B4AF3D44C;
+			remoteInfo = FreeFlowKeyboard;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		BF3F14293A6416DA13ACDD06 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				5F10C0F25D559F1847799059 /* FreeFlowKeyboard.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		078652E230F788CD9A858CB7 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		0EC3A16ACE3BC92DE8A6662C /* RecordingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingSession.swift; sourceTree = "<group>"; };
+		1A15BA367D4008C4E1182035 /* PipelineHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineHistory.swift; sourceTree = "<group>"; };
+		5298E57403C1E801FB541D5F /* PostProcessingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostProcessingService.swift; sourceTree = "<group>"; };
+		5CAE4DBE1B356CEDC2A377FF /* TranscriptionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionService.swift; sourceTree = "<group>"; };
+		8F923D79DA1E102281CFCB5B /* KeyboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardView.swift; sourceTree = "<group>"; };
+		90314535002F62FF7B4E7802 /* FreeFlow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FreeFlow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A56C48713CB1CF97D4066365 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		A9BE7C1BC0D727773DFF7FDC /* SharedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedStorage.swift; sourceTree = "<group>"; };
+		B74CF43C51FC03C270EEC8EA /* KeyboardViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardViewController.swift; sourceTree = "<group>"; };
+		C442D8FB7849A17E6345A93F /* FreeFlowApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeFlowApp.swift; sourceTree = "<group>"; };
+		C7DBE9538EDBE15C16EC7495 /* FreeFlowKeyboard.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = FreeFlowKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		CDC962279E3FCE51DAFFC2BB /* VoiceMacros.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceMacros.swift; sourceTree = "<group>"; };
+		D8CBBC260BF913C17445B9B9 /* LLMAPITransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LLMAPITransport.swift; sourceTree = "<group>"; };
+		DD4D267D86E1C5A735E56E3D /* DarwinObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DarwinObserver.swift; sourceTree = "<group>"; };
+		EB419908A9DC9BB6B4DCF0EE /* AudioNormalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioNormalization.swift; sourceTree = "<group>"; };
+		EBCA9AD16A6CF28D55F75AE8 /* Prompts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Prompts.swift; sourceTree = "<group>"; };
+		F33315A2C7BA3FC944DA797E /* KeyboardPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardPipeline.swift; sourceTree = "<group>"; };
+		F6E99A690191F4D4673B20DC /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		67466C4A479FBB668D8BA0D2 /* FreeFlowShared */ = {
+			isa = PBXGroup;
+			children = (
+				EB419908A9DC9BB6B4DCF0EE /* AudioNormalization.swift */,
+				DD4D267D86E1C5A735E56E3D /* DarwinObserver.swift */,
+				F33315A2C7BA3FC944DA797E /* KeyboardPipeline.swift */,
+				D8CBBC260BF913C17445B9B9 /* LLMAPITransport.swift */,
+				1A15BA367D4008C4E1182035 /* PipelineHistory.swift */,
+				5298E57403C1E801FB541D5F /* PostProcessingService.swift */,
+				EBCA9AD16A6CF28D55F75AE8 /* Prompts.swift */,
+				A9BE7C1BC0D727773DFF7FDC /* SharedStorage.swift */,
+				5CAE4DBE1B356CEDC2A377FF /* TranscriptionService.swift */,
+				CDC962279E3FCE51DAFFC2BB /* VoiceMacros.swift */,
+			);
+			path = FreeFlowShared;
+			sourceTree = "<group>";
+		};
+		79209D6E83755EF1E243B918 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				90314535002F62FF7B4E7802 /* FreeFlow.app */,
+				C7DBE9538EDBE15C16EC7495 /* FreeFlowKeyboard.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		871FE7D6A78780CD056F0915 /* FreeFlowApp */ = {
+			isa = PBXGroup;
+			children = (
+				C442D8FB7849A17E6345A93F /* FreeFlowApp.swift */,
+				F6E99A690191F4D4673B20DC /* HistoryView.swift */,
+				0EC3A16ACE3BC92DE8A6662C /* RecordingSession.swift */,
+				078652E230F788CD9A858CB7 /* SettingsView.swift */,
+				A56C48713CB1CF97D4066365 /* SetupView.swift */,
+			);
+			path = FreeFlowApp;
+			sourceTree = "<group>";
+		};
+		9420A569D5D89DA74FE63938 = {
+			isa = PBXGroup;
+			children = (
+				871FE7D6A78780CD056F0915 /* FreeFlowApp */,
+				CC00D222E2AE5CC6AB874DDE /* FreeFlowKeyboard */,
+				67466C4A479FBB668D8BA0D2 /* FreeFlowShared */,
+				79209D6E83755EF1E243B918 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CC00D222E2AE5CC6AB874DDE /* FreeFlowKeyboard */ = {
+			isa = PBXGroup;
+			children = (
+				8F923D79DA1E102281CFCB5B /* KeyboardView.swift */,
+				B74CF43C51FC03C270EEC8EA /* KeyboardViewController.swift */,
+			);
+			path = FreeFlowKeyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0D1C14D8CDBC13F5766855F3 /* FreeFlowApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1741124A4768C8B3004538D /* Build configuration list for PBXNativeTarget "FreeFlowApp" */;
+			buildPhases = (
+				107FCECDFE0A63AE446D0490 /* Sources */,
+				BF3F14293A6416DA13ACDD06 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B78B698D669E3A9D4D9ED834 /* PBXTargetDependency */,
+			);
+			name = FreeFlowApp;
+			packageProductDependencies = (
+			);
+			productName = FreeFlowApp;
+			productReference = 90314535002F62FF7B4E7802 /* FreeFlow.app */;
+			productType = "com.apple.product-type.application";
+		};
+		C4489DE97665A71B4AF3D44C /* FreeFlowKeyboard */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8B033FA25FD2C9715EA12807 /* Build configuration list for PBXNativeTarget "FreeFlowKeyboard" */;
+			buildPhases = (
+				92274C4F023061EC86B14D5E /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = FreeFlowKeyboard;
+			packageProductDependencies = (
+			);
+			productName = FreeFlowKeyboard;
+			productReference = C7DBE9538EDBE15C16EC7495 /* FreeFlowKeyboard.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9B6F5D6AE2205A2A210C7385 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					0D1C14D8CDBC13F5766855F3 = {
+						ProvisioningStyle = Automatic;
+					};
+					C4489DE97665A71B4AF3D44C = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 3CF16A055F703A3498CD88A2 /* Build configuration list for PBXProject "FreeFlow" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 9420A569D5D89DA74FE63938;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 79209D6E83755EF1E243B918 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0D1C14D8CDBC13F5766855F3 /* FreeFlowApp */,
+				C4489DE97665A71B4AF3D44C /* FreeFlowKeyboard */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		107FCECDFE0A63AE446D0490 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1E0E9A1E1A27E1CACB6D6BC4 /* AudioNormalization.swift in Sources */,
+				0408E6DCD9D4E2723CD598DC /* DarwinObserver.swift in Sources */,
+				63C725E8D035F44C4935D1EB /* FreeFlowApp.swift in Sources */,
+				E6623B6B3C0F43FBBF0E2C55 /* HistoryView.swift in Sources */,
+				E5E58F997BE6C924773893C4 /* KeyboardPipeline.swift in Sources */,
+				530FB870D2D479DB0D5F7854 /* LLMAPITransport.swift in Sources */,
+				5127E6291D681F8A7C8C631E /* PipelineHistory.swift in Sources */,
+				89E529B3573DBB80FE4AC752 /* PostProcessingService.swift in Sources */,
+				08104799B64FC48878240C8D /* Prompts.swift in Sources */,
+				73D8301BB830E667A4609B03 /* RecordingSession.swift in Sources */,
+				DC3FFA24818A17D292578108 /* SettingsView.swift in Sources */,
+				03B929F9291B33EE54FA1AE3 /* SetupView.swift in Sources */,
+				D080A82C8EA00682846F8EBD /* SharedStorage.swift in Sources */,
+				08AF2AD818468B9A2FAFEC3D /* TranscriptionService.swift in Sources */,
+				7B7E84C37DE864E90E45D84E /* VoiceMacros.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		92274C4F023061EC86B14D5E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A015E33BD744480BD9F69BB5 /* AudioNormalization.swift in Sources */,
+				90D4A607F57DAD857C9400E0 /* DarwinObserver.swift in Sources */,
+				A0C27E5638249392C8FA4F76 /* KeyboardPipeline.swift in Sources */,
+				9E2D0CF4C25EB464716C08A2 /* KeyboardView.swift in Sources */,
+				F5E01050E456A44C4978ABDC /* KeyboardViewController.swift in Sources */,
+				70A5F93906ACA05A3F5F7413 /* LLMAPITransport.swift in Sources */,
+				BA019CF2762DBCE6C3E394DF /* PipelineHistory.swift in Sources */,
+				64E7F782EB131F6BA1604F2D /* PostProcessingService.swift in Sources */,
+				4B958E1A4AAB21C3E63D875D /* Prompts.swift in Sources */,
+				E01D017DF0C913CBD2E1D4B2 /* SharedStorage.swift in Sources */,
+				888C4EB24CCEC1E4B9871330 /* TranscriptionService.swift in Sources */,
+				ED0F15461AF06E2D1D56CC67 /* VoiceMacros.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B78B698D669E3A9D4D9ED834 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C4489DE97665A71B4AF3D44C /* FreeFlowKeyboard */;
+			targetProxy = 6355A49712232A2E079DD40C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		3A3EF55EC87E6C79CE222FB2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = FreeFlowApp/FreeFlowApp.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 2Q2L4BB4KG;
+				INFOPLIST_FILE = FreeFlowApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shebetoff.freeflow.ios;
+				PRODUCT_NAME = FreeFlow;
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		504190E31DE74CE4B4AFD735 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = FreeFlowKeyboard/FreeFlowKeyboard.entitlements;
+				DEVELOPMENT_TEAM = 2Q2L4BB4KG;
+				INFOPLIST_FILE = FreeFlowKeyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shebetoff.freeflow.ios.keyboard;
+				PRODUCT_MODULE_NAME = FreeFlowKeyboard;
+				PRODUCT_NAME = FreeFlowKeyboard;
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		68EFA82F17F73204EDDFAE66 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = FreeFlowApp/FreeFlowApp.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 2Q2L4BB4KG;
+				INFOPLIST_FILE = FreeFlowApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shebetoff.freeflow.ios;
+				PRODUCT_NAME = FreeFlow;
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7A9DCE84867B3059130658AE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = FreeFlowKeyboard/FreeFlowKeyboard.entitlements;
+				DEVELOPMENT_TEAM = 2Q2L4BB4KG;
+				INFOPLIST_FILE = FreeFlowKeyboard/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.shebetoff.freeflow.ios.keyboard;
+				PRODUCT_MODULE_NAME = FreeFlowKeyboard;
+				PRODUCT_NAME = FreeFlowKeyboard;
+				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		8ACBB2BE7CF0DF6310665856 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C2A683DBB63F3F2AD0DEAEA5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3CF16A055F703A3498CD88A2 /* Build configuration list for PBXProject "FreeFlow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C2A683DBB63F3F2AD0DEAEA5 /* Debug */,
+				8ACBB2BE7CF0DF6310665856 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8B033FA25FD2C9715EA12807 /* Build configuration list for PBXNativeTarget "FreeFlowKeyboard" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				504190E31DE74CE4B4AFD735 /* Debug */,
+				7A9DCE84867B3059130658AE /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F1741124A4768C8B3004538D /* Build configuration list for PBXNativeTarget "FreeFlowApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				68EFA82F17F73204EDDFAE66 /* Debug */,
+				3A3EF55EC87E6C79CE222FB2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 9B6F5D6AE2205A2A210C7385 /* Project object */;
+}
