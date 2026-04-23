@@ -1704,6 +1704,20 @@ struct RunLogEntryView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Collapsed header
             HStack(spacing: 0) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                }) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: actionIconSize, height: actionIconSize)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isExpanded.toggle()
@@ -1731,20 +1745,6 @@ struct RunLogEntryView: View {
                 .buttonStyle(.plain)
 
                 HStack(spacing: 4) {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            isExpanded.toggle()
-                        }
-                    }) {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: actionIconSize, height: actionIconSize)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-
                     if isError && item.audioFileName != nil {
                         Button {
                             appState.retryTranscription(item: item)
