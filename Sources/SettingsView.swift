@@ -498,7 +498,7 @@ struct GeneralSettingsView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 64, height: 64)
 
-                    Text("FreeFlow")
+                    Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "FreeFlow")
                         .font(.system(size: 20, weight: .bold, design: .rounded))
 
                     Text("v\(appVersion)")
