@@ -3,3 +3,8 @@ build/
 *.swp
 .env
 .build
+ios/build/
+ios/DerivedData/
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+*.xcuserdatad/
