@@ -6,6 +6,7 @@ import AppKit
 struct GitHubRelease: Decodable {
     let tagName: String
     let name: String?
+    let body: String?
     let htmlUrl: String
     let publishedAt: String
     let assets: [GitHubReleaseAsset]
@@ -13,9 +14,85 @@ struct GitHubRelease: Decodable {
     enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
         case name
+        case body
         case htmlUrl = "html_url"
         case publishedAt = "published_at"
         case assets
+    }
+}
+
+struct SemanticVersion: Comparable, Equatable {
+    let major: Int
+    let minor: Int
+    let patch: Int
+    let prerelease: [String]
+
+    init?(_ value: String) {
+        var normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("v") || normalized.hasPrefix("V") {
+            normalized.removeFirst()
+        }
+
+        let withoutBuildMetadata = normalized.split(separator: "+", maxSplits: 1).first.map(String.init) ?? normalized
+        let versionAndPrerelease = withoutBuildMetadata
+            .split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+            .map(String.init)
+        let coreComponents = versionAndPrerelease[0].split(separator: ".").map(String.init)
+
+        guard coreComponents.count == 3,
+              let major = Int(coreComponents[0]),
+              let minor = Int(coreComponents[1]),
+              let patch = Int(coreComponents[2]) else {
+            return nil
+        }
+
+        let parsedPrerelease: [String]
+        if versionAndPrerelease.count > 1 {
+            let prereleaseRaw = versionAndPrerelease[1]
+            guard !prereleaseRaw.isEmpty else { return nil }
+            parsedPrerelease = prereleaseRaw
+                .split(separator: ".", omittingEmptySubsequences: false)
+                .map(String.init)
+            guard parsedPrerelease.allSatisfy({ !$0.isEmpty }) else { return nil }
+        } else {
+            parsedPrerelease = []
+        }
+
+        self.major = major
+        self.minor = minor
+        self.patch = patch
+        prerelease = parsedPrerelease
+    }
+
+    static func < (lhs: SemanticVersion, rhs: SemanticVersion) -> Bool {
+        if lhs.major != rhs.major { return lhs.major < rhs.major }
+        if lhs.minor != rhs.minor { return lhs.minor < rhs.minor }
+        if lhs.patch != rhs.patch { return lhs.patch < rhs.patch }
+
+        if lhs.prerelease.isEmpty && rhs.prerelease.isEmpty { return false }
+        if lhs.prerelease.isEmpty { return false }
+        if rhs.prerelease.isEmpty { return true }
+
+        for index in 0..<min(lhs.prerelease.count, rhs.prerelease.count) {
+            let left = lhs.prerelease[index]
+            let right = rhs.prerelease[index]
+            if left == right { continue }
+
+            let leftNumber = Int(left)
+            let rightNumber = Int(right)
+            switch (leftNumber, rightNumber) {
+            case let (leftNumber?, rightNumber?):
+                return leftNumber < rightNumber
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                return left < right
+            }
+        }
+
+        return lhs.prerelease.count < rhs.prerelease.count
     }
 }
 
@@ -29,6 +106,14 @@ struct GitHubReleaseAsset: Decodable {
         case browserDownloadUrl = "browser_download_url"
         case size
     }
+}
+
+private struct SemanticRelease {
+    let release: GitHubRelease
+    let version: SemanticVersion
+    let versionString: String
+    let publishedDate: Date
+    let releaseDateString: String
 }
 
 // MARK: - Update Status
@@ -49,6 +134,7 @@ final class UpdateManager: ObservableObject {
 
     @Published var updateAvailable = false
     @Published var latestRelease: GitHubRelease?
+    @Published var latestReleaseVersion: String = ""
     @Published var latestReleaseDate: String = ""
     @Published var isChecking = false
     @Published var downloadProgress: Double?
@@ -71,9 +157,20 @@ final class UpdateManager: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "updateSkippedVersion") }
     }
 
-    private let releasesURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/releases/latest")!
+    private var lastPostTranscriptionReminderVersion: String? {
+        get { UserDefaults.standard.string(forKey: "updateLastPostTranscriptionReminderVersion") }
+        set { UserDefaults.standard.set(newValue, forKey: "updateLastPostTranscriptionReminderVersion") }
+    }
+
+    private var lastPostTranscriptionReminderDate: Date? {
+        get { UserDefaults.standard.object(forKey: "updateLastPostTranscriptionReminderDate") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "updateLastPostTranscriptionReminderDate") }
+    }
+
+    private let releasesURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/releases?per_page=100")!
     private let stabilityBufferDays: TimeInterval = 3
     private let checkIntervalSeconds: TimeInterval = 7 * 24 * 60 * 60 // 7 days
+    private let postTranscriptionReminderInterval: TimeInterval = 24 * 60 * 60 // 1 day
     private var periodicTimer: Timer?
     private var activeDownloadTask: Task<Void, Never>?
 
@@ -116,6 +213,7 @@ final class UpdateManager: ObservableObject {
 
     func checkForUpdates(userInitiated: Bool) async {
         let currentBuildTag = Bundle.main.infoDictionary?["FreeFlowBuildTag"] as? String
+        let currentVersionString = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
 
         // Dev builds (no embedded tag): skip auto-checks, but allow manual checks
         if !userInitiated && currentBuildTag == nil {
@@ -142,6 +240,8 @@ final class UpdateManager: ObservableObject {
                 lastCheckDate = Date()
                 updateAvailable = false
                 latestRelease = nil
+                latestReleaseVersion = ""
+                latestReleaseDate = ""
                 if userInitiated { showUpToDateAlert() }
                 return
             }
@@ -152,37 +252,53 @@ final class UpdateManager: ObservableObject {
             }
 
             let decoder = JSONDecoder()
-            let release = try decoder.decode(GitHubRelease.self, from: data)
+            let releases = try decoder.decode([GitHubRelease].self, from: data)
             lastCheckDate = Date()
 
-            // Parse the published date
-            let iso8601 = ISO8601DateFormatter()
-            iso8601.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let iso8601Basic = ISO8601DateFormatter()
-            iso8601Basic.formatOptions = [.withInternetDateTime]
-
-            guard let publishedDate = iso8601.date(from: release.publishedAt)
-                    ?? iso8601Basic.date(from: release.publishedAt) else {
-                if userInitiated { showErrorAlert("Could not parse release date.") }
+            guard let currentVersion = SemanticVersion(currentVersionString) else {
+                updateAvailable = false
+                if userInitiated {
+                    showErrorAlert("The current app version does not use semantic versioning.")
+                }
                 return
             }
 
-            // Format the release date for display
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateStyle = .medium
-            dateFormatter.timeStyle = .none
-            let releaseDateString = dateFormatter.string(from: publishedDate)
-
-            // If this is the same build we're running, no update available
-            if let currentTag = currentBuildTag, release.tagName == currentTag {
+            let semanticReleases = releaseCandidates(from: releases)
+            guard let latestSemanticRelease = semanticReleases.last else {
                 updateAvailable = false
                 latestRelease = nil
+                latestReleaseVersion = ""
+                latestReleaseDate = ""
+                if userInitiated {
+                    showErrorAlert("No semantic version release was found.")
+                }
+                return
+            }
+
+            let latestVersion = latestSemanticRelease.version
+            let release = latestSemanticRelease.release
+            let includedReleases = semanticReleases
+                .filter { currentVersion < $0.version && $0.version <= latestVersion }
+                .map(\.release)
+            latestRelease = releaseWithAggregatedNotes(latest: release, includedReleases: includedReleases)
+            latestReleaseVersion = latestSemanticRelease.versionString
+            latestReleaseDate = latestSemanticRelease.releaseDateString
+
+            // If this is the same or an older semantic version, no update is available.
+            if let currentTag = currentBuildTag, release.tagName == currentTag {
+                updateAvailable = false
+                if userInitiated { showUpToDateAlert() }
+                return
+            }
+
+            if latestVersion <= currentVersion {
+                updateAvailable = false
                 if userInitiated { showUpToDateAlert() }
                 return
             }
 
             // Check stability buffer (3 days since published)
-            let daysSincePublished = Date().timeIntervalSince(publishedDate) / (24 * 60 * 60)
+            let daysSincePublished = Date().timeIntervalSince(latestSemanticRelease.publishedDate) / (24 * 60 * 60)
             if daysSincePublished < stabilityBufferDays {
                 if !userInitiated {
                     // Auto-check: silently skip, too new
@@ -190,8 +306,6 @@ final class UpdateManager: ObservableObject {
                     return
                 }
                 // Manual check: let user know and offer the update anyway
-                latestRelease = release
-                latestReleaseDate = releaseDateString
                 updateAvailable = true
                 showRecentReleaseAlert(daysSincePublished: daysSincePublished)
                 return
@@ -203,8 +317,6 @@ final class UpdateManager: ObservableObject {
                 return
             }
 
-            latestRelease = release
-            latestReleaseDate = releaseDateString
             updateAvailable = true
 
             if userInitiated {
@@ -217,6 +329,105 @@ final class UpdateManager: ObservableObject {
         }
     }
 
+    private func releaseCandidates(from releases: [GitHubRelease]) -> [SemanticRelease] {
+        releases.compactMap { release in
+            guard let version = SemanticVersion(release.tagName),
+                  let publishedDate = releasePublishedDate(from: release.publishedAt) else {
+                return nil
+            }
+
+            return SemanticRelease(
+                release: release,
+                version: version,
+                versionString: normalizedVersionString(from: release.tagName),
+                publishedDate: publishedDate,
+                releaseDateString: displayDateString(from: publishedDate)
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.version == rhs.version {
+                return lhs.publishedDate < rhs.publishedDate
+            }
+            return lhs.version < rhs.version
+        }
+    }
+
+    private func releaseWithAggregatedNotes(latest: GitHubRelease, includedReleases: [GitHubRelease]) -> GitHubRelease {
+        GitHubRelease(
+            tagName: latest.tagName,
+            name: latest.name,
+            body: aggregatedReleaseNotes(from: includedReleases) ?? latest.body,
+            htmlUrl: latest.htmlUrl,
+            publishedAt: latest.publishedAt,
+            assets: latest.assets
+        )
+    }
+
+    private func aggregatedReleaseNotes(from releases: [GitHubRelease]) -> String? {
+        let notes = releases.compactMap { releaseNotesBody(from: $0.body) }
+        guard !notes.isEmpty else { return nil }
+        return notes.joined(separator: "\n\n")
+    }
+
+    private func releasePublishedDate(from value: String) -> Date? {
+        let iso8601 = ISO8601DateFormatter()
+        iso8601.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let iso8601Basic = ISO8601DateFormatter()
+        iso8601Basic.formatOptions = [.withInternetDateTime]
+
+        return iso8601.date(from: value) ?? iso8601Basic.date(from: value)
+    }
+
+    private func displayDateString(from date: Date) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .none
+        return dateFormatter.string(from: date)
+    }
+
+    private func normalizedVersionString(from tagName: String) -> String {
+        tagName.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(
+            of: "^v",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+    }
+
+    func shouldShowPostTranscriptionReminder() -> Bool {
+        guard updateAvailable,
+              let release = latestRelease,
+              updateStatus == .idle,
+              skippedVersion != release.tagName else {
+            return false
+        }
+
+        guard lastPostTranscriptionReminderVersion == release.tagName,
+              let lastReminder = lastPostTranscriptionReminderDate else {
+            return true
+        }
+
+        return Date().timeIntervalSince(lastReminder) > postTranscriptionReminderInterval
+    }
+
+    func markPostTranscriptionReminderShown() {
+        guard let release = latestRelease else { return }
+        lastPostTranscriptionReminderVersion = release.tagName
+        lastPostTranscriptionReminderDate = Date()
+    }
+
+    private func suppressPostTranscriptionReminder(for tagName: String) {
+        lastPostTranscriptionReminderVersion = tagName
+        lastPostTranscriptionReminderDate = Date()
+    }
+
+    private func clearAvailableUpdate() {
+        updateAvailable = false
+        latestRelease = nil
+        latestReleaseVersion = ""
+        latestReleaseDate = ""
+    }
+
     // MARK: - Alerts
 
     func showUpdateAlert() {
@@ -224,10 +435,12 @@ final class UpdateManager: ObservableObject {
 
         let alert = NSAlert()
         alert.messageText = "A New Version is Available"
-        alert.informativeText = "A new version of FreeFlow (released \(latestReleaseDate)) is available.\n\nWould you like to download the update?"
+        let versionText = latestReleaseVersion.isEmpty ? release.tagName : "v\(latestReleaseVersion)"
+        alert.informativeText = "FreeFlow \(versionText) was released \(latestReleaseDate).\n\nWould you like to download the update?"
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "Download Update")
+        alert.addButton(withTitle: "What's New")
         alert.addButton(withTitle: "Remind Me Later")
         alert.addButton(withTitle: "Skip This Version")
 
@@ -235,12 +448,16 @@ final class UpdateManager: ObservableObject {
         switch response {
         case .alertFirstButtonReturn:
             downloadAndInstall(release: release)
+        case .alertSecondButtonReturn:
+            showReleaseNotes(for: release)
+            showUpdateAlert()
         case .alertThirdButtonReturn:
+            suppressPostTranscriptionReminder(for: release.tagName)
+        case NSApplication.ModalResponse(rawValue: NSApplication.ModalResponse.alertThirdButtonReturn.rawValue + 1):
             skippedVersion = release.tagName
-            updateAvailable = false
-            latestRelease = nil
+            clearAvailableUpdate()
         default:
-            break // Remind me later — do nothing
+            break
         }
     }
 
@@ -252,15 +469,24 @@ final class UpdateManager: ObservableObject {
 
         let alert = NSAlert()
         alert.messageText = "New Release Available"
-        alert.informativeText = "A new version of FreeFlow was released \(ageText). It's very recent — you can download it now or wait a few days for stability.\n\nWould you like to download it?"
+        let versionText = latestReleaseVersion.isEmpty ? release.tagName : "v\(latestReleaseVersion)"
+        alert.informativeText = "FreeFlow \(versionText) was released \(ageText). It's very recent — you can download it now or wait a few days for stability.\n\nWould you like to download it?"
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "Download Now")
+        alert.addButton(withTitle: "What's New")
         alert.addButton(withTitle: "Wait")
 
         let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
+        switch response {
+        case .alertFirstButtonReturn:
             downloadAndInstall(release: release)
+        case .alertSecondButtonReturn:
+            showReleaseNotes(for: release)
+            showRecentReleaseAlert(daysSincePublished: daysSincePublished)
+        default:
+            suppressPostTranscriptionReminder(for: release.tagName)
+            updateAvailable = false
         }
     }
 
@@ -272,6 +498,73 @@ final class UpdateManager: ObservableObject {
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    func showReleaseNotes() {
+        guard let release = latestRelease else { return }
+        showReleaseNotes(for: release)
+    }
+
+    private func showReleaseNotes(for release: GitHubRelease) {
+        let alert = NSAlert()
+        let versionText = latestReleaseVersion.isEmpty ? release.tagName : "v\(latestReleaseVersion)"
+        alert.messageText = "What's New in FreeFlow \(versionText)"
+        alert.informativeText = "Release notes from GitHub."
+        alert.alertStyle = .informational
+        alert.icon = NSApp.applicationIconImage
+        alert.accessoryView = releaseNotesView(text: releaseNotesText(for: release))
+        alert.addButton(withTitle: "OK")
+
+        if let releaseURL = URL(string: release.htmlUrl) {
+            alert.addButton(withTitle: "Open on GitHub")
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                NSWorkspace.shared.open(releaseURL)
+            }
+        } else {
+            alert.runModal()
+        }
+    }
+
+    private func releaseNotesText(for release: GitHubRelease) -> String {
+        guard let body = releaseNotesBody(from: release.body) else {
+            return "No release notes were published for this version."
+        }
+
+        return body
+    }
+
+    private func releaseNotesBody(from body: String?) -> String? {
+        guard let body = body?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !body.isEmpty else {
+            return nil
+        }
+
+        if let downloadRange = body.range(of: "\n## Download") {
+            let notes = String(body[..<downloadRange.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            return notes.isEmpty ? nil : notes
+        }
+
+        return body
+    }
+
+    private func releaseNotesView(text: String) -> NSView {
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 280))
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .bezelBorder
+
+        let textView = NSTextView(frame: scrollView.bounds)
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = true
+        textView.backgroundColor = .textBackgroundColor
+        textView.textColor = .textColor
+        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.string = text
+
+        scrollView.documentView = textView
+        return scrollView
     }
 
     private func showErrorAlert(_ message: String) {

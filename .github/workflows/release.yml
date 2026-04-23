@@ -2,7 +2,8 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    tags:
+      - "v*.*.*"
 
 permissions:
   contents: write
@@ -15,15 +16,39 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate version tag
+      - name: Resolve release version
         id: version
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          TAG="build-$(date -u +'%Y%m%d-%H%M%S')-${SHORT_SHA}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
 
-      - name: Embed build tag in Info.plist
-        run: plutil -insert FreeFlowBuildTag -string "${{ steps.version.outputs.tag }}" Info.plist
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must use semantic versioning, for example v0.3.1." >&2
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp app version
+        run: |
+          plutil -replace CFBundleShortVersionString -string "${{ steps.version.outputs.version }}" Info.plist
+          plutil -replace CFBundleVersion -string "${{ github.run_number }}" Info.plist
+          plutil -replace FreeFlowBuildTag -string "${{ steps.version.outputs.tag }}" Info.plist
+
+      - name: Build release notes from changelog
+        id: release_notes
+        run: |
+          .github/scripts/changelog-section.sh "${{ steps.version.outputs.version }}" > "$RUNNER_TEMP/release-notes.md"
+          {
+            echo "body<<EOF"
+            cat "$RUNNER_TEMP/release-notes.md"
+            echo
+            echo "## Download"
+            echo
+            echo "**[FreeFlow.dmg](https://github.com/zachlatta/freeflow/releases/download/${{ steps.version.outputs.tag }}/FreeFlow.dmg)** — Universal build for all Macs (Apple Silicon + Intel)."
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Install build tools
         run: brew install create-dmg fileicon
@@ -112,12 +137,9 @@ jobs:
         uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: FreeFlow ${{ steps.version.outputs.tag }}
-          body: |
-            ## Download
-
-            **[FreeFlow.dmg](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg)** — Universal build for all Macs (Apple Silicon + Intel).
-          generate_release_notes: true
+          name: FreeFlow ${{ steps.version.outputs.version }}
+          body: ${{ steps.release_notes.outputs.body }}
+          generate_release_notes: false
           make_latest: true
           files: |
             FreeFlow.dmg

@@ -789,9 +789,15 @@ struct GeneralSettingsView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "arrow.down.circle.fill")
                                 .foregroundStyle(.blue)
-                            Text("A new version of FreeFlow is available!")
+                            Text(updateManager.latestReleaseVersion.isEmpty
+                                ? "A new version of FreeFlow is available!"
+                                : "FreeFlow v\(updateManager.latestReleaseVersion) is available!")
                                 .font(.caption.weight(.semibold))
                             Spacer()
+                            Button("What's New") {
+                                updateManager.showReleaseNotes()
+                            }
+                            .font(.caption)
                             Button("Update Now") {
                                 if let release = updateManager.latestRelease {
                                     updateManager.downloadAndInstall(release: release)

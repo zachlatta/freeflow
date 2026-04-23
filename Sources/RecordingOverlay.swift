@@ -9,6 +9,7 @@ final class RecordingOverlayState: ObservableObject {
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
     @Published var isCommandMode = false
     @Published var showsTranscribingSpinner = false
+    @Published var updateVersion: String = ""
 }
 
 enum OverlayPhase {
@@ -16,6 +17,7 @@ enum OverlayPhase {
     case recording
     case transcribing
     case feedback
+    case updateAvailable
 }
 
 // MARK: - Panel Helpers
@@ -63,6 +65,7 @@ final class RecordingOverlayManager {
     private var lockedOverlayWidth: CGFloat?
 
     var onStopButtonPressed: (() -> Void)?
+    var onUpdateOverlayPressed: (() -> Void)?
 
     private var screenHasNotch: Bool {
         guard let screen = NSScreen.main else { return false }
@@ -82,7 +85,8 @@ final class RecordingOverlayManager {
     }
 
     private var overlayAcceptsMouseEvents: Bool {
-        overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle
+        (overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle)
+            || overlayState.phase == .updateAvailable
     }
 
     func showInitializing(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
@@ -151,6 +155,17 @@ final class RecordingOverlayManager {
         }
     }
 
+    func showUpdateAvailable(version: String) {
+        DispatchQueue.main.async {
+            self.lockedOverlayWidth = nil
+            self.overlayState.isCommandMode = false
+            self.overlayState.showsTranscribingSpinner = false
+            self.overlayState.updateVersion = version
+            self.overlayState.phase = .updateAvailable
+            self.showOverlayPanel(animatedResize: true)
+        }
+    }
+
     func dismiss() {
         DispatchQueue.main.async {
             self.dismissAll()
@@ -214,6 +229,9 @@ final class RecordingOverlayManager {
                 state: overlayState,
                 onStopButtonPressed: { [weak self] in
                     self?.onStopButtonPressed?()
+                },
+                onUpdateOverlayPressed: { [weak self] in
+                    self?.onUpdateOverlayPressed?()
                 }
             )
             .padding(.top, screenHasNotch ? notchOverlap : 0)
@@ -254,6 +272,12 @@ final class RecordingOverlayManager {
             return max(notchWidth, feedbackWidth)
         }
 
+        if overlayState.phase == .updateAvailable {
+            let updateWidth: CGFloat = 190
+            guard screenHasNotch else { return updateWidth }
+            return max(notchWidth, updateWidth)
+        }
+
         let commandModeWidth: CGFloat = 180
         let toggleWidth: CGFloat = 150
         let defaultWidth: CGFloat = 92
@@ -281,6 +305,7 @@ final class RecordingOverlayManager {
         lockedOverlayWidth = nil
         overlayState.isCommandMode = false
         overlayState.showsTranscribingSpinner = false
+        overlayState.updateVersion = ""
         if let panel = overlayWindow {
             panel.orderOut(nil)
             overlayWindow = nil
@@ -425,6 +450,7 @@ struct InitializingDotsView: View {
 struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
     let onStopButtonPressed: () -> Void
+    let onUpdateOverlayPressed: () -> Void
 
     private let leadingAccessoryWidth: CGFloat = 24
     private let trailingAccessoryWidth: CGFloat = 32
@@ -441,6 +467,8 @@ struct RecordingOverlayView: View {
         Group {
             if state.phase == .feedback {
                 FailureIndicatorView()
+            } else if state.phase == .updateAvailable {
+                UpdateAvailableOverlayView(onPress: onUpdateOverlayPressed)
             } else {
                 ZStack {
                     Group {
@@ -516,5 +544,26 @@ struct FailureIndicatorView: View {
             .frame(width: 20, height: 20)
             .background(Circle().fill(Color.red.opacity(0.92)))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct UpdateAvailableOverlayView: View {
+    let onPress: () -> Void
+
+    var body: some View {
+        Button(action: onPress) {
+            HStack(spacing: 7) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+
+                Text("Update Available")
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(.plain)
     }
 }
