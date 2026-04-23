@@ -1814,9 +1814,18 @@ struct RunLogEntryView: View {
     @State private var isRetrying = false
     @State private var showContextPrompt = false
     @State private var showPostProcessingPrompt = false
+    @State private var copiedTranscript = false
+    @State private var copiedTranscriptResetWorkItem: DispatchWorkItem?
 
     private var isError: Bool {
         item.postProcessingStatus.hasPrefix("Error:")
+    }
+
+    private var copyableTranscript: String {
+        if !item.postProcessedTranscript.isEmpty {
+            return item.postProcessedTranscript
+        }
+        return item.rawTranscript
     }
 
     @ViewBuilder
@@ -1913,6 +1922,15 @@ struct RunLogEntryView: View {
                             item: item,
                             audioDirURL: AppState.audioStorageDirectory()
                         )
+                    }
+
+                    actionIconButton(
+                        systemName: copiedTranscript ? "checkmark" : "doc.on.doc",
+                        color: copiedTranscript ? .green : .secondary,
+                        help: copiedTranscript ? "Copied transcript" : "Copy transcript",
+                        disabled: copyableTranscript.isEmpty
+                    ) {
+                        copyTranscriptToPasteboard()
                     }
 
                     actionIconButton(systemName: "trash", help: "Delete this run") {
@@ -2117,6 +2135,22 @@ struct RunLogEntryView: View {
         text.components(separatedBy: CharacterSet(charactersIn: ",;\n"))
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+
+    private func copyTranscriptToPasteboard() {
+        guard !copyableTranscript.isEmpty else { return }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(copyableTranscript, forType: .string)
+        copiedTranscript = true
+
+        copiedTranscriptResetWorkItem?.cancel()
+        let resetWorkItem = DispatchWorkItem {
+            copiedTranscript = false
+            copiedTranscriptResetWorkItem = nil
+        }
+        copiedTranscriptResetWorkItem = resetWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
     }
 }
 
