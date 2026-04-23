@@ -41,12 +41,18 @@ private let iso8601DayFormatter: DateFormatter = {
 struct ProviderSettingsFields: View {
     @EnvironmentObject var appState: AppState
     @Binding var apiBaseURLInput: String
+    @Binding var transcriptionAPIURLInput: String
+    @Binding var transcriptionAPIKeyInput: String
     @FocusState private var isEditingAPIBaseURL: Bool
     @FocusState private var isEditingTranscriptionModel: Bool
+    @FocusState private var isEditingRealtimeStreamingModel: Bool
     @FocusState private var isEditingPostProcessingModel: Bool
     @FocusState private var isEditingPostProcessingFallbackModel: Bool
     @FocusState private var isEditingContextModel: Bool
+    @FocusState private var transcriptionAPIURLFocused: Bool
+    @FocusState private var transcriptionAPIKeyFocused: Bool
     @State private var transcriptionModelDraft: String = ""
+    @State private var realtimeStreamingModelDraft: String = ""
     @State private var postProcessingModelDraft: String = ""
     @State private var postProcessingFallbackModelDraft: String = ""
     @State private var contextModelDraft: String = ""
@@ -65,6 +71,13 @@ struct ProviderSettingsFields: View {
         transcriptionModelDraft = trimmed
         guard appState.transcriptionModel != trimmed else { return }
         appState.transcriptionModel = trimmed
+    }
+
+    private func commitRealtimeStreamingModel() {
+        let trimmed = realtimeStreamingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        realtimeStreamingModelDraft = trimmed
+        guard appState.realtimeStreamingModel != trimmed else { return }
+        appState.realtimeStreamingModel = trimmed
     }
 
     private func commitPostProcessingModel() {
@@ -86,6 +99,20 @@ struct ProviderSettingsFields: View {
         contextModelDraft = trimmed
         guard appState.contextModel != trimmed else { return }
         appState.contextModel = trimmed
+    }
+
+    private func commitTranscriptionAPIURL() {
+        let trimmed = transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        transcriptionAPIURLInput = trimmed
+        guard appState.transcriptionAPIURL != trimmed else { return }
+        appState.transcriptionAPIURL = trimmed
+    }
+
+    private func commitTranscriptionAPIKey() {
+        let trimmed = transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        transcriptionAPIKeyInput = trimmed
+        guard appState.transcriptionAPIKey != trimmed else { return }
+        appState.transcriptionAPIKey = trimmed
     }
 
     var body: some View {
@@ -120,32 +147,6 @@ struct ProviderSettingsFields: View {
 
             if showsModelDescription {
                 Text("If you use another provider, enter that provider's model IDs here.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Transcription Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField(AppState.defaultTranscriptionModel, text: $transcriptionModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isEditingTranscriptionModel)
-                        .onSubmit {
-                            commitTranscriptionModel()
-                        }
-                        .onChange(of: isEditingTranscriptionModel) { isEditing in
-                            if !isEditing {
-                                commitTranscriptionModel()
-                            }
-                        }
-                    Button("Reset to Default") {
-                        transcriptionModelDraft = AppState.defaultTranscriptionModel
-                        appState.transcriptionModel = AppState.defaultTranscriptionModel
-                    }
-                    .font(.caption)
-                }
-                Text("Used for speech-to-text transcription.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -227,9 +228,126 @@ struct ProviderSettingsFields: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultTranscriptionModel, text: $transcriptionModelDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isEditingTranscriptionModel)
+                        .onSubmit {
+                            commitTranscriptionModel()
+                        }
+                        .onChange(of: isEditingTranscriptionModel) { isEditing in
+                            if !isEditing {
+                                commitTranscriptionModel()
+                            }
+                        }
+                    Button("Reset to Default") {
+                        transcriptionModelDraft = AppState.defaultTranscriptionModel
+                        appState.transcriptionModel = AppState.defaultTranscriptionModel
+                    }
+                    .font(.caption)
+                }
+                Text("Used for speech-to-text transcription.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription API URL")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField("Uses API Base URL when empty", text: $transcriptionAPIURLInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .focused($transcriptionAPIURLFocused)
+                        .onSubmit {
+                            commitTranscriptionAPIURL()
+                        }
+                        .onChange(of: transcriptionAPIURLFocused) { isFocused in
+                            if !isFocused {
+                                commitTranscriptionAPIURL()
+                            }
+                        }
+                    if !transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Clear") {
+                            transcriptionAPIURLInput = ""
+                            appState.transcriptionAPIURL = ""
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription API Key")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    SecureField("Uses API Key when empty", text: $transcriptionAPIKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .focused($transcriptionAPIKeyFocused)
+                        .onSubmit {
+                            commitTranscriptionAPIKey()
+                        }
+                        .onChange(of: transcriptionAPIKeyFocused) { isFocused in
+                            if !isFocused {
+                                commitTranscriptionAPIKey()
+                            }
+                        }
+                    if !transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Clear") {
+                            transcriptionAPIKeyInput = ""
+                            appState.transcriptionAPIKey = ""
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+
+            Divider()
+
+            Toggle(
+                "Stream audio while recording (realtime)",
+                isOn: $appState.realtimeStreamingEnabled
+            )
+            Text("Streams audio through the provider's OpenAI-compatible /v1/realtime WebSocket so transcription runs while you speak.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Realtime Transcription Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField("Required by some providers, e.g. gpt-4o-transcribe", text: $realtimeStreamingModelDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isEditingRealtimeStreamingModel)
+                        .onSubmit {
+                            commitRealtimeStreamingModel()
+                        }
+                        .onChange(of: isEditingRealtimeStreamingModel) { isEditing in
+                            if !isEditing {
+                                commitRealtimeStreamingModel()
+                            }
+                        }
+                    if !realtimeStreamingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Reset") {
+                            realtimeStreamingModelDraft = ""
+                            appState.realtimeStreamingModel = ""
+                        }
+                        .font(.caption)
+                    }
+                }
+                Text("Used only for realtime streaming. Leave empty for providers that supply a server default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .onAppear {
             transcriptionModelDraft = appState.transcriptionModel
+            realtimeStreamingModelDraft = appState.realtimeStreamingModel
             postProcessingModelDraft = appState.postProcessingModel
             postProcessingFallbackModelDraft = appState.postProcessingFallbackModel
             contextModelDraft = appState.contextModel
@@ -237,6 +355,11 @@ struct ProviderSettingsFields: View {
         .onChange(of: appState.transcriptionModel) { value in
             if !isEditingTranscriptionModel {
                 transcriptionModelDraft = value
+            }
+        }
+        .onChange(of: appState.realtimeStreamingModel) { value in
+            if !isEditingRealtimeStreamingModel {
+                realtimeStreamingModelDraft = value
             }
         }
         .onChange(of: appState.postProcessingModel) { value in
@@ -315,6 +438,8 @@ struct GeneralSettingsView: View {
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
+    @State private var transcriptionAPIURLInput: String = ""
+    @State private var transcriptionAPIKeyInput: String = ""
     @State private var advancedProviderSettingsExpanded = false
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
@@ -522,10 +647,22 @@ struct GeneralSettingsView: View {
         .onAppear {
             apiKeyInput = appState.apiKey
             apiBaseURLInput = appState.apiBaseURL
+            transcriptionAPIURLInput = appState.transcriptionAPIURL
+            transcriptionAPIKeyInput = appState.transcriptionAPIKey
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             appState.refreshLaunchAtLoginStatus()
             Task { await githubCache.fetchIfNeeded() }
+        }
+        .onChange(of: appState.transcriptionAPIURL) { value in
+            if transcriptionAPIURLInput != value {
+                transcriptionAPIURLInput = value
+            }
+        }
+        .onChange(of: appState.transcriptionAPIKey) { value in
+            if transcriptionAPIKeyInput != value {
+                transcriptionAPIKeyInput = value
+            }
         }
     }
 
@@ -754,6 +891,8 @@ struct GeneralSettingsView: View {
                     Divider()
                     ProviderSettingsFields(
                         apiBaseURLInput: $apiBaseURLInput,
+                        transcriptionAPIURLInput: $transcriptionAPIURLInput,
+                        transcriptionAPIKeyInput: $transcriptionAPIKeyInput,
                         showsModelDescription: false
                     )
                 }
