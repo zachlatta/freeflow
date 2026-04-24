@@ -5,6 +5,7 @@ import AVFoundation
 import ServiceManagement
 import ApplicationServices
 import ScreenCaptureKit
+import Carbon
 import os.log
 private let recordingLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Recording")
 
@@ -2829,14 +2830,43 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func pasteAtCursor() {
         let source = CGEventSource(stateID: .hidSystemState)
+        let vKeyCode = keyCodeForCharacter("v") ?? 9
 
-        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: true)
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true)
         keyDown?.flags = .maskCommand
         keyDown?.post(tap: .cgSessionEventTap)
 
-        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: false)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
         keyUp?.flags = .maskCommand
         keyUp?.post(tap: .cgSessionEventTap)
+    }
+
+    private func keyCodeForCharacter(_ character: String) -> CGKeyCode? {
+        guard let char = character.lowercased().utf16.first else { return nil }
+        let source = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+        guard let layoutDataRef = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+            return nil
+        }
+        let layoutData = unsafeBitCast(layoutDataRef, to: CFData.self) as Data
+        return layoutData.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> CGKeyCode? in
+            guard let layout = ptr.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else {
+                return nil
+            }
+            for keyCode in UInt16(0)..<UInt16(128) {
+                var chars = [UniChar](repeating: 0, count: 4)
+                var charCount = 0
+                var deadKeyState: UInt32 = 0
+                let status = UCKeyTranslate(
+                    layout, keyCode, UInt16(kUCKeyActionDisplay), 0,
+                    UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                    &deadKeyState, 4, &charCount, &chars
+                )
+                if status == noErr, charCount > 0, chars[0] == char {
+                    return CGKeyCode(keyCode)
+                }
+            }
+            return nil
+        }
     }
 
     private func pressEnter() {
