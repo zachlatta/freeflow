@@ -899,18 +899,28 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return appSupport.appendingPathComponent("\(appName)/is-recording")
     }
 
+    /// Serial queue that owns every flag-file I/O so the recording
+    /// start/stop hot path never blocks on disk.
+    private static let recordingStateFlagQueue = DispatchQueue(
+        label: "com.zachlatta.freeflow.recording-state-flag"
+    )
+
     /// Write or clear the `is-recording` flag file. Called from the
-    /// `isRecording` didSet. Failures are swallowed — this is advisory IPC
-    /// and must never interrupt the recording pipeline.
+    /// `isRecording` didSet. Dispatches to a background queue so disk
+    /// I/O never adds latency to recording start/stop. Failures are
+    /// swallowed — this is advisory IPC and must never interrupt the
+    /// recording pipeline.
     static func writeRecordingStateFlag(_ recording: Bool) {
-        let url = recordingStateFlagURL()
-        if recording {
-            let dir = url.deletingLastPathComponent()
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let timestamp = String(Date().timeIntervalSince1970)
-            try? timestamp.write(to: url, atomically: true, encoding: .utf8)
-        } else {
-            try? FileManager.default.removeItem(at: url)
+        let timestamp = recording ? String(Date().timeIntervalSince1970) : nil
+        recordingStateFlagQueue.async {
+            let url = recordingStateFlagURL()
+            if let timestamp {
+                let dir = url.deletingLastPathComponent()
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try? timestamp.write(to: url, atomically: true, encoding: .utf8)
+            } else {
+                try? FileManager.default.removeItem(at: url)
+            }
         }
     }
 
