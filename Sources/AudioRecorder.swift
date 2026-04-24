@@ -100,7 +100,6 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     /// to a realtime transcription socket. The recorder writes a normalized
     /// 16 kHz mono PCM16 WAV file independently for upload-based transcription.
     var onPCM16Samples: ((Data) -> Void)?
-    private let recordingConverterLock = OSAllocatedUnfairLock<AVAudioConverter?>(initialState: nil)
     private let pcm16ConverterLock = OSAllocatedUnfairLock<AVAudioConverter?>(initialState: nil)
     private let recordingTargetFormat: AVAudioFormat = {
         AVAudioFormat(
@@ -152,12 +151,12 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private func preferredCaptureDevice(
         for requestedDeviceUID: String?,
         reason: String
-    ) -> AVCaptureDevice? {
+    ) throws -> AVCaptureDevice {
         guard let requestedDeviceUID, !requestedDeviceUID.isEmpty, requestedDeviceUID != "default" else {
-            let device = Self.defaultCaptureDevice()
-            if let device {
-                os_log(.info, log: recordingLog, "%{public}@ — using system default device: %{public}@", reason, device.localizedName)
+            guard let device = Self.defaultCaptureDevice() else {
+                throw AudioRecorderError.missingInputDevice
             }
+            os_log(.info, log: recordingLog, "%{public}@ — using system default device: %{public}@", reason, device.localizedName)
             return device
         }
 
@@ -166,11 +165,16 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             return device
         }
 
-        let fallbackDevice = Self.defaultCaptureDevice()
-        if let fallbackDevice {
-            os_log(.info, log: recordingLog, "%{public}@ — selected device unavailable, falling back to system default: %{public}@ [uid=%{public}@]", reason, fallbackDevice.localizedName, fallbackDevice.uniqueID)
-        }
-        return fallbackDevice
+        os_log(
+            .error,
+            log: recordingLog,
+            "%{public}@ — selected device unavailable [uid=%{public}@]; refusing silent fallback to default input",
+            reason,
+            requestedDeviceUID
+        )
+        throw AudioRecorderError.failedToCreateCaptureInput(
+            "The selected microphone is no longer available. Re-select it in Settings."
+        )
     }
 
     private func installSessionObservers(for session: AVCaptureSession) {
@@ -330,10 +334,6 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         }
     }
 
-    private func audioFormatSummary(_ format: AVAudioFormat) -> String {
-        "sampleRate=\(format.sampleRate), channels=\(format.channelCount), commonFormat=\(String(describing: format.commonFormat)), interleaved=\(format.isInterleaved), settings=\(format.settings)"
-    }
-
     private func appendSampleBufferToFile(_ sampleBuffer: CMSampleBuffer) throws {
         if let fileWriteError = fileWriteErrorLock.withLock({ _ in
             self.fileWriteError
@@ -382,22 +382,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             return
         }
 
-        let converter = recordingConverterLock.withLock { existing -> AVAudioConverter? in
-            if let existing, existing.inputFormat == sourceFormat {
-                return existing
-            }
-            let new = AVAudioConverter(from: sourceFormat, to: targetFormat)
-            existing = new
-            return new
-        }
-        guard let converter else {
-            throw AudioRecorderError.failedToBeginFileRecording("Could not create recording converter.")
-        }
-
-        let outputBuffer = try convertBuffer(
+        let outputBuffer = try convertRecordingBuffer(
             inputBuffer,
             from: sourceFormat,
-            using: converter,
             to: targetFormat
         )
         try activeAudioFile.write(from: outputBuffer)
@@ -479,12 +466,99 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         return inputBuffer
     }
 
+    private struct ConversionResult {
+        let buffer: AVAudioPCMBuffer
+        let status: String
+    }
+
+    private func convertRecordingBuffer(
+        _ inputBuffer: AVAudioPCMBuffer,
+        from sourceFormat: AVAudioFormat,
+        to targetFormat: AVAudioFormat
+    ) throws -> AVAudioPCMBuffer {
+        let outputFrameCount = AVAudioFrameCount(
+            max(1, Int(ceil(Double(inputBuffer.frameLength) * targetFormat.sampleRate / sourceFormat.sampleRate)))
+        )
+        guard let outputBuffer = AVAudioPCMBuffer(
+            pcmFormat: targetFormat,
+            frameCapacity: outputFrameCount
+        ) else {
+            throw AudioRecorderError.failedToBeginFileRecording("Could not allocate converted recording buffer.")
+        }
+
+        let outputBuffers = UnsafeMutableAudioBufferListPointer(outputBuffer.mutableAudioBufferList)
+        guard let outputPointer = outputBuffers.first?.mData?.assumingMemoryBound(to: Int16.self) else {
+            throw AudioRecorderError.failedToBeginFileRecording("Converted recording buffer has no writable storage.")
+        }
+
+        let inputFrameCount = Int(inputBuffer.frameLength)
+        guard inputFrameCount > 0 else {
+            outputBuffer.frameLength = 0
+            return outputBuffer
+        }
+
+        for outputFrame in 0..<Int(outputFrameCount) {
+            let sourcePosition = Double(outputFrame) * sourceFormat.sampleRate / targetFormat.sampleRate
+            let lowerFrame = min(Int(sourcePosition), inputFrameCount - 1)
+            let upperFrame = min(lowerFrame + 1, inputFrameCount - 1)
+            let fraction = Float(sourcePosition - Double(lowerFrame))
+            let lowerSample = monoSample(in: inputBuffer, frame: lowerFrame)
+            let upperSample = monoSample(in: inputBuffer, frame: upperFrame)
+            let sample = lowerSample + (upperSample - lowerSample) * fraction
+            outputPointer[outputFrame] = int16Sample(fromNormalizedFloat: sample)
+        }
+
+        outputBuffer.frameLength = outputFrameCount
+        return outputBuffer
+    }
+
+    private func monoSample(in buffer: AVAudioPCMBuffer, frame: Int) -> Float {
+        let channelCount = max(1, Int(buffer.format.channelCount))
+        var sum: Float = 0
+        for channel in 0..<channelCount {
+            sum += normalizedSample(in: buffer, frame: frame, channel: channel)
+        }
+        return sum / Float(channelCount)
+    }
+
+    private func normalizedSample(in buffer: AVAudioPCMBuffer, frame: Int, channel: Int) -> Float {
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        let channelCount = max(1, Int(buffer.format.channelCount))
+        let audioBufferIndex = buffer.format.isInterleaved ? 0 : min(channel, audioBuffers.count - 1)
+        guard audioBuffers.indices.contains(audioBufferIndex),
+              let baseAddress = audioBuffers[audioBufferIndex].mData else {
+            return 0
+        }
+
+        let sampleIndex = buffer.format.isInterleaved ? frame * channelCount + channel : frame
+        switch buffer.format.commonFormat {
+        case .pcmFormatFloat32:
+            return baseAddress.assumingMemoryBound(to: Float.self)[sampleIndex]
+        case .pcmFormatFloat64:
+            return Float(baseAddress.assumingMemoryBound(to: Double.self)[sampleIndex])
+        case .pcmFormatInt16:
+            return Float(baseAddress.assumingMemoryBound(to: Int16.self)[sampleIndex]) / 32768.0
+        case .pcmFormatInt32:
+            return Float(baseAddress.assumingMemoryBound(to: Int32.self)[sampleIndex]) / 2147483648.0
+        default:
+            return 0
+        }
+    }
+
+    private func int16Sample(fromNormalizedFloat sample: Float) -> Int16 {
+        let clamped = min(1.0, max(-1.0, sample))
+        if clamped >= 0 {
+            return Int16(clamped * Float(Int16.max))
+        }
+        return Int16(clamped * 32768.0)
+    }
+
     private func convertBuffer(
         _ inputBuffer: AVAudioPCMBuffer,
         from sourceFormat: AVAudioFormat,
         using converter: AVAudioConverter,
         to targetFormat: AVAudioFormat
-    ) throws -> AVAudioPCMBuffer {
+    ) throws -> ConversionResult {
         let ratio = targetFormat.sampleRate / sourceFormat.sampleRate
         let outputCapacity = AVAudioFrameCount(ceil(Double(inputBuffer.frameLength) * ratio)) + 32
         guard let outputBuffer = AVAudioPCMBuffer(
@@ -512,15 +586,13 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         guard status != .error, outputBuffer.frameLength > 0 else {
             throw AudioRecorderError.failedToBeginFileRecording("Audio conversion produced no data.")
         }
-        return outputBuffer
+        return ConversionResult(buffer: outputBuffer, status: String(describing: status))
     }
 
     private func makeSession(deviceUID: String?, outputURL: URL) throws {
         teardownSessionLocked()
 
-        guard let device = preferredCaptureDevice(for: deviceUID, reason: "initial start") else {
-            throw AudioRecorderError.missingInputDevice
-        }
+        let device = try preferredCaptureDevice(for: deviceUID, reason: "initial start")
 
         let session = AVCaptureSession()
         let dataOutput = AVCaptureAudioDataOutput()
@@ -567,7 +639,6 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         isSessionInterrupted = false
         activeAudioFile = nil
         activeAudioFormat = nil
-        recordingConverterLock.withLock { $0 = nil }
         pcm16ConverterLock.withLock { $0 = nil }
         recordedFrameCount = 0
         fileWriteErrorLock.withLock { _ in
@@ -784,12 +855,13 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         }
         guard let converter else { return }
 
-        guard let outputBuffer = try? convertBuffer(
+        guard let conversion = try? convertBuffer(
             inputBuffer,
             from: sourceFormat,
             using: converter,
             to: pcm16TargetFormat
         ) else { return }
+        let outputBuffer = conversion.buffer
 
         let outputFrames = Int(outputBuffer.frameLength)
         guard outputFrames > 0, let int16Ptr = outputBuffer.int16ChannelData?[0] else {
@@ -810,17 +882,6 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         do {
             try appendSampleBufferToFile(sampleBuffer)
         } catch {
-            if let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) {
-                let sourceFormat = AVAudioFormat(cmAudioFormatDescription: formatDescription)
-                os_log(
-                    .error,
-                    log: recordingLog,
-                    "audio recorder sample format failure: %{public}@",
-                    audioFormatSummary(sourceFormat)
-                )
-            } else {
-                os_log(.error, log: recordingLog, "audio recorder sample format failure: missing format description")
-            }
             fileWriteErrorLock.withLock { _ in
                 fileWriteError = error
             }
