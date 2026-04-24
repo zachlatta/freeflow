@@ -940,9 +940,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let fileName = UUID().uuidString + ".wav"
         let destURL = audioStorageDirectory().appendingPathComponent(fileName)
         do {
-            try AudioNormalization.writePreferredAudioCopy(from: tempURL, to: destURL)
+            try FileManager.default.copyItem(at: tempURL, to: destURL)
             return SavedAudioFile(fileName: fileName, fileURL: destURL)
         } catch {
+            os_log(
+                .error,
+                log: recordingLog,
+                "failed to persist audio file %{public}@ from %{public}@ to %{public}@ : %{public}@",
+                fileName,
+                tempURL.path,
+                destURL.path,
+                error.localizedDescription
+            )
             return nil
         }
     }
