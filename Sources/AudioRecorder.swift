@@ -84,6 +84,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private var activeAudioFile: AVAudioFile?
     private var activeAudioFormat: AVAudioFormat?
     private var recordedFrameCount: AVAudioFramePosition = 0
+    private var recordingResamplingPhase: Double = 0
+    private var recordingResamplingSourceRate: Double?
     private var fileWriteError: Error?
     private var isSessionInterrupted = false
 
@@ -387,6 +389,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             from: sourceFormat,
             to: targetFormat
         )
+        guard outputBuffer.frameLength > 0 else { return }
         try activeAudioFile.write(from: outputBuffer)
         recordedFrameCount += AVAudioFramePosition(outputBuffer.frameLength)
     }
@@ -476,12 +479,29 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         from sourceFormat: AVAudioFormat,
         to targetFormat: AVAudioFormat
     ) throws -> AVAudioPCMBuffer {
-        let outputFrameCount = AVAudioFrameCount(
-            max(1, Int(ceil(Double(inputBuffer.frameLength) * targetFormat.sampleRate / sourceFormat.sampleRate)))
-        )
+        if recordingResamplingSourceRate != sourceFormat.sampleRate {
+            recordingResamplingPhase = 0
+            recordingResamplingSourceRate = sourceFormat.sampleRate
+        }
+
+        let inputFrameCount = Int(inputBuffer.frameLength)
+        guard inputFrameCount > 0 else {
+            guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: 1) else {
+                throw AudioRecorderError.failedToBeginFileRecording("Could not allocate empty converted recording buffer.")
+            }
+            outputBuffer.frameLength = 0
+            return outputBuffer
+        }
+
+        let sourceFramesPerOutputFrame = sourceFormat.sampleRate / targetFormat.sampleRate
+        var outputFrameCount = 0
+        while recordingResamplingPhase + Double(outputFrameCount) * sourceFramesPerOutputFrame < Double(inputFrameCount) {
+            outputFrameCount += 1
+        }
+
         guard let outputBuffer = AVAudioPCMBuffer(
             pcmFormat: targetFormat,
-            frameCapacity: outputFrameCount
+            frameCapacity: AVAudioFrameCount(max(1, outputFrameCount))
         ) else {
             throw AudioRecorderError.failedToBeginFileRecording("Could not allocate converted recording buffer.")
         }
@@ -491,14 +511,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             throw AudioRecorderError.failedToBeginFileRecording("Converted recording buffer has no writable storage.")
         }
 
-        let inputFrameCount = Int(inputBuffer.frameLength)
-        guard inputFrameCount > 0 else {
-            outputBuffer.frameLength = 0
-            return outputBuffer
-        }
-
-        for outputFrame in 0..<Int(outputFrameCount) {
-            let sourcePosition = Double(outputFrame) * sourceFormat.sampleRate / targetFormat.sampleRate
+        for outputFrame in 0..<outputFrameCount {
+            let sourcePosition = recordingResamplingPhase + Double(outputFrame) * sourceFramesPerOutputFrame
             let lowerFrame = min(Int(sourcePosition), inputFrameCount - 1)
             let upperFrame = min(lowerFrame + 1, inputFrameCount - 1)
             let fraction = Float(sourcePosition - Double(lowerFrame))
@@ -508,7 +522,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             outputPointer[outputFrame] = int16Sample(fromNormalizedFloat: sample)
         }
 
-        outputBuffer.frameLength = outputFrameCount
+        let nextSourcePosition = recordingResamplingPhase + Double(outputFrameCount) * sourceFramesPerOutputFrame
+        recordingResamplingPhase = nextSourcePosition - Double(inputFrameCount)
+        outputBuffer.frameLength = AVAudioFrameCount(outputFrameCount)
         return outputBuffer
     }
 
@@ -641,6 +657,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         activeAudioFormat = nil
         pcm16ConverterLock.withLock { $0 = nil }
         recordedFrameCount = 0
+        recordingResamplingPhase = 0
+        recordingResamplingSourceRate = nil
         fileWriteErrorLock.withLock { _ in
             fileWriteError = nil
         }
