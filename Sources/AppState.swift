@@ -372,7 +372,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @Published var transcriptionLanguage: String {
         didSet {
-            UserDefaults.standard.set(transcriptionLanguage, forKey: transcriptionLanguageStorageKey)
+            let normalized = Self.normalizeTranscriptionLanguage(transcriptionLanguage)
+            if normalized != transcriptionLanguage {
+                transcriptionLanguage = normalized
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: transcriptionLanguageStorageKey)
         }
     }
 
@@ -575,7 +580,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
             fallback: shortcuts.toggle.isCustom ? shortcuts.toggle : nil
         )
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
-        let transcriptionLanguage = UserDefaults.standard.string(forKey: transcriptionLanguageStorageKey) ?? ""
+        let transcriptionLanguage = Self.normalizeTranscriptionLanguage(
+            UserDefaults.standard.string(forKey: transcriptionLanguageStorageKey) ?? ""
+        )
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
         let customSystemPromptLastModified = UserDefaults.standard.string(forKey: customSystemPromptLastModifiedStorageKey) ?? ""
@@ -868,6 +875,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return stored.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static func normalizeTranscriptionLanguage(_ language: String) -> String {
+        let normalized = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard transcriptionLanguageOptions.contains(where: { $0.code == normalized }) else {
+            return ""
+        }
+        return normalized
+    }
+
     private var resolvedTranscriptionBaseURL: String {
         let trimmed = transcriptionAPIURL.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? apiBaseURL : trimmed
@@ -888,8 +903,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private var resolvedTranscriptionLanguage: String? {
-        let trimmed = transcriptionLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        let normalized = Self.normalizeTranscriptionLanguage(transcriptionLanguage)
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func persistShortcut(_ binding: ShortcutBinding, key: String) {

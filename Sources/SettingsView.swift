@@ -263,6 +263,7 @@ struct ProviderSettingsFields: View {
                         Text(option.name).tag(option.code)
                     }
                 }
+                .accessibilityLabel("Transcription Language")
                 .labelsHidden()
                 Text("Hint to the transcription model. Auto-detect works for most users. Pick a specific language if you see wrong-script characters (for example Chinese) appear in your output.")
                     .font(.caption)
