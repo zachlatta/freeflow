@@ -263,7 +263,7 @@ struct SetupView: View {
                 .frame(width: 128, height: 128)
 
             VStack(spacing: 6) {
-                Text("Welcome to FreeFlow")
+                Text("Welcome to \(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "FreeFlow")")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
 
                 Text("Dictate text anywhere on your Mac.\nHold to talk or tap to toggle dictation.")
