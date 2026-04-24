@@ -675,32 +675,21 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     }
 
     private func updateAudioLevel(from sampleBuffer: CMSampleBuffer) -> Float {
-        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return 0 }
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else { return 0 }
+        guard let sourceFormat = try? validatedPCMBufferFormat(
+            AVAudioFormat(cmAudioFormatDescription: formatDescription),
+            context: "audio level sample buffer"
+        ) else { return 0 }
 
-        var lengthAtOffset = 0
-        var totalLength = 0
-        var dataPointer: UnsafeMutablePointer<Int8>?
-        let status = CMBlockBufferGetDataPointer(
-            dataBuffer,
-            atOffset: 0,
-            lengthAtOffsetOut: &lengthAtOffset,
-            totalLengthOut: &totalLength,
-            dataPointerOut: &dataPointer
-        )
+        let frameCount = AVAudioFrameCount(CMSampleBufferGetNumSamples(sampleBuffer))
+        guard frameCount > 0 else { return 0 }
+        guard let inputBuffer = try? makePCMBuffer(
+            from: sampleBuffer,
+            format: sourceFormat,
+            frameCount: frameCount
+        ) else { return 0 }
 
-        guard status == kCMBlockBufferNoErr, totalLength > 0, let dataPointer else { return 0 }
-
-        let sampleCount = totalLength / MemoryLayout<Float>.size
-        guard sampleCount > 0 else { return 0 }
-
-        let floatPointer = UnsafeRawPointer(dataPointer).assumingMemoryBound(to: Float.self)
-        var sumOfSquares: Float = 0
-        for index in 0..<sampleCount {
-            let sample = floatPointer[index]
-            sumOfSquares += sample * sample
-        }
-
-        let rms = sqrtf(sumOfSquares / Float(sampleCount))
+        let rms = rmsLevel(for: inputBuffer)
         let normalizedDisplayLevel = liveLevelNormalizerLock.withLock {
             $0.normalizedLevel(forRMS: rms)
         }
@@ -709,6 +698,59 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             self.audioLevel = normalizedDisplayLevel
         }
         return rms
+    }
+
+    private func rmsLevel(for buffer: AVAudioPCMBuffer) -> Float {
+        let audioBuffers = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+
+        var totalSamples = 0
+        var sumOfSquares: Double = 0
+
+        for audioBuffer in audioBuffers {
+            guard let baseAddress = audioBuffer.mData, audioBuffer.mDataByteSize > 0 else {
+                continue
+            }
+
+            switch buffer.format.commonFormat {
+            case .pcmFormatFloat32:
+                let samples = Int(audioBuffer.mDataByteSize) / MemoryLayout<Float>.size
+                let pointer = baseAddress.assumingMemoryBound(to: Float.self)
+                totalSamples += samples
+                for index in 0..<samples {
+                    let sample = Double(pointer[index])
+                    sumOfSquares += sample * sample
+                }
+            case .pcmFormatFloat64:
+                let samples = Int(audioBuffer.mDataByteSize) / MemoryLayout<Double>.size
+                let pointer = baseAddress.assumingMemoryBound(to: Double.self)
+                totalSamples += samples
+                for index in 0..<samples {
+                    let sample = pointer[index]
+                    sumOfSquares += sample * sample
+                }
+            case .pcmFormatInt16:
+                let samples = Int(audioBuffer.mDataByteSize) / MemoryLayout<Int16>.size
+                let pointer = baseAddress.assumingMemoryBound(to: Int16.self)
+                totalSamples += samples
+                for index in 0..<samples {
+                    let sample = Double(pointer[index]) / 32768.0
+                    sumOfSquares += sample * sample
+                }
+            case .pcmFormatInt32:
+                let samples = Int(audioBuffer.mDataByteSize) / MemoryLayout<Int32>.size
+                let pointer = baseAddress.assumingMemoryBound(to: Int32.self)
+                totalSamples += samples
+                for index in 0..<samples {
+                    let sample = Double(pointer[index]) / 2147483648.0
+                    sumOfSquares += sample * sample
+                }
+            default:
+                continue
+            }
+        }
+
+        guard totalSamples > 0 else { return 0 }
+        return Float(sqrt(sumOfSquares / Double(totalSamples)))
     }
 
     private func emitPCM16IfNeeded(from sampleBuffer: CMSampleBuffer) {
