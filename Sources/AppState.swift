@@ -194,6 +194,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let savedHoldCustomShortcutStorageKey = "saved_hold_custom_shortcut"
     private let savedToggleCustomShortcutStorageKey = "saved_toggle_custom_shortcut"
     private let customVocabularyStorageKey = "custom_vocabulary"
+    private let transcriptionLanguageStorageKey = "transcription_language"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
     private let customSystemPromptStorageKey = "custom_system_prompt"
     private let customContextPromptStorageKey = "custom_context_prompt"
@@ -220,6 +221,38 @@ final class AppState: ObservableObject, @unchecked Sendable {
     static let defaultContextScreenshotMaxDimension = Int(AppContextService.defaultScreenshotMaxDimension)
     static let contextScreenshotDimensionOptions = [1024, 768, 640, 512]
     static let defaultTranscriptionModel = "whisper-large-v3"
+    static let transcriptionLanguageOptions: [(code: String, name: String)] = [
+        ("", "Auto-detect"),
+        ("en", "English"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("nl", "Dutch"),
+        ("ru", "Russian"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("zh", "Chinese"),
+        ("ar", "Arabic"),
+        ("hi", "Hindi"),
+        ("tr", "Turkish"),
+        ("pl", "Polish"),
+        ("uk", "Ukrainian"),
+        ("sv", "Swedish"),
+        ("no", "Norwegian"),
+        ("da", "Danish"),
+        ("fi", "Finnish"),
+        ("cs", "Czech"),
+        ("el", "Greek"),
+        ("he", "Hebrew"),
+        ("vi", "Vietnamese"),
+        ("th", "Thai"),
+        ("id", "Indonesian"),
+        ("ro", "Romanian"),
+        ("hu", "Hungarian"),
+        ("ca", "Catalan")
+    ]
     static let defaultPostProcessingModel = "openai/gpt-oss-20b"
     static let defaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     static let defaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
@@ -334,6 +367,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var customVocabulary: String {
         didSet {
             UserDefaults.standard.set(customVocabulary, forKey: customVocabularyStorageKey)
+        }
+    }
+
+    @Published var transcriptionLanguage: String {
+        didSet {
+            let normalized = Self.normalizeTranscriptionLanguage(transcriptionLanguage)
+            if normalized != transcriptionLanguage {
+                transcriptionLanguage = normalized
+                return
+            }
+            UserDefaults.standard.set(normalized, forKey: transcriptionLanguageStorageKey)
         }
     }
 
@@ -536,6 +580,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
             fallback: shortcuts.toggle.isCustom ? shortcuts.toggle : nil
         )
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
+        let transcriptionLanguage = Self.normalizeTranscriptionLanguage(
+            UserDefaults.standard.string(forKey: transcriptionLanguageStorageKey) ?? ""
+        )
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
         let customSystemPromptLastModified = UserDefaults.standard.string(forKey: customSystemPromptLastModifiedStorageKey) ?? ""
@@ -618,6 +665,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.commandModeStyle = commandModeStyle
         self.commandModeManualModifier = commandModeManualModifier
         self.customVocabulary = customVocabulary
+        self.transcriptionLanguage = transcriptionLanguage
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
         self.contextScreenshotMaxDimension = contextScreenshotMaxDimension
@@ -827,6 +875,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return stored.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static func normalizeTranscriptionLanguage(_ language: String) -> String {
+        let normalized = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard transcriptionLanguageOptions.contains(where: { $0.code == normalized }) else {
+            return ""
+        }
+        return normalized
+    }
+
     private var resolvedTranscriptionBaseURL: String {
         let trimmed = transcriptionAPIURL.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? apiBaseURL : trimmed
@@ -841,8 +897,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         try TranscriptionService(
             apiKey: resolvedTranscriptionAPIKey,
             baseURL: resolvedTranscriptionBaseURL,
-            transcriptionModel: transcriptionModel
+            transcriptionModel: transcriptionModel,
+            language: resolvedTranscriptionLanguage
         )
+    }
+
+    private var resolvedTranscriptionLanguage: String? {
+        let normalized = Self.normalizeTranscriptionLanguage(transcriptionLanguage)
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func persistShortcut(_ binding: ShortcutBinding, key: String) {
@@ -2489,7 +2551,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             baseURL: trimmedBase,
             apiKey: resolvedTranscriptionAPIKey,
             model: model,
-            language: nil
+            language: resolvedTranscriptionLanguage
         )
         let service = RealtimeTranscriptionService(config: config)
         do {

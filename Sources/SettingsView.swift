@@ -256,6 +256,21 @@ struct ProviderSettingsFields: View {
             }
 
             VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription Language")
+                    .font(.caption.weight(.semibold))
+                Picker("", selection: $appState.transcriptionLanguage) {
+                    ForEach(AppState.transcriptionLanguageOptions, id: \.code) { option in
+                        Text(option.name).tag(option.code)
+                    }
+                }
+                .accessibilityLabel("Transcription Language")
+                .labelsHidden()
+                Text("Hint to the transcription model. Auto-detect works for most users. Pick a specific language if you see wrong-script characters (for example Chinese) appear in your output.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Transcription API URL")
                     .font(.caption.weight(.semibold))
                 HStack(spacing: 8) {
