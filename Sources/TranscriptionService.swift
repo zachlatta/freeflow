@@ -8,6 +8,7 @@ class TranscriptionService {
     private let apiKey: String
     private let baseURL: URL
     private let transcriptionModel: String
+    private let language: String?
     private let transcriptionResponseFormat = "verbose_json"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
     private let uploadSampleRate = 16_000.0
@@ -16,12 +17,15 @@ class TranscriptionService {
     init(
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
-        transcriptionModel: String = "whisper-large-v3"
+        transcriptionModel: String = "whisper-large-v3",
+        language: String? = nil
     ) throws {
         self.apiKey = apiKey
         self.baseURL = try Self.normalizedBaseURL(from: baseURL)
         let trimmedModel = transcriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
+        let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
     }
 
     // Validate API key by hitting a lightweight endpoint
@@ -81,6 +85,7 @@ class TranscriptionService {
             fileName: fileURL.lastPathComponent,
             model: transcriptionModel,
             responseFormat: transcriptionResponseFormat,
+            language: language,
             boundary: boundary
         )
 
@@ -146,6 +151,7 @@ class TranscriptionService {
         fileName: String,
         model: String,
         responseFormat: String,
+        language: String?,
         boundary: String
     ) -> Data {
         var body = Data()
@@ -161,6 +167,12 @@ class TranscriptionService {
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n")
         append("\(responseFormat)\r\n")
+
+        if let language, !language.isEmpty {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"language\"\r\n\r\n")
+            append("\(language)\r\n")
+        }
 
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
