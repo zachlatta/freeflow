@@ -364,7 +364,7 @@ final class UpdateManager: ObservableObject {
     }
 
     private func aggregatedReleaseNotes(from releases: [GitHubRelease]) -> String? {
-        let notes = releases.compactMap { releaseNotesBody(from: $0.body) }
+        let notes = releases.reversed().compactMap { releaseNotesBody(from: $0.body) }
         guard !notes.isEmpty else { return nil }
         return notes.joined(separator: "\n\n")
     }
@@ -561,10 +561,119 @@ final class UpdateManager: ObservableObject {
         textView.textColor = .textColor
         textView.font = .systemFont(ofSize: NSFont.systemFontSize)
         textView.textContainerInset = NSSize(width: 10, height: 10)
-        textView.string = text
+        textView.textStorage?.setAttributedString(releaseNotesAttributedString(from: text))
 
         scrollView.documentView = textView
         return scrollView
+    }
+
+    private func releaseNotesAttributedString(from text: String) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let bodyFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let bulletFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let headingFont = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize + 3)
+        let subheadingFont = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize + 1)
+        let baseParagraph = NSMutableParagraphStyle()
+        baseParagraph.lineSpacing = 2
+        baseParagraph.paragraphSpacing = 6
+
+        let bulletParagraph = NSMutableParagraphStyle()
+        bulletParagraph.lineSpacing = 2
+        bulletParagraph.paragraphSpacing = 4
+        bulletParagraph.firstLineHeadIndent = 0
+        bulletParagraph.headIndent = 16
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
+            let font: NSFont
+            let paragraphStyle: NSParagraphStyle
+            let renderedLine: String
+
+            if trimmedLine.hasPrefix("### ") {
+                font = subheadingFont
+                paragraphStyle = baseParagraph
+                renderedLine = String(trimmedLine.dropFirst(4))
+            } else if trimmedLine.hasPrefix("## ") {
+                font = headingFont
+                paragraphStyle = baseParagraph
+                renderedLine = String(trimmedLine.dropFirst(3))
+            } else if trimmedLine.hasPrefix("- ") {
+                font = bulletFont
+                paragraphStyle = bulletParagraph
+                renderedLine = "• \(trimmedLine.dropFirst(2))"
+            } else {
+                font = bodyFont
+                paragraphStyle = baseParagraph
+                renderedLine = rawLine
+            }
+
+            result.append(inlineMarkdownAttributedString(
+                from: renderedLine,
+                font: font,
+                paragraphStyle: paragraphStyle
+            ))
+            result.append(NSAttributedString(string: "\n"))
+        }
+
+        return result
+    }
+
+    private func inlineMarkdownAttributedString(
+        from text: String,
+        font: NSFont,
+        paragraphStyle: NSParagraphStyle
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        var remaining = text[...]
+
+        while let markerRange = remaining.range(of: "**") {
+            appendPlainMarkdownText(
+                String(remaining[..<markerRange.lowerBound]),
+                to: result,
+                font: font,
+                paragraphStyle: paragraphStyle
+            )
+
+            let boldStart = markerRange.upperBound
+            guard let boldEndRange = remaining[boldStart...].range(of: "**") else {
+                appendPlainMarkdownText(
+                    String(remaining[markerRange.lowerBound...]),
+                    to: result,
+                    font: font,
+                    paragraphStyle: paragraphStyle
+                )
+                return result
+            }
+
+            let boldText = String(remaining[boldStart..<boldEndRange.lowerBound])
+            let boldFont = NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+            appendPlainMarkdownText(
+                boldText,
+                to: result,
+                font: boldFont,
+                paragraphStyle: paragraphStyle
+            )
+            remaining = remaining[boldEndRange.upperBound...]
+        }
+
+        appendPlainMarkdownText(String(remaining), to: result, font: font, paragraphStyle: paragraphStyle)
+        return result
+    }
+
+    private func appendPlainMarkdownText(
+        _ text: String,
+        to result: NSMutableAttributedString,
+        font: NSFont,
+        paragraphStyle: NSParagraphStyle
+    ) {
+        result.append(NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: NSColor.textColor,
+                .paragraphStyle: paragraphStyle
+            ]
+        ))
     }
 
     private func showErrorAlert(_ message: String) {

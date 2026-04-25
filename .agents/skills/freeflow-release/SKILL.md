@@ -9,9 +9,11 @@ description: Prepare and publish FreeFlow app releases. Use when the user asks t
 
 Use this skill to prepare a FreeFlow release from the local repository. FreeFlow releases are semver-tag driven: pushing a tag like `v0.3.1` triggers `.github/workflows/release.yml`, which stamps the app bundle, extracts the matching `CHANGELOG.md` section, builds/signs/notarizes the DMG, and creates the GitHub Release.
 
+Every release prep must update `CHANGELOG.md` by comparing the previous public semver release with the current release target. The changelog section should describe the user-visible changes that shipped since the previous release, not just summarize the final release-prep commit.
+
 ## Ground Rules
 
-- Treat `CHANGELOG.md` as the release notes source of truth.
+- Treat `CHANGELOG.md` as the release notes source of truth, and update it before any release commit or tag.
 - Keep changelog language user-facing. Avoid implementation details unless they affect maintainers or troubleshooting.
 - Do not edit `README.md` or unrelated docs unless the user explicitly asks.
 - Do not push tags or branches until the user has approved the exact release version and changelog.
@@ -26,12 +28,14 @@ Use this skill to prepare a FreeFlow release from the local repository. FreeFlow
    git log --oneline --decorate -n 20
    ```
 
-2. Find the last version bump:
+2. Find the previous public release:
    ```bash
+   git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname
+   git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --abbrev=0
    git log --oneline --decorate -- Info.plist CHANGELOG.md .github/workflows/release.yml
    git blame -L 11,14 Info.plist
    ```
-   Use the last commit that changed `CFBundleShortVersionString`, `CFBundleVersion`, or the prior release section as the start of the changelog range.
+   Use the latest reachable public semver tag, such as `v0.3.2`, as the previous-release boundary. If tags are missing or inconsistent, fall back to the commit that introduced the prior `CHANGELOG.md` section or changed `CFBundleShortVersionString`/`CFBundleVersion`, and state that fallback explicitly.
 
 3. Determine the next version:
    - `PATCH` for fixes, polish, release-system updates, and small user-visible improvements.
@@ -39,13 +43,14 @@ Use this skill to prepare a FreeFlow release from the local repository. FreeFlow
    - `MAJOR` only for breaking behavior or major compatibility changes.
    Confirm the version with the user if it was not specified.
 
-4. Build the changelog from the commit range:
+4. Build and write the `CHANGELOG.md` entry from the previous release to the current release target:
    ```bash
-   git log --first-parent --reverse --oneline <last-version-commit>..HEAD
-   git log --reverse --oneline <last-version-commit>..HEAD
-   git diff --stat <last-version-commit>..HEAD
+   git log --first-parent --reverse --oneline <previous-release-tag>..HEAD
+   git log --reverse --oneline <previous-release-tag>..HEAD
+   git diff --stat <previous-release-tag>..HEAD
+   git diff --name-status <previous-release-tag>..HEAD
    ```
-   Prefer first-parent merge commits for feature grouping, then inspect individual commits for details. Write a concise section:
+   Prefer first-parent merge commits for feature grouping, then inspect individual commits and relevant diffs for details. Write a concise section near the top of `CHANGELOG.md`, above the previous release:
    ```md
    ## [0.3.1] - YYYY-MM-DD
 
@@ -58,6 +63,7 @@ Use this skill to prepare a FreeFlow release from the local repository. FreeFlow
    ### Fixed
    - User-visible bugs and update/release fixes.
    ```
+   Include only categories that have entries. If the release contains mostly internal work, describe the user-facing effect, such as reliability, update behavior, packaging, or troubleshooting improvements. Do not include raw commit hashes in the changelog.
 
 5. Validate locally before commit/tag:
    ```bash
