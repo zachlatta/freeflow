@@ -632,6 +632,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("API Key", icon: "key.fill") {
                     apiKeySection
                 }
+                SettingsCard("Output Language", icon: "globe") {
+                    outputLanguageSection
+                }
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
@@ -955,6 +958,37 @@ struct GeneralSettingsView: View {
                     keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
                 }
             }
+        }
+    }
+
+    // MARK: Output Language
+
+    private static let outputLanguageOptions = [
+        "",
+        "English",
+        "Chinese (Simplified)",
+        "Chinese (Traditional)",
+        "Spanish",
+        "French",
+        "Japanese",
+        "Korean",
+        "German",
+        "Portuguese",
+    ]
+
+    private var outputLanguageSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Language", selection: $appState.outputLanguage) {
+                Text("Same as spoken").tag("")
+                ForEach(Self.outputLanguageOptions.dropFirst(), id: \.self) { lang in
+                    Text(lang).tag(lang)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text("When set, FreeFlow translates your speech into the selected language.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
