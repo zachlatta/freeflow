@@ -929,7 +929,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     static func audioStorageDirectory() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "FreeFlow"
+        let appName = AppName.displayName
         let audioDir = appSupport.appendingPathComponent("\(appName)/audio", isDirectory: true)
         if !FileManager.default.fileExists(atPath: audioDir.path) {
             try? FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
@@ -2030,7 +2030,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     func showMicrophonePermissionAlert() {
         let alert = NSAlert()
         alert.messageText = "Microphone Permission Required"
-        alert.informativeText = "FreeFlow cannot record audio without Microphone access.\n\nGo to System Settings > Privacy & Security > Microphone and enable FreeFlow."
+        alert.informativeText = "\(AppName.displayName) cannot record audio without Microphone access.\n\nGo to System Settings > Privacy & Security > Microphone and enable FreeFlow."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Dismiss")
@@ -2045,7 +2045,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     func showAccessibilityAlert() {
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "FreeFlow cannot type transcriptions without Accessibility access.\n\nGo to System Settings > Privacy & Security > Accessibility and enable FreeFlow."
+        alert.informativeText = "\(AppName.displayName) cannot type transcriptions without Accessibility access.\n\nGo to System Settings > Privacy & Security > Accessibility and enable FreeFlow."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Dismiss")
@@ -2719,7 +2719,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func showScreenshotPermissionAlert(message: String) {
         let alert = NSAlert()
         alert.messageText = "Screen Recording Permission Required"
-        alert.informativeText = "\(message)\n\nFreeFlow requires Screen Recording permission to capture screenshots for context-aware transcription.\n\nGo to System Settings > Privacy & Security > Screen Recording and enable FreeFlow."
+        alert.informativeText = "\(message)\n\n\(AppName.displayName) requires Screen Recording permission to capture screenshots for context-aware transcription.\n\nGo to System Settings > Privacy & Security > Screen Recording and enable FreeFlow."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Dismiss")

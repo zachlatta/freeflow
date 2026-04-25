@@ -471,7 +471,7 @@ struct GeneralSettingsView: View {
     private var appDisplayName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
             ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
-            ?? "FreeFlow"
+            ?? "\(AppName.displayName)"
     }
 
     private var appVersion: String {
@@ -513,7 +513,7 @@ struct GeneralSettingsView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 64, height: 64)
 
-                    Text(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "FreeFlow")
+                    Text(AppName.displayName)
                         .font(.system(size: 20, weight: .bold, design: .rounded))
 
                     Text("v\(appVersion)")
@@ -688,7 +688,7 @@ struct GeneralSettingsView: View {
 
     private var startupSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Launch FreeFlow at login", isOn: $appState.launchAtLogin)
+            Toggle("Launch \(AppName.displayName) at login", isOn: $appState.launchAtLogin)
             Toggle("Show menu bar icon", isOn: $showMenuBarIcon)
 
             if SMAppService.mainApp.status == .requiresApproval {
@@ -805,8 +805,8 @@ struct GeneralSettingsView: View {
                             Image(systemName: "arrow.down.circle.fill")
                                 .foregroundStyle(.blue)
                             Text(updateManager.latestReleaseVersion.isEmpty
-                                ? "A new version of FreeFlow is available!"
-                                : "FreeFlow v\(updateManager.latestReleaseVersion) is available!")
+                                ? "A new version of \(AppName.displayName) is available!"
+                                : "\(AppName.displayName) v\(updateManager.latestReleaseVersion) is available!")
                                 .font(.caption.weight(.semibold))
                             Spacer()
                             Button("What's New") {
@@ -880,7 +880,7 @@ struct GeneralSettingsView: View {
 
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("FreeFlow uses the configured transcription model with your selected OpenAI-compatible provider.")
+            Text("\(AppName.displayName) uses the configured transcription model with your selected OpenAI-compatible provider.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1002,7 +1002,7 @@ struct GeneralSettingsView: View {
                 isOn: $appState.dictationAudioInterruptionEnabled
             )
 
-            Text("FreeFlow restores the audio state it changed when dictation ends.")
+            Text("\(AppName.displayName) restores the audio state it changed when dictation ends.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1076,7 +1076,7 @@ struct GeneralSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Preserve clipboard after paste", isOn: $appState.preserveClipboard)
 
-            Text("FreeFlow will temporarily place the transcript on your clipboard to paste it, then restore whatever was there before. If you copy something else before the restore happens, FreeFlow leaves it alone.")
+            Text("\(AppName.displayName) will temporarily place the transcript on your clipboard to paste it, then restore whatever was there before. If you copy something else before the restore happens, \(AppName.displayName) leaves it alone.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1085,7 +1085,7 @@ struct GeneralSettingsView: View {
 
             Toggle("Say \"press enter\" to submit after paste", isOn: $appState.isPressEnterVoiceCommandEnabled)
 
-            Text("When the transcription ends with \"press enter\", FreeFlow removes those words before cleanup, pastes the remaining transcript, then presses Return.")
+            Text("When the transcription ends with \"press enter\", \(AppName.displayName) removes those words before cleanup, pastes the remaining transcript, then presses Return.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1526,11 +1526,11 @@ struct PromptsSettingsView: View {
         let vocabulary = appState.customVocabulary
 
         let context = AppContext(
-            appName: "FreeFlow Settings",
+            appName: "\(AppName.displayName) Settings",
             bundleIdentifier: "com.zachlatta.freeflow",
             windowTitle: "System Prompt Test",
             selectedText: nil,
-            currentActivity: "User is testing the system prompt in FreeFlow settings.",
+            currentActivity: "User is testing the system prompt in \(AppName.displayName) settings.",
             contextSystemPrompt: nil,
             contextPrompt: nil,
             screenshotDataURL: nil,
@@ -1569,7 +1569,7 @@ struct PromptsSettingsView: View {
             && appState.customContextPromptLastModified < AppContextService.defaultContextPromptDate
 
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Controls how FreeFlow infers your current activity from app metadata and screenshots.")
+            Text("Controls how \(AppName.displayName) infers your current activity from app metadata and screenshots.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 

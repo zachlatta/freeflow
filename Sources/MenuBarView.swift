@@ -10,7 +10,7 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Text("FreeFlow v\(appVersion)")
+            Text("\(AppName.displayName) v\(appVersion)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
@@ -293,7 +293,7 @@ struct MenuBarView: View {
 
             Divider()
 
-            Button("Quit FreeFlow") {
+            Button("Quit \(AppName.displayName)") {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")
