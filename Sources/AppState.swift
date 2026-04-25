@@ -211,6 +211,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let commandModeEnabledStorageKey = "command_mode_enabled"
     private let commandModeStyleStorageKey = "command_mode_style"
     private let commandModeManualModifierStorageKey = "command_mode_manual_modifier"
+    private let outputLanguageStorageKey = "output_language"
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
@@ -418,6 +419,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var outputLanguage: String {
+        didSet {
+            UserDefaults.standard.set(outputLanguage, forKey: outputLanguageStorageKey)
+        }
+    }
+
     @Published var shortcutStartDelay: TimeInterval {
         didSet {
             UserDefaults.standard.set(shortcutStartDelay, forKey: shortcutStartDelayStorageKey)
@@ -486,7 +493,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    @Published var isRecording = false
+    @Published var isRecording = false {
+        didSet {
+            guard oldValue != isRecording else { return }
+            AppState.writeRecordingStateFlag(isRecording)
+        }
+    }
     @Published var isTranscribing = false
     @Published var retryingItemIDs: Set<UUID> = []
     @Published var lastTranscript: String = ""
@@ -588,6 +600,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
         let customSystemPromptLastModified = UserDefaults.standard.string(forKey: customSystemPromptLastModifiedStorageKey) ?? ""
         let customContextPromptLastModified = UserDefaults.standard.string(forKey: customContextPromptLastModifiedStorageKey) ?? ""
+        let outputLanguage = UserDefaults.standard.string(forKey: outputLanguageStorageKey) ?? ""
         let storedContextScreenshotMaxDimension = UserDefaults.standard.object(forKey: contextScreenshotMaxDimensionStorageKey) != nil
             ? UserDefaults.standard.integer(forKey: contextScreenshotMaxDimensionStorageKey)
             : Self.defaultContextScreenshotMaxDimension
@@ -672,6 +685,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.contextScreenshotMaxDimension = contextScreenshotMaxDimension
         self.customSystemPromptLastModified = customSystemPromptLastModified
         self.customContextPromptLastModified = customContextPromptLastModified
+        self.outputLanguage = outputLanguage
         self.shortcutStartDelay = shortcutStartDelay
         self.preserveClipboard = preserveClipboard
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
@@ -714,10 +728,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self?.handleUpdateOverlayPressed()
             }
         }
+
+        // Clear any stale recording flag left over from an unclean exit.
+        AppState.writeRecordingStateFlag(false)
     }
 
     deinit {
         removeAudioDeviceObservers()
+        AppState.writeRecordingStateFlag(false)
     }
 
     private func removeAudioDeviceObservers() {
@@ -929,12 +947,53 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     static func audioStorageDirectory() -> URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "FreeFlow"
+        let appName = AppName.displayName
         let audioDir = appSupport.appendingPathComponent("\(appName)/audio", isDirectory: true)
         if !FileManager.default.fileExists(atPath: audioDir.path) {
             try? FileManager.default.createDirectory(at: audioDir, withIntermediateDirectories: true)
         }
         return audioDir
+    }
+
+    /// URL of the flag file written while FreeFlow is actively recording.
+    ///
+    /// External tools (voice assistants, TTS barge-in pipelines, conversation
+    /// apps) can poll this file to know when the user is dictating. The file
+    /// exists while `isRecording` is true and is removed when it flips false.
+    /// Contents are the UNIX timestamp (seconds, float) of when recording
+    /// started — useful for stale-flag detection after an unclean exit.
+    ///
+    /// Path: `~/Library/Application Support/FreeFlow/is-recording`
+    /// (or `FreeFlow Dev/is-recording` when running the dev bundle).
+    static func recordingStateFlagURL() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "FreeFlow"
+        return appSupport.appendingPathComponent("\(appName)/is-recording")
+    }
+
+    /// Serial queue that owns every flag-file I/O so the recording
+    /// start/stop hot path never blocks on disk.
+    private static let recordingStateFlagQueue = DispatchQueue(
+        label: "com.zachlatta.freeflow.recording-state-flag"
+    )
+
+    /// Write or clear the `is-recording` flag file. Called from the
+    /// `isRecording` didSet. Dispatches to a background queue so disk
+    /// I/O never adds latency to recording start/stop. Failures are
+    /// swallowed — this is advisory IPC and must never interrupt the
+    /// recording pipeline.
+    static func writeRecordingStateFlag(_ recording: Bool) {
+        let timestamp = recording ? String(Date().timeIntervalSince1970) : nil
+        recordingStateFlagQueue.async {
+            let url = recordingStateFlagURL()
+            if let timestamp {
+                let dir = url.deletingLastPathComponent()
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try? timestamp.write(to: url, atomically: true, encoding: .utf8)
+            } else {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
     }
 
     static func saveAudioFile(from tempURL: URL) -> SavedAudioFile? {
@@ -1043,7 +1102,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     context: restoredContext,
                     postProcessingService: postProcessingService,
                     customVocabulary: capturedCustomVocabulary,
-                    customSystemPrompt: capturedCustomSystemPrompt
+                    customSystemPrompt: capturedCustomSystemPrompt,
+                    outputLanguage: self.outputLanguage
                 )
                 finalTranscript = result.finalTranscript
                 processingStatus = Self.statusMessage(
@@ -2030,7 +2090,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     func showMicrophonePermissionAlert() {
         let alert = NSAlert()
         alert.messageText = "Microphone Permission Required"
-        alert.informativeText = "FreeFlow cannot record audio without Microphone access.\n\nGo to System Settings > Privacy & Security > Microphone and enable FreeFlow."
+        alert.informativeText = "\(AppName.displayName) cannot record audio without Microphone access.\n\nGo to System Settings > Privacy & Security > Microphone and enable \(AppName.displayName)."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Dismiss")
@@ -2045,7 +2105,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     func showAccessibilityAlert() {
         let alert = NSAlert()
         alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = "FreeFlow cannot type transcriptions without Accessibility access.\n\nGo to System Settings > Privacy & Security > Accessibility and enable FreeFlow."
+        alert.informativeText = "\(AppName.displayName) cannot type transcriptions without Accessibility access.\n\nGo to System Settings > Privacy & Security > Accessibility and enable \(AppName.displayName)."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Dismiss")
@@ -2164,7 +2224,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         context: AppContext,
         postProcessingService: PostProcessingService,
         customVocabulary: String,
-        customSystemPrompt: String
+        customSystemPrompt: String,
+        outputLanguage: String = ""
     ) async -> (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String) {
         let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -2178,7 +2239,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     selectedText: selectedText,
                     voiceCommand: rawTranscript,
                     context: context,
-                    customVocabulary: customVocabulary
+                    customVocabulary: customVocabulary,
+                    outputLanguage: outputLanguage
                 )
                 return (result.transcript, .commandModeSucceeded(invocation: invocation), result.prompt)
             } catch {
@@ -2197,7 +2259,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 transcript: trimmedRawTranscript,
                 context: context,
                 customVocabulary: customVocabulary,
-                customSystemPrompt: customSystemPrompt
+                customSystemPrompt: customSystemPrompt,
+                outputLanguage: outputLanguage
             )
             return (result.transcript, .postProcessingSucceeded, result.prompt)
         } catch {
@@ -2359,7 +2422,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         context: appContext,
                         postProcessingService: postProcessingService,
                         customVocabulary: self.customVocabulary,
-                        customSystemPrompt: self.customSystemPrompt
+                        customSystemPrompt: self.customSystemPrompt,
+                        outputLanguage: self.outputLanguage
                     )
                     try Task.checkCancellation()
 
@@ -2719,7 +2783,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func showScreenshotPermissionAlert(message: String) {
         let alert = NSAlert()
         alert.messageText = "Screen Recording Permission Required"
-        alert.informativeText = "\(message)\n\nFreeFlow requires Screen Recording permission to capture screenshots for context-aware transcription.\n\nGo to System Settings > Privacy & Security > Screen Recording and enable FreeFlow."
+        alert.informativeText = "\(message)\n\n\(AppName.displayName) requires Screen Recording permission to capture screenshots for context-aware transcription.\n\nGo to System Settings > Privacy & Security > Screen Recording and enable \(AppName.displayName)."
         alert.alertStyle = .critical
         alert.addButton(withTitle: "Open System Settings")
         alert.addButton(withTitle: "Dismiss")

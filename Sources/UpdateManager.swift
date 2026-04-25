@@ -436,7 +436,7 @@ final class UpdateManager: ObservableObject {
         let alert = NSAlert()
         alert.messageText = "A New Version is Available"
         let versionText = latestReleaseVersion.isEmpty ? release.tagName : "v\(latestReleaseVersion)"
-        alert.informativeText = "FreeFlow \(versionText) was released \(latestReleaseDate).\n\nWould you like to download the update?"
+        alert.informativeText = "\(AppName.displayName) \(versionText) was released \(latestReleaseDate).\n\nWould you like to download the update?"
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "Download Update")
@@ -470,7 +470,7 @@ final class UpdateManager: ObservableObject {
         let alert = NSAlert()
         alert.messageText = "New Release Available"
         let versionText = latestReleaseVersion.isEmpty ? release.tagName : "v\(latestReleaseVersion)"
-        alert.informativeText = "FreeFlow \(versionText) was released \(ageText). It's very recent — you can download it now or wait a few days for stability.\n\nWould you like to download it?"
+        alert.informativeText = "\(AppName.displayName) \(versionText) was released \(ageText). It's very recent — you can download it now or wait a few days for stability.\n\nWould you like to download it?"
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "Download Now")
@@ -493,7 +493,7 @@ final class UpdateManager: ObservableObject {
     func showUpToDateAlert() {
         let alert = NSAlert()
         alert.messageText = "You're Up to Date"
-        alert.informativeText = "You're running the latest version of FreeFlow."
+        alert.informativeText = "You're running the latest version of \(AppName.displayName)."
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
         alert.addButton(withTitle: "OK")
@@ -508,7 +508,7 @@ final class UpdateManager: ObservableObject {
     private func showReleaseNotes(for release: GitHubRelease) {
         let alert = NSAlert()
         let versionText = latestReleaseVersion.isEmpty ? release.tagName : "v\(latestReleaseVersion)"
-        alert.messageText = "What's New in FreeFlow \(versionText)"
+        alert.messageText = "What's New in \(AppName.displayName) \(versionText)"
         alert.informativeText = "Release notes from GitHub."
         alert.alertStyle = .informational
         alert.icon = NSApp.applicationIconImage
