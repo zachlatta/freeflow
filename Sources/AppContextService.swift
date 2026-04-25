@@ -15,6 +15,7 @@ struct AppContext {
     let windowTitle: String?
     let selectedText: String?
     let currentActivity: String
+    let contextSystemPrompt: String?
     let contextPrompt: String?
     let screenshotDataURL: String?
     let screenshotMimeType: String?
@@ -62,6 +63,11 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             : AppContextService.defaultScreenshotMaxDimension
     }
 
+    private func resolveContextPrompt() -> String {
+        let trimmedPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedPrompt.isEmpty ? Self.defaultContextPrompt : trimmedPrompt
+    }
+
     func collectSelectionSnapshot() -> AppSelectionSnapshot {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             return AppSelectionSnapshot(
@@ -82,6 +88,8 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     }
 
     func collectContext() async -> AppContext {
+        let contextSystemPrompt = resolveContextPrompt()
+
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             return AppContext(
                 appName: nil,
@@ -89,6 +97,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 windowTitle: nil,
                 selectedText: nil,
                 currentActivity: "You are dictating in an unrecognized context.",
+                contextSystemPrompt: contextSystemPrompt,
                 contextPrompt: nil,
                 screenshotDataURL: nil,
                 screenshotMimeType: nil,
@@ -115,7 +124,8 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 bundleIdentifier: bundleIdentifier,
                 windowTitle: windowTitle,
                 selectedText: selectedText,
-                screenshotDataURL: screenshot.dataURL
+                screenshotDataURL: screenshot.dataURL,
+                contextSystemPrompt: contextSystemPrompt
             ) {
                 currentActivity = result.activity
                 contextPrompt = result.prompt
@@ -146,6 +156,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             windowTitle: windowTitle,
             selectedText: selectedText,
             currentActivity: currentActivity,
+            contextSystemPrompt: contextSystemPrompt,
             contextPrompt: contextPrompt,
             screenshotDataURL: screenshot.dataURL,
             screenshotMimeType: screenshot.mimeType,
@@ -158,7 +169,8 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         bundleIdentifier: String?,
         windowTitle: String?,
         selectedText: String?,
-        screenshotDataURL: String?
+        screenshotDataURL: String?,
+        contextSystemPrompt: String
     ) async -> (activity: String, prompt: String)? {
         let attempts: [(model: String, screenshotDataURL: String?)] =
             if let screenshotDataURL {
@@ -179,6 +191,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 windowTitle: windowTitle,
                 selectedText: selectedText,
                 screenshotDataURL: attempt.screenshotDataURL,
+                contextSystemPrompt: contextSystemPrompt,
                 model: attempt.model
             ) {
                 return inferred
@@ -194,6 +207,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         windowTitle: String?,
         selectedText: String?,
         screenshotDataURL: String?,
+        contextSystemPrompt: String,
         model: String
     ) async -> (activity: String, prompt: String)? {
         do {
@@ -209,10 +223,6 @@ Bundle ID: \(bundleIdentifier ?? "Unknown")
 Window: \(windowTitle ?? "Unknown")
 Selected text: \(selectedText ?? "None")
 """
-
-            let systemPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? Self.defaultContextPrompt
-                : customContextPrompt
 
             let textOnlyPrompt = "Analyze the context and infer the user's current activity in exactly two sentences.\n\n\(metadata)"
             var userMessageDescription: String
@@ -238,13 +248,13 @@ Selected text: \(selectedText ?? "None")
                 userMessageDescription = textOnlyPrompt
             }
 
-            let fullPrompt = "Model: \(model)\n\n[System]\n\(systemPrompt)\n[User]\n\(userMessageDescription)"
+            let fullPrompt = "Model: \(model)\n\n[System]\n\(contextSystemPrompt)\n[User]\n\(userMessageDescription)"
 
             let payload: [String: Any] = [
                 "model": model,
                 "temperature": 0.2,
                 "messages": [
-                    ["role": "system", "content": systemPrompt],
+                    ["role": "system", "content": contextSystemPrompt],
                     ["role": "user", "content": userMessage]
                 ]
             ]

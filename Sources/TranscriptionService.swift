@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 import os.log
 
@@ -8,20 +7,22 @@ class TranscriptionService {
     private let apiKey: String
     private let baseURL: URL
     private let transcriptionModel: String
+    private let language: String?
     private let transcriptionResponseFormat = "verbose_json"
     private let transcriptionTimeoutSeconds: TimeInterval = 20
-    private let uploadSampleRate = 16_000.0
-    private let uploadChannelCount: AVAudioChannelCount = 1
 
     init(
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
-        transcriptionModel: String = "whisper-large-v3"
+        transcriptionModel: String = "whisper-large-v3",
+        language: String? = nil
     ) throws {
         self.apiKey = apiKey
         self.baseURL = try Self.normalizedBaseURL(from: baseURL)
         let trimmedModel = transcriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
+        let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
     }
 
     // Validate API key by hitting a lightweight endpoint
@@ -58,10 +59,7 @@ class TranscriptionService {
 
     // Send audio file for transcription and return text
     private func transcribeAudio(fileURL: URL) async throws -> String {
-        let preparedAudio = try prepareAudioForUpload(from: fileURL)
-        defer { preparedAudio.cleanup() }
-
-        return try await transcribeAudioWithURLSession(fileURL: preparedAudio.fileURL)
+        return try await transcribeAudioWithURLSession(fileURL: fileURL)
     }
 
     private func transcribeAudioWithURLSession(fileURL: URL) async throws -> String {
@@ -81,6 +79,7 @@ class TranscriptionService {
             fileName: fileURL.lastPathComponent,
             model: transcriptionModel,
             responseFormat: transcriptionResponseFormat,
+            language: language,
             boundary: boundary
         )
 
@@ -146,6 +145,7 @@ class TranscriptionService {
         fileName: String,
         model: String,
         responseFormat: String,
+        language: String?,
         boundary: String
     ) -> Data {
         var body = Data()
@@ -162,6 +162,12 @@ class TranscriptionService {
         append("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n")
         append("\(responseFormat)\r\n")
 
+        if let language, !language.isEmpty {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"language\"\r\n\r\n")
+            append("\(language)\r\n")
+        }
+
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
         append("Content-Type: \(audioContentType(for: fileName))\r\n\r\n")
@@ -171,32 +177,6 @@ class TranscriptionService {
 
         return body
     }
-
-    private func prepareAudioForUpload(from fileURL: URL) throws -> PreparedUploadAudio {
-        let inputFile = try AVAudioFile(forReading: fileURL)
-        if isPreferredUploadFormat(file: inputFile, fileURL: fileURL) {
-            return PreparedUploadAudio(fileURL: fileURL, deleteOnCleanup: false)
-        }
-
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension("wav")
-        do {
-            try AudioNormalization.writePreferredAudioCopy(from: fileURL, to: outputURL)
-        } catch {
-            throw TranscriptionError.audioPreparationFailed(error.localizedDescription)
-        }
-        return PreparedUploadAudio(fileURL: outputURL, deleteOnCleanup: true)
-    }
-
-    private func isPreferredUploadFormat(file: AVAudioFile, fileURL: URL) -> Bool {
-        let format = file.fileFormat
-        return fileURL.pathExtension.lowercased() == "wav"
-            && abs(format.sampleRate - uploadSampleRate) < 0.5
-            && format.channelCount == uploadChannelCount
-            && format.commonFormat == .pcmFormatInt16
-    }
-
     private static func normalizedBaseURL(from baseURL: String) throws -> URL {
         let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -243,8 +223,14 @@ class TranscriptionService {
     // Normal speech included audios have very low no_speech_prob.
     private let hallucinationPhrases = [
         "thank you",
+        "thank you for watching",
         "thank you very much",
         "thank you so much",
+        "thanks for watching",
+        "please subscribe",
+        "like and subscribe",
+        "subtitles by",
+        "subtitles by the amara.org community",
         "you"
     ]
 

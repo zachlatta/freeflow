@@ -1,0 +1,4 @@
+interface:
+  display_name: "FreeFlow Release"
+  short_description: "Prepare and publish FreeFlow semver releases."
+  default_prompt: "Prepare a new FreeFlow release."

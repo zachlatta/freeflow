@@ -9,6 +9,7 @@ final class RecordingOverlayState: ObservableObject {
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
     @Published var isCommandMode = false
     @Published var showsTranscribingSpinner = false
+    @Published var updateVersion: String = ""
 }
 
 enum OverlayPhase {
@@ -16,6 +17,7 @@ enum OverlayPhase {
     case recording
     case transcribing
     case feedback
+    case updateAvailable
 }
 
 // MARK: - Panel Helpers
@@ -63,6 +65,7 @@ final class RecordingOverlayManager {
     private var lockedOverlayWidth: CGFloat?
 
     var onStopButtonPressed: (() -> Void)?
+    var onUpdateOverlayPressed: (() -> Void)?
 
     private var screenHasNotch: Bool {
         guard let screen = NSScreen.main else { return false }
@@ -82,7 +85,8 @@ final class RecordingOverlayManager {
     }
 
     private var overlayAcceptsMouseEvents: Bool {
-        overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle
+        (overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle)
+            || overlayState.phase == .updateAvailable
     }
 
     func showInitializing(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
@@ -151,6 +155,17 @@ final class RecordingOverlayManager {
         }
     }
 
+    func showUpdateAvailable(version: String) {
+        DispatchQueue.main.async {
+            self.lockedOverlayWidth = nil
+            self.overlayState.isCommandMode = false
+            self.overlayState.showsTranscribingSpinner = false
+            self.overlayState.updateVersion = version
+            self.overlayState.phase = .updateAvailable
+            self.showOverlayPanel(animatedResize: true)
+        }
+    }
+
     func dismiss() {
         DispatchQueue.main.async {
             self.dismissAll()
@@ -214,6 +229,9 @@ final class RecordingOverlayManager {
                 state: overlayState,
                 onStopButtonPressed: { [weak self] in
                     self?.onStopButtonPressed?()
+                },
+                onUpdateOverlayPressed: { [weak self] in
+                    self?.onUpdateOverlayPressed?()
                 }
             )
             .padding(.top, screenHasNotch ? notchOverlap : 0)
@@ -254,6 +272,12 @@ final class RecordingOverlayManager {
             return max(notchWidth, feedbackWidth)
         }
 
+        if overlayState.phase == .updateAvailable {
+            let updateWidth: CGFloat = 190
+            guard screenHasNotch else { return updateWidth }
+            return max(notchWidth, updateWidth)
+        }
+
         let commandModeWidth: CGFloat = 180
         let toggleWidth: CGFloat = 150
         let defaultWidth: CGFloat = 92
@@ -281,6 +305,7 @@ final class RecordingOverlayManager {
         lockedOverlayWidth = nil
         overlayState.isCommandMode = false
         overlayState.showsTranscribingSpinner = false
+        overlayState.updateVersion = ""
         if let panel = overlayWindow {
             panel.orderOut(nil)
             overlayWindow = nil
@@ -305,15 +330,29 @@ struct WaveformBar: View {
 
 struct WaveformView: View {
     let audioLevel: Float
+    var showsActivityPulse = false
 
     private static let barCount = 9
     private static let multipliers: [CGFloat] = [0.35, 0.55, 0.75, 0.9, 1.0, 0.9, 0.75, 0.55, 0.35]
     private static let centerIndex = CGFloat((barCount - 1) / 2)
 
     var body: some View {
+        Group {
+            if showsActivityPulse {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+                    waveformBars(pulseTime: context.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                waveformBars(pulseTime: nil)
+            }
+        }
+        .frame(height: 20)
+    }
+
+    private func waveformBars(pulseTime: TimeInterval?) -> some View {
         HStack(spacing: 2.5) {
             ForEach(0..<Self.barCount, id: \.self) { index in
-                WaveformBar(amplitude: barAmplitude(for: index))
+                WaveformBar(amplitude: barAmplitude(for: index, pulseTime: pulseTime))
                     .animation(
                         .spring(
                             response: barResponse(for: index),
@@ -324,12 +363,21 @@ struct WaveformView: View {
                     )
             }
         }
-        .frame(height: 20)
     }
 
-    private func barAmplitude(for index: Int) -> CGFloat {
-        let level = CGFloat(audioLevel)
-        return min(level * Self.multipliers[index], 1.0)
+    private func barAmplitude(for index: Int, pulseTime: TimeInterval?) -> CGFloat {
+        let level = CGFloat(max(audioLevel, 0))
+        let baseAmplitude = min(level * Self.multipliers[index], 1.0)
+
+        guard let pulseTime else { return baseAmplitude }
+
+        let travelingWave = CGFloat(0.5 + 0.5 * sin((pulseTime * 6.2) - Double(index) * 0.78))
+        let shimmer = CGFloat(0.5 + 0.5 * sin((pulseTime * 3.1) + Double(index) * 0.5))
+        let pulse = travelingWave * 0.22 + shimmer * 0.06
+
+        let saturationRelief = baseAmplitude * (0.74 + pulse)
+        let quietPulse = (1.0 - baseAmplitude) * (0.04 + pulse * 0.28)
+        return min(saturationRelief + quietPulse, 1.0)
     }
 
     private func barResponse(for index: Int) -> Double {
@@ -402,6 +450,7 @@ struct InitializingDotsView: View {
 struct RecordingOverlayView: View {
     @ObservedObject var state: RecordingOverlayState
     let onStopButtonPressed: () -> Void
+    let onUpdateOverlayPressed: () -> Void
 
     private let leadingAccessoryWidth: CGFloat = 24
     private let trailingAccessoryWidth: CGFloat = 32
@@ -418,6 +467,8 @@ struct RecordingOverlayView: View {
         Group {
             if state.phase == .feedback {
                 FailureIndicatorView()
+            } else if state.phase == .updateAvailable {
+                UpdateAvailableOverlayView(onPress: onUpdateOverlayPressed)
             } else {
                 ZStack {
                     Group {
@@ -425,7 +476,10 @@ struct RecordingOverlayView: View {
                             InitializingDotsView()
                                 .transition(.opacity)
                         } else if showsLiveRecordingContent {
-                            WaveformView(audioLevel: state.audioLevel)
+                            WaveformView(
+                                audioLevel: state.audioLevel,
+                                showsActivityPulse: state.phase == .recording
+                            )
                                 .transition(.opacity)
                         } else {
                             ProcessingWaveformView()
@@ -490,5 +544,26 @@ struct FailureIndicatorView: View {
             .frame(width: 20, height: 20)
             .background(Circle().fill(Color.red.opacity(0.92)))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct UpdateAvailableOverlayView: View {
+    let onPress: () -> Void
+
+    var body: some View {
+        Button(action: onPress) {
+            HStack(spacing: 7) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white)
+
+                Text("Update Available")
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(.plain)
     }
 }

@@ -279,7 +279,7 @@ struct MenuBarView: View {
                     Button {
                         updateManager.showUpdateAlert()
                     } label: {
-                        Label("Update Available", systemImage: "arrow.down.circle.fill")
+                        Label("Update available", systemImage: "arrow.down.circle.fill")
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.white)
