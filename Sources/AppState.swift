@@ -215,7 +215,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
-    private let transcribingIndicatorDelay: TimeInterval = 0.25
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
     private let clipboardRestoreDelay: TimeInterval = 1.0
@@ -541,7 +540,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var audioLevelCancellable: AnyCancellable?
     private var debugOverlayTimer: Timer?
     private var recordingInitializationTimer: DispatchSourceTimer?
-    private var transcribingIndicatorTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
     private var transcribingAudioFileName: String?
     private var contextService: AppContextService
@@ -1624,8 +1622,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         transcriptionTask?.cancel()
         transcriptionTask = nil
-        transcribingIndicatorTask?.cancel()
-        transcribingIndicatorTask = nil
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         capturedContext = nil
@@ -2054,8 +2050,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         isTranscribing = false
         transcriptionTask?.cancel()
         transcriptionTask = nil
-        transcribingIndicatorTask?.cancel()
-        transcribingIndicatorTask = nil
         if let transcribingAudioFileName {
             Self.deleteAudioFile(transcribingAudioFileName)
             self.transcribingAudioFileName = nil
@@ -2351,18 +2345,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.statusText = "Transcribing..."
             self.debugStatusMessage = "Transcribing audio"
 
-            self.transcribingIndicatorTask?.cancel()
-            let indicatorDelay = self.transcribingIndicatorDelay
-            self.transcribingIndicatorTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(nanoseconds: UInt64(indicatorDelay * 1_000_000_000))
-                    let shouldShowTranscribing = self?.isTranscribing ?? false
-                    guard shouldShowTranscribing else { return }
-                    await MainActor.run { [weak self] in
-                        self?.overlayManager.showTranscribing()
-                    }
-                } catch {}
-            }
+            self.overlayManager.showTranscribing()
 
         let postProcessingService = PostProcessingService(
             apiKey: apiKey,
@@ -2376,8 +2359,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.audioRecorder.onPCM16Samples = nil
             self.transcriptionTask?.cancel()
             guard self.isTranscribing else {
-                self.transcribingIndicatorTask?.cancel()
-                self.transcribingIndicatorTask = nil
                 if let savedAudioFile {
                     Self.deleteAudioFile(savedAudioFile.fileName)
                 }
@@ -2459,8 +2440,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             audioFileName: savedAudioFile?.fileName
                         )
                         self.transcriptionTask = nil
-                        self.transcribingIndicatorTask?.cancel()
-                        self.transcribingIndicatorTask = nil
                         self.transcribingAudioFileName = nil
                         self.lastTranscript = trimmedFinalTranscript
                         self.isTranscribing = false
@@ -2530,8 +2509,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     await MainActor.run {
                         guard self.isTranscribing else { return }
                         self.transcriptionTask = nil
-                        self.transcribingIndicatorTask?.cancel()
-                        self.transcribingIndicatorTask = nil
                         self.transcribingAudioFileName = nil
                         self.errorMessage = error.localizedDescription
                         self.isTranscribing = false
