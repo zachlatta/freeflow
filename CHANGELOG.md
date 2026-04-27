@@ -8,6 +8,28 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [0.3.3] - 2026-04-25
+
+### Added
+
+- Output Language setting for automatically translating dictated text before it is pasted.
+- Transcription Language setting for choosing the language FreeFlow listens for during dictation.
+- Recording state flag file for external tools that need to know when FreeFlow is actively recording.
+- Distinct FreeFlow Dev app and menu bar icons so development builds are easier to tell apart from release builds.
+
+### Improved
+
+- Permission prompts and setup screens now use the correct app name for the installed build.
+- Release notes in update prompts now render changelog formatting more clearly.
+- Development builds now have clearer bundle naming and icon handling.
+
+### Fixed
+
+- Fixed audio recording crashes caused by unexpected input formats, resampling, and upload-path conversion.
+- Fixed cases where FreeFlow could silently fall back when the selected microphone was unavailable.
+- Fixed paste shortcuts on Colemak-DH and other non-QWERTY keyboard layouts.
+- Fixed output language handling when custom system prompts are enabled.
+
 ## [0.3.2] - 2026-04-23
 
 ### Fixed
