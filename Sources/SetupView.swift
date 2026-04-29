@@ -359,39 +359,6 @@ struct SetupView: View {
                     }
                     .clipped()
                 }
-
-                if !githubCache.recentStargazers.isEmpty {
-                    Divider()
-                    HStack(spacing: 8) {
-                        HStack(spacing: -6) {
-                            ForEach(githubCache.recentStargazers) { star in
-                                Button {
-                                    openURL(star.user.htmlUrl)
-                                } label: {
-                                    AsyncImage(url: star.user.avatarThumbnailUrl) { phase in
-                                        switch phase {
-                                        case .success(let image):
-                                            image.resizable().aspectRatio(contentMode: .fill)
-                                        default:
-                                            Color.gray.opacity(0.2)
-                                        }
-                                    }
-                                    .frame(width: 22, height: 22)
-                                    .clipShape(Circle())
-                                    .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .clipped()
-                        Text("recently starred")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .fixedSize()
-                        Spacer()
-                    }
-                    .clipped()
-                }
             }
             .padding(12)
             .background(
