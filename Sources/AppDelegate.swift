@@ -44,10 +44,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func handleShowSetup() {
+        let wasCompleted = appState.hasCompletedSetup
         appState.hasCompletedSetup = false
         appState.stopAccessibilityPolling()
         appState.stopHotkeyMonitoring()
         showSetupWindow()
+
+        // Restore prior state if the user closes the wizard without completing.
+        // completeSetup() flips hasCompletedSetup back to true before window.close(),
+        // so the !hasCompletedSetup check below correctly skips the restore there.
+        if wasCompleted, let window = setupWindow {
+            NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { [weak self] _ in
+                guard let self = self else { return }
+                if !self.appState.hasCompletedSetup {
+                    self.appState.hasCompletedSetup = true
+                    self.appState.startHotkeyMonitoring()
+                    self.appState.startAccessibilityPolling()
+                    NSApp.setActivationPolicy(.accessory)
+                }
+            }
+        }
     }
 
     @objc private func handleShowSettings() {
