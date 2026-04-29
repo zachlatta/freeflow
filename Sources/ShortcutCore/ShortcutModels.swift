@@ -428,23 +428,23 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     static func exactModifierDisplayLabel(for keyCode: UInt16) -> String? {
         switch keyCode {
         case 55:
-            return "\u{2318}"
+            return "Cmd \u{2318}"
         case 54:
-            return "\u{2318} \u{2192}"
+            return "Right Cmd \u{2318}"
         case 59:
-            return "\u{2303}"
+            return "Ctrl \u{2303}"
         case 62:
-            return "\u{2303} \u{2192}"
+            return "Right Ctrl \u{2303}"
         case 58:
-            return "\u{2325}"
+            return "Option \u{2325}"
         case 61:
-            return "\u{2325} \u{2192}"
+            return "Right Option \u{2325}"
         case 56:
-            return "\u{21E7}"
+            return "Shift \u{21E7}"
         case 60:
-            return "\u{21E7} \u{2192}"
+            return "Right Shift \u{21E7}"
         case 63:
-            return "fn"
+            return "Fn"
         default:
             return nil
         }
