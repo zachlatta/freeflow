@@ -209,20 +209,42 @@ final class RecordingOverlayManager {
     }
 
     private func makeOverlayContent(frame: NSRect) -> NSView {
-        makeNotchContent(
+        if useWingedLayout {
+            // Winged layout: notch x-range stays solid black so the cutout masks it.
+            let rootView = WingedRecordingView(
+                state: overlayState,
+                leftWingWidth: Self.leftWingWidth,
+                notchWidth: notchWidth,
+                rightWingWidth: Self.rightWingWidth,
+                height: frame.height,
+                onStopButtonPressed: { [weak self] in
+                    self?.onStopButtonPressed?()
+                }
+            )
+            return makeNotchContent(
+                width: frame.width,
+                height: frame.height,
+                cornerRadius: 14,
+                rootView: AnyView(rootView)
+            )
+        }
+
+        return makeNotchContent(
             width: frame.width,
             height: frame.height,
             cornerRadius: screenHasNotch ? 18 : 12,
-            rootView: RecordingOverlayView(
-                state: overlayState,
-                onStopButtonPressed: { [weak self] in
-                    self?.onStopButtonPressed?()
-                },
-                onUpdateOverlayPressed: { [weak self] in
-                    self?.onUpdateOverlayPressed?()
-                }
+            rootView: AnyView(
+                RecordingOverlayView(
+                    state: overlayState,
+                    onStopButtonPressed: { [weak self] in
+                        self?.onStopButtonPressed?()
+                    },
+                    onUpdateOverlayPressed: { [weak self] in
+                        self?.onUpdateOverlayPressed?()
+                    }
+                )
+                .padding(.top, screenHasNotch ? notchOverlap : 0)
             )
-            .padding(.top, screenHasNotch ? notchOverlap : 0)
         )
     }
 
@@ -239,8 +261,44 @@ final class RecordingOverlayManager {
         }
     }
 
+    /// True iff the overlay renders as wings flanking the notch (notched display
+    /// + use_compact_overlay on). updateAvailable still uses the drop-down pill.
+    private var useWingedLayout: Bool {
+        guard screenHasNotch else { return false }
+        let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
+        guard useCompact else { return false }
+        switch overlayState.phase {
+        case .recording, .initializing, .transcribing, .feedback:
+            return true
+        case .updateAvailable:
+            return false
+        }
+    }
+
+    /// Wing width — tight to the compact waveform / stop button so the
+    /// panel stays clear of right-side menu-bar items.
+    static let wingWidth: CGFloat = 36
+    static let leftWingWidth: CGFloat = wingWidth
+    static let rightWingWidth: CGFloat = wingWidth
+
     private var overlayFrame: NSRect {
         guard let screen = NSScreen.main else { return .zero }
+
+        if useWingedLayout {
+            // Anchor to the screen's auxiliary-area boundaries of the notch;
+            // panel height matches the menu-bar overlap so nothing protrudes below.
+            let nWidth = notchWidth
+            let nLeftX = screen.auxiliaryTopLeftArea?.maxX
+                ?? (screen.frame.midX - nWidth / 2)
+            let leftWing = Self.leftWingWidth
+            let rightWing = Self.rightWingWidth
+            let panelHeight = notchOverlap
+            let panelWidth = leftWing + nWidth + rightWing
+            let panelX = nLeftX - leftWing
+            let panelY = screen.frame.maxY - panelHeight
+            return NSRect(x: panelX, y: panelY, width: panelWidth, height: panelHeight)
+        }
+
         let width = overlayWidth
         let overlap = screenHasNotch ? notchOverlap : 0
         let height: CGFloat = 38 + overlap
@@ -300,13 +358,102 @@ final class RecordingOverlayManager {
     }
 }
 
+// MARK: - Winged Recording View
+
+/// Wing layout: waveform left, stop button right, solid-black notch in the middle
+/// (the camera cutout masks those pixels).
+struct WingedRecordingView: View {
+    @ObservedObject var state: RecordingOverlayState
+    let leftWingWidth: CGFloat
+    let notchWidth: CGFloat
+    let rightWingWidth: CGFloat
+    let height: CGFloat
+    let onStopButtonPressed: () -> Void
+
+    private var showsLiveRecordingContent: Bool {
+        state.phase == .recording
+    }
+
+    private var showsStopButton: Bool {
+        showsLiveRecordingContent && state.recordingTriggerMode == .toggle
+    }
+
+    var body: some View {
+        wingsHStack
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
+    }
+
+    private var wingsHStack: some View {
+        HStack(spacing: 0) {
+            // Left wing — empty during feedback so the right-wing X reads as the sole signal.
+            HStack {
+                Spacer(minLength: 0)
+                Group {
+                    if state.phase == .feedback {
+                        Color.clear
+                    } else if state.phase == .initializing {
+                        InitializingDotsView()
+                            .transition(.opacity)
+                    } else if showsLiveRecordingContent {
+                        CompactWaveformView(
+                            audioLevel: state.audioLevel,
+                            showsActivityPulse: state.phase == .recording
+                        )
+                        .transition(.opacity)
+                    } else {
+                        CompactProcessingIndicatorView()
+                            .transition(.opacity)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: leftWingWidth, height: height)
+
+            // Notch spacer — solid black; camera cutout hides it.
+            Color.black
+                .frame(width: notchWidth, height: height)
+
+            // Right wing — stop button (recording) OR failure X (feedback),
+            // horizontally centered.
+            HStack {
+                Spacer(minLength: 0)
+                Group {
+                    if state.phase == .feedback {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 7, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 14, height: 14)
+                            .background(Circle().fill(Color.red.opacity(0.92)))
+                            .transition(.opacity)
+                    } else if showsStopButton {
+                        Button(action: onStopButtonPressed) {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(.white)
+                                .frame(width: 14, height: 14)
+                                .background(Circle().fill(Color.red.opacity(0.92)))
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.opacity)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: rightWingWidth, height: height)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
+    }
+}
+
 // MARK: - Waveform Views
 
 struct WaveformBar: View {
     let amplitude: CGFloat
 
     private let minHeight: CGFloat = 2
-    private let maxHeight: CGFloat = 20
+    private let maxHeight: CGFloat = 22
 
     var body: some View {
         Capsule()
@@ -333,7 +480,7 @@ struct WaveformView: View {
                 waveformBars(pulseTime: nil)
             }
         }
-        .frame(height: 20)
+        .frame(height: 24)
     }
 
     private func waveformBars(pulseTime: TimeInterval?) -> some View {
@@ -376,6 +523,65 @@ struct WaveformView: View {
     private func barDelay(for index: Int) -> Double {
         let distance = abs(CGFloat(index) - Self.centerIndex)
         return Double(distance) * 0.01
+    }
+}
+
+/// Tighter 5-bar waveform sized for the 36pt wing layout.
+struct CompactWaveformView: View {
+    let audioLevel: Float
+    var showsActivityPulse = false
+
+    private static let barCount = 5
+    private static let multipliers: [CGFloat] = [0.5, 0.75, 1.0, 0.75, 0.5]
+    private static let centerIndex = CGFloat((barCount - 1) / 2)
+
+    var body: some View {
+        Group {
+            if showsActivityPulse {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+                    bars(pulseTime: context.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                bars(pulseTime: nil)
+            }
+        }
+        .frame(height: 18)
+    }
+
+    private func bars(pulseTime: TimeInterval?) -> some View {
+        HStack(spacing: 1.5) {
+            ForEach(0..<Self.barCount, id: \.self) { index in
+                CompactWaveformBar(amplitude: amplitude(for: index, pulseTime: pulseTime))
+                    .animation(
+                        .spring(response: 0.18, dampingFraction: 0.88),
+                        value: audioLevel
+                    )
+            }
+        }
+    }
+
+    private func amplitude(for index: Int, pulseTime: TimeInterval?) -> CGFloat {
+        let level = CGFloat(max(audioLevel, 0))
+        let base = min(level * Self.multipliers[index], 1.0)
+        guard let pulseTime else { return base }
+        let traveling = CGFloat(0.5 + 0.5 * sin((pulseTime * 6.2) - Double(index) * 0.78))
+        let shimmer = CGFloat(0.5 + 0.5 * sin((pulseTime * 3.1) + Double(index) * 0.5))
+        let pulse = traveling * 0.22 + shimmer * 0.06
+        let saturationRelief = base * (0.74 + pulse)
+        let quietPulse = (1.0 - base) * (0.04 + pulse * 0.28)
+        return min(saturationRelief + quietPulse, 1.0)
+    }
+}
+
+struct CompactWaveformBar: View {
+    let amplitude: CGFloat
+    private let minHeight: CGFloat = 2
+    private let maxHeight: CGFloat = 14
+
+    var body: some View {
+        Capsule()
+            .fill(.white)
+            .frame(width: 2, height: minHeight + (maxHeight - minHeight) * amplitude)
     }
 }
 
@@ -452,7 +658,7 @@ struct ProcessingIndicatorView: View {
                     .rotationEffect(.degrees(rotation))
                     .frame(height: 20)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    .transition(.opacity)
                     .onAppear {
                         rotation = 0
                         withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
@@ -461,7 +667,7 @@ struct ProcessingIndicatorView: View {
                     }
             } else {
                 ProcessingWaveformView()
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .transition(.opacity)
             }
         }
         .task {
@@ -474,6 +680,107 @@ struct ProcessingIndicatorView: View {
                 }
             } catch {}
         }
+    }
+}
+
+/// Same hybrid waveform-then-spinner as `ProcessingIndicatorView`, sized to
+/// fit the 18pt winged menu-bar overlay. Uses tighter pills and a smaller
+/// spinner so the indicator stays inside the wing without the jolt to
+/// oversized capsules that the full-size indicator produced.
+struct CompactProcessingIndicatorView: View {
+    @State private var showsExtendedSpinner = false
+    @State private var rotation: Double = 0
+
+    var body: some View {
+        ZStack {
+            if showsExtendedSpinner {
+                Circle()
+                    .trim(from: 0.1, to: 0.9)
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 2.0, lineCap: .round))
+                    .frame(width: 12, height: 12)
+                    .rotationEffect(.degrees(rotation))
+                    .frame(height: 18)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+                    .onAppear {
+                        rotation = 0
+                        withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
+                            rotation = 360
+                        }
+                    }
+            } else {
+                CompactProcessingWaveformView()
+                    .transition(.opacity)
+            }
+        }
+        .task {
+            showsExtendedSpinner = false
+            do {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showsExtendedSpinner = true
+                }
+            } catch {}
+        }
+    }
+}
+
+struct CompactProcessingWaveformView: View {
+    private static let barCount = 5
+    private static let centerIndex = CGFloat((barCount - 1) / 2)
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            HStack(spacing: 2) {
+                ForEach(0..<Self.barCount, id: \.self) { index in
+                    CompactProcessingPill(
+                        amplitude: amplitude(for: index, time: time),
+                        opacity: opacity(for: index, time: time)
+                    )
+                }
+            }
+            .frame(height: 18)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func phase(for index: Int, time: TimeInterval) -> Double {
+        let cycle = 1.05
+        let stagger = 0.11
+        return ((time - Double(index) * stagger).truncatingRemainder(dividingBy: cycle)) / cycle
+    }
+
+    private func pulse(for index: Int, time: TimeInterval) -> CGFloat {
+        let phase = phase(for: index, time: time)
+        let wave = 0.5 + 0.5 * sin((phase * 2.0 * .pi) - (.pi / 2.0))
+        return CGFloat(pow(wave, 1.9))
+    }
+
+    private func amplitude(for index: Int, time: TimeInterval) -> CGFloat {
+        let centerDistance = abs(CGFloat(index) - Self.centerIndex) / Self.centerIndex
+        let baseline = 0.18 + (1.0 - centerDistance) * 0.1
+        return min(baseline + pulse(for: index, time: time) * 0.68, 1.0)
+    }
+
+    private func opacity(for index: Int, time: TimeInterval) -> CGFloat {
+        0.42 + pulse(for: index, time: time) * 0.52
+    }
+}
+
+private struct CompactProcessingPill: View {
+    let amplitude: CGFloat
+    let opacity: CGFloat
+
+    private let minHeight: CGFloat = 2
+    private let maxHeight: CGFloat = 12
+
+    var body: some View {
+        Capsule()
+            .fill(.white)
+            .frame(width: 2, height: minHeight + (maxHeight - minHeight) * amplitude)
+            .opacity(opacity)
     }
 }
 
@@ -541,7 +848,7 @@ struct RecordingOverlayView: View {
                                 .transition(.opacity)
                         } else {
                             ProcessingIndicatorView()
-                                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                                .transition(.opacity)
                         }
                     }
 
@@ -549,7 +856,7 @@ struct RecordingOverlayView: View {
                         Group {
                             if state.isCommandMode {
                                 CommandModeIndicator()
-                                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                                    .transition(.opacity)
                             }
                         }
                         .frame(width: leadingAccessoryWidth, alignment: .center)
@@ -561,9 +868,9 @@ struct RecordingOverlayView: View {
                             if showsStopButton {
                                 Button(action: onStopButtonPressed) {
                                     Image(systemName: "stop.fill")
-                                        .font(.system(size: 9, weight: .bold))
+                                        .font(.system(size: 7, weight: .bold))
                                         .foregroundStyle(.white)
-                                        .frame(width: 20, height: 20)
+                                        .frame(width: 14, height: 14)
                                         .background(Circle().fill(Color.red.opacity(0.92)))
                                 }
                                 .buttonStyle(.plain)
@@ -577,9 +884,9 @@ struct RecordingOverlayView: View {
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.phase)
-        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.recordingTriggerMode)
-        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: state.isCommandMode)
+        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
+        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.recordingTriggerMode)
+        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.isCommandMode)
     }
 }
 
