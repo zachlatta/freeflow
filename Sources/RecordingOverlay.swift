@@ -451,6 +451,45 @@ private struct ProcessingPill: View {
     }
 }
 
+struct ProcessingIndicatorView: View {
+    @State private var showsExtendedSpinner = false
+    @State private var rotation: Double = 0
+
+    var body: some View {
+        ZStack {
+            if showsExtendedSpinner {
+                Circle()
+                    .trim(from: 0.1, to: 0.9)
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .frame(width: 16, height: 16)
+                    .rotationEffect(.degrees(rotation))
+                    .frame(height: 20)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    .onAppear {
+                        rotation = 0
+                        withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
+                            rotation = 360
+                        }
+                    }
+            } else {
+                ProcessingWaveformView()
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+        }
+        .task {
+            showsExtendedSpinner = false
+            do {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showsExtendedSpinner = true
+                }
+            } catch {}
+        }
+    }
+}
+
 struct InitializingDotsView: View {
     @State private var activeDot = 0
     @State private var timer: Timer?
@@ -514,7 +553,7 @@ struct RecordingOverlayView: View {
                             )
                                 .transition(.opacity)
                         } else {
-                            ProcessingWaveformView()
+                            ProcessingIndicatorView()
                                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
                         }
                     }
