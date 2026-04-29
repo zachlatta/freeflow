@@ -137,12 +137,6 @@ final class RecordingOverlayManager {
         }
     }
 
-    func prepareForTranscribing() {
-        DispatchQueue.main.async {
-            self.setTranscribingPhase(showsTranscribingSpinner: true)
-        }
-    }
-
     func showTranscribing() {
         DispatchQueue.main.async {
             self.setTranscribingPhase(showsTranscribingSpinner: true)
