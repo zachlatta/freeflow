@@ -98,9 +98,9 @@ enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .fnKey: return "Fn (Globe) Key"
-        case .rightOption: return "Right Option Key"
-        case .f5: return "F5 Key"
+        case .fnKey: return "Fn 🌐"
+        case .rightOption: return "Right Option ⌥"
+        case .f5: return "F5"
         }
     }
 
