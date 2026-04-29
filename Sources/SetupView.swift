@@ -327,6 +327,39 @@ struct SetupView: View {
                     .buttonStyle(.plain)
                 }
 
+                if !githubCache.recentContributors.isEmpty {
+                    Divider()
+                    HStack(spacing: 8) {
+                        HStack(spacing: -6) {
+                            ForEach(githubCache.recentContributors) { contributor in
+                                Button {
+                                    openURL(contributor.htmlUrl)
+                                } label: {
+                                    AsyncImage(url: contributor.avatarThumbnailUrl) { phase in
+                                        switch phase {
+                                        case .success(let image):
+                                            image.resizable().aspectRatio(contentMode: .fill)
+                                        default:
+                                            Color.gray.opacity(0.2)
+                                        }
+                                    }
+                                    .frame(width: 22, height: 22)
+                                    .clipShape(Circle())
+                                    .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .clipped()
+                        Text("recent contributors")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .fixedSize()
+                        Spacer()
+                    }
+                    .clipped()
+                }
+
                 if !githubCache.recentStargazers.isEmpty {
                     Divider()
                     HStack(spacing: 8) {
@@ -1317,12 +1350,32 @@ struct GitHubStarUser: Decodable {
     }
 }
 
+struct GitHubContributor: Decodable, Identifiable {
+    let id: Int
+    let login: String
+    let avatarUrl: URL
+    let htmlUrl: URL
+
+    var avatarThumbnailUrl: URL {
+        let separator = avatarUrl.absoluteString.contains("?") ? "&" : "?"
+        return URL(string: avatarUrl.absoluteString + "\(separator)s=44") ?? avatarUrl
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case login
+        case avatarUrl = "avatar_url"
+        case htmlUrl = "html_url"
+    }
+}
+
 @MainActor
 class GitHubMetadataCache: ObservableObject {
     static let shared = GitHubMetadataCache()
 
     @Published var starCount: Int?
     @Published var recentStargazers: [GitHubStarRecord] = []
+    @Published var recentContributors: [GitHubContributor] = []
     @Published var isLoading = true
 
     private var lastFetchDate: Date?
@@ -1361,8 +1414,17 @@ class GitHubMetadataCache: ObservableObject {
                 }
             }
 
+            var contributors: [GitHubContributor] = []
+            let contributorsURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/contributors?per_page=15")!
+            let contributorsResult = try await URLSession.shared.data(from: contributorsURL)
+            if let contribHTTP = contributorsResult.1 as? HTTPURLResponse,
+               (200..<300).contains(contribHTTP.statusCode) {
+                contributors = (try? JSONDecoder().decode([GitHubContributor].self, from: contributorsResult.0)) ?? []
+            }
+
             starCount = count
             recentStargazers = recent
+            recentContributors = contributors
             isLoading = false
             lastFetchDate = Date()
         } catch {
