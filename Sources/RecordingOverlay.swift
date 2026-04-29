@@ -8,7 +8,6 @@ final class RecordingOverlayState: ObservableObject {
     @Published var audioLevel: Float = 0.0
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
     @Published var isCommandMode = false
-    @Published var showsTranscribingSpinner = false
     @Published var updateVersion: String = ""
 }
 
@@ -95,7 +94,6 @@ final class RecordingOverlayManager {
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .initializing
-            self.overlayState.showsTranscribingSpinner = false
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: false)
         }
@@ -107,7 +105,6 @@ final class RecordingOverlayManager {
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .recording
-            self.overlayState.showsTranscribingSpinner = false
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: true)
         }
@@ -119,7 +116,6 @@ final class RecordingOverlayManager {
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .recording
-            self.overlayState.showsTranscribingSpinner = false
             self.updateOverlayLayout(animated: true)
         }
     }
@@ -139,7 +135,7 @@ final class RecordingOverlayManager {
 
     func showTranscribing() {
         DispatchQueue.main.async {
-            self.setTranscribingPhase(showsTranscribingSpinner: true)
+            self.setTranscribingPhase()
         }
     }
 
@@ -153,7 +149,6 @@ final class RecordingOverlayManager {
         DispatchQueue.main.async {
             self.lockedOverlayWidth = nil
             self.overlayState.isCommandMode = false
-            self.overlayState.showsTranscribingSpinner = false
             self.overlayState.updateVersion = version
             self.overlayState.phase = .updateAvailable
             self.showOverlayPanel(animatedResize: true)
@@ -207,10 +202,9 @@ final class RecordingOverlayManager {
         resize(panel: panel, to: frame, animated: animated)
     }
 
-    private func setTranscribingPhase(showsTranscribingSpinner: Bool) {
+    private func setTranscribingPhase() {
         lockedOverlayWidth = overlayWindow?.frame.width ?? overlayWidth
         overlayState.phase = .transcribing
-        overlayState.showsTranscribingSpinner = showsTranscribingSpinner
         showOverlayPanel(animatedResize: true)
     }
 
@@ -298,7 +292,6 @@ final class RecordingOverlayManager {
     private func dismissAll() {
         lockedOverlayWidth = nil
         overlayState.isCommandMode = false
-        overlayState.showsTranscribingSpinner = false
         overlayState.updateVersion = ""
         if let panel = overlayWindow {
             panel.orderOut(nil)
