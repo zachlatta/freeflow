@@ -1403,13 +1403,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @discardableResult
     func setCommandModeManualModifier(_ modifier: CommandModeManualModifier) -> String? {
-        if isCommandModeEnabled,
-           commandModeStyle == .manual,
-           let message = commandModeManualModifierCollisionMessage(for: modifier) {
-            return message
-        }
-
+        // Match sibling setters: always commit, then validate.
         commandModeManualModifier = modifier
+        if isCommandModeEnabled, commandModeStyle == .manual {
+            return commandModeManualModifierCollisionMessage(for: modifier)
+        }
         return nil
     }
 
