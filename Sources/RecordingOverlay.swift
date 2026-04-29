@@ -139,7 +139,7 @@ final class RecordingOverlayManager {
 
     func prepareForTranscribing() {
         DispatchQueue.main.async {
-            self.setTranscribingPhase(showsTranscribingSpinner: false)
+            self.setTranscribingPhase(showsTranscribingSpinner: true)
         }
     }
 
@@ -393,29 +393,61 @@ struct WaveformView: View {
 }
 
 struct ProcessingWaveformView: View {
-    private static let barCount = 9
-    private static let multipliers: [CGFloat] = [0.42, 0.58, 0.76, 0.9, 1.0, 0.9, 0.76, 0.58, 0.42]
+    private static let barCount = 5
+    private static let centerIndex = CGFloat((barCount - 1) / 2)
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
             let time = context.date.timeIntervalSinceReferenceDate
 
-            HStack(spacing: 2.5) {
+            HStack(spacing: 4) {
                 ForEach(0..<Self.barCount, id: \.self) { index in
-                    let wave = 0.5 + 0.5 * sin((time * 5.6) - Double(index) * 0.5)
-                    let shimmer = 0.5 + 0.5 * sin((time * 2.8) + Double(index) * 0.75)
-                    let amplitude = min(
-                        0.16 + CGFloat(wave) * Self.multipliers[index] * 0.52 + CGFloat(shimmer) * 0.08,
-                        1.0
+                    ProcessingPill(
+                        amplitude: amplitude(for: index, time: time),
+                        opacity: opacity(for: index, time: time)
                     )
-
-                    WaveformBar(amplitude: amplitude)
-                        .opacity(0.45 + CGFloat(wave) * 0.5)
                 }
             }
             .frame(height: 20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func phase(for index: Int, time: TimeInterval) -> Double {
+        let cycle = 1.05
+        let stagger = 0.11
+        return ((time - Double(index) * stagger).truncatingRemainder(dividingBy: cycle)) / cycle
+    }
+
+    private func pulse(for index: Int, time: TimeInterval) -> CGFloat {
+        let phase = phase(for: index, time: time)
+        let wave = 0.5 + 0.5 * sin((phase * 2.0 * .pi) - (.pi / 2.0))
+        return CGFloat(pow(wave, 1.9))
+    }
+
+    private func amplitude(for index: Int, time: TimeInterval) -> CGFloat {
+        let centerDistance = abs(CGFloat(index) - Self.centerIndex) / Self.centerIndex
+        let baseline = 0.18 + (1.0 - centerDistance) * 0.1
+        return min(baseline + pulse(for: index, time: time) * 0.68, 1.0)
+    }
+
+    private func opacity(for index: Int, time: TimeInterval) -> CGFloat {
+        0.42 + pulse(for: index, time: time) * 0.52
+    }
+}
+
+private struct ProcessingPill: View {
+    let amplitude: CGFloat
+    let opacity: CGFloat
+
+    private let minHeight: CGFloat = 4
+    private let maxHeight: CGFloat = 18
+
+    var body: some View {
+        Capsule()
+            .fill(.white)
+            .frame(width: 4, height: minHeight + (maxHeight - minHeight) * amplitude)
+            .opacity(opacity)
     }
 }
 
@@ -456,7 +488,7 @@ struct RecordingOverlayView: View {
     private let trailingAccessoryWidth: CGFloat = 32
 
     private var showsLiveRecordingContent: Bool {
-        state.phase == .recording || (state.phase == .transcribing && !state.showsTranscribingSpinner)
+        state.phase == .recording
     }
 
     private var showsStopButton: Bool {
