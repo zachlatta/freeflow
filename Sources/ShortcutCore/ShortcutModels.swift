@@ -29,7 +29,7 @@ struct ShortcutModifiers: OptionSet, Hashable, Codable {
         if contains(.control) { names.append("Ctrl ⌃") }
         if contains(.option) { names.append("Option ⌥") }
         if contains(.shift) { names.append("Shift ⇧") }
-        if contains(.function) { names.append("Fn") }
+        if contains(.function) { names.append("Fn 🌐") }
         return names
     }
 }
@@ -534,6 +534,6 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         (.control, "Ctrl ⌃", [(59, "Ctrl ⌃"), (62, "Right Ctrl ⌃")]),
         (.option, "Option ⌥", [(58, "Option ⌥"), (61, "Right Option ⌥")]),
         (.shift, "Shift ⇧", [(56, "Shift ⇧"), (60, "Right Shift ⇧")]),
-        (.function, "Fn", [(63, "Fn")])
+        (.function, "Fn 🌐", [(63, "Fn 🌐")])
     ]
 }
