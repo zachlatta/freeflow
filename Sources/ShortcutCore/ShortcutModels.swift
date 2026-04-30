@@ -300,7 +300,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         case .key:
             return keyCode == other.keyCode
         case .modifierKey:
-            return true
+            return keyCode == other.keyCode
         }
     }
 

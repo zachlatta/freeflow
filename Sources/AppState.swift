@@ -1414,23 +1414,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let binding = binding.normalizedForStorageMigration()
-        let nextHoldShortcut = role == .hold ? binding : holdShortcut
-        let nextToggleShortcut = role == .toggle ? binding : toggleShortcut
         let otherBinding = role == .hold ? toggleShortcut : holdShortcut
         if binding.isDisabled && otherBinding.isDisabled {
             return "At least one shortcut must remain enabled."
         }
         guard !binding.conflicts(with: otherBinding) else {
             return "Hold and tap shortcuts must be distinct."
-        }
-        if isCommandModeEnabled,
-           commandModeStyle == .manual,
-           let message = commandModeManualModifierCollisionMessage(
-            for: commandModeManualModifier,
-            holdBinding: nextHoldShortcut,
-            toggleBinding: nextToggleShortcut
-           ) {
-            return message
         }
 
         switch role {
