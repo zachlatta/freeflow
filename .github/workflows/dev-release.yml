@@ -1,0 +1,152 @@
+name: Dev Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dev-release
+  cancel-in-progress: true
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve dev version
+        id: version
+        run: |
+          BASE_VERSION="$(plutil -extract CFBundleShortVersionString raw Info.plist)"
+          SHORT_SHA="$(git rev-parse --short=12 HEAD)"
+          BUILD_TAG="dev-${SHORT_SHA}"
+
+          echo "tag=dev" >> "$GITHUB_OUTPUT"
+          echo "version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "build_tag=$BUILD_TAG" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp app version
+        run: |
+          plutil -replace CFBundleShortVersionString -string "${{ steps.version.outputs.version }}" Info.plist
+          plutil -replace CFBundleVersion -string "${{ github.run_number }}" Info.plist
+          plutil -replace FreeFlowBuildTag -string "${{ steps.version.outputs.build_tag }}" Info.plist
+
+      - name: Install build tools
+        run: brew install create-dmg fileicon
+
+      # --- Code signing setup ---
+      # Required GitHub secrets:
+      #   DEVELOPER_ID_CERTIFICATE_BASE64 - base64-encoded .p12 Developer ID certificate
+      #   DEVELOPER_ID_CERTIFICATE_PASSWORD - password for the .p12
+      #   APPLE_ID - Apple ID email for notarization
+      #   APPLE_TEAM_ID - 10-character Apple Team ID
+      #   APPLE_APP_PASSWORD - app-specific password for notarization
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          CERTIFICATE_PATH="$RUNNER_TEMP/developer_id.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 20)"
+
+          # Decode certificate
+          echo "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+
+          # Create temporary keychain
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate and delete .p12 from disk immediately
+          security import "$CERTIFICATE_PATH" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          rm -f "$CERTIFICATE_PATH"
+
+          # Allow codesign to access the keychain without UI prompt
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Add temporary keychain to search list
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+
+          # Extract signing identity
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "CODESIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "Found signing identity: $IDENTITY"
+
+      - name: Store notarization credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials "notarytool-profile" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --keychain "$KEYCHAIN_PATH"
+
+      # --- Build universal dev app ---
+      - name: Build universal
+        run: make ARCH=universal CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
+
+      - name: Create universal DMG
+        run: make dmg ARCH=universal CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
+
+      - name: Sign universal DMG
+        run: codesign --force --sign "$CODESIGN_IDENTITY" "build/FreeFlow Dev.dmg"
+
+      - name: Notarize universal DMG
+        run: |
+          xcrun notarytool submit "build/FreeFlow Dev.dmg" \
+            --keychain-profile "notarytool-profile" \
+            --keychain "$KEYCHAIN_PATH" \
+            --wait
+          xcrun stapler staple "build/FreeFlow Dev.dmg"
+
+      - name: Save universal DMG
+        run: mv "build/FreeFlow Dev.dmg" FreeFlow-Dev.dmg
+
+      - name: Move dev tag
+        run: |
+          git tag --force "${{ steps.version.outputs.tag }}" "$GITHUB_SHA"
+          git push --force origin "refs/tags/${{ steps.version.outputs.tag }}"
+
+      # --- Release ---
+      - name: Create or update dev release
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: FreeFlow Dev ${{ steps.version.outputs.short_sha }}
+          body: |
+            Development build from `${{ github.sha }}`.
+
+            **[FreeFlow-Dev.dmg](https://github.com/zachlatta/freeflow/releases/download/${{ steps.version.outputs.tag }}/FreeFlow-Dev.dmg)** - Universal dev build for all Macs (Apple Silicon + Intel).
+          generate_release_notes: false
+          make_latest: false
+          prerelease: true
+          files: |
+            FreeFlow-Dev.dmg
+
+      # --- Cleanup ---
+      - name: Cleanup signing artifacts
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/developer_id.p12"
+          KPATH="${KEYCHAIN_PATH:-$RUNNER_TEMP/signing.keychain-db}"
+          if [ -f "$KPATH" ]; then
+            security delete-keychain "$KPATH"
+          fi
