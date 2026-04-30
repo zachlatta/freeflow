@@ -44,6 +44,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func handleShowSetup() {
+        // Single wizard at a time — opening a second leaks the first's
+        // willClose observer and breaks the bail-restore.
+        if let existing = setupWindow, existing.isVisible {
+            existing.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
         let wasCompleted = appState.hasCompletedSetup
         appState.hasCompletedSetup = false
         appState.stopAccessibilityPolling()
