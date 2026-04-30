@@ -2930,8 +2930,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let pasteboard = NSPasteboard.general
         let snapshot = preserveClipboard ? PreservedPasteboardSnapshot(pasteboard: pasteboard) : nil
 
+        // Append a space when ending with sentence-ending punctuation so the
+        // next dictation does not jam against the prior period.
+        let textToWrite: String
+        if let last = transcript.last, ".!?".contains(last) {
+            textToWrite = transcript + " "
+        } else {
+            textToWrite = transcript
+        }
+
         pasteboard.clearContents()
-        pasteboard.setString(transcript, forType: .string)
+        pasteboard.setString(textToWrite, forType: .string)
 
         guard let snapshot else { return nil }
         return PendingClipboardRestore(snapshot: snapshot, expectedChangeCount: pasteboard.changeCount)
