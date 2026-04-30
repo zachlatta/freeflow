@@ -300,7 +300,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         case .key:
             return keyCode == other.keyCode
         case .modifierKey:
-            return true
+            return keyCode == other.keyCode
         }
     }
 
@@ -423,6 +423,17 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         default:
             return "Modifier"
         }
+    }
+
+    /// Maps a modifier-key keyCode to the modifier mask it produces.
+    /// Returns nil for non-modifier keyCodes.
+    static func modifier(forKeyCode keyCode: UInt16) -> ShortcutModifiers? {
+        for spec in modifierKeyCodeMatchSpecs {
+            if spec.keyCodes.contains(keyCode) {
+                return spec.logicalModifier
+            }
+        }
+        return nil
     }
 
     static func exactModifierDisplayLabel(for keyCode: UInt16) -> String? {

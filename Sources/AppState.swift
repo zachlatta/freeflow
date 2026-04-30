@@ -1403,36 +1403,23 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @discardableResult
     func setCommandModeManualModifier(_ modifier: CommandModeManualModifier) -> String? {
-        if isCommandModeEnabled,
-           commandModeStyle == .manual,
-           let message = commandModeManualModifierCollisionMessage(for: modifier) {
-            return message
-        }
-
+        // Match sibling setters: always commit, then validate.
         commandModeManualModifier = modifier
+        if isCommandModeEnabled, commandModeStyle == .manual {
+            return commandModeManualModifierCollisionMessage(for: modifier)
+        }
         return nil
     }
 
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let binding = binding.normalizedForStorageMigration()
-        let nextHoldShortcut = role == .hold ? binding : holdShortcut
-        let nextToggleShortcut = role == .toggle ? binding : toggleShortcut
         let otherBinding = role == .hold ? toggleShortcut : holdShortcut
         if binding.isDisabled && otherBinding.isDisabled {
             return "At least one shortcut must remain enabled."
         }
         guard !binding.conflicts(with: otherBinding) else {
             return "Hold and tap shortcuts must be distinct."
-        }
-        if isCommandModeEnabled,
-           commandModeStyle == .manual,
-           let message = commandModeManualModifierCollisionMessage(
-            for: commandModeManualModifier,
-            holdBinding: nextHoldShortcut,
-            toggleBinding: nextToggleShortcut
-           ) {
-            return message
         }
 
         switch role {
@@ -1465,6 +1452,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
         if !toggleBinding.isDisabled && toggleBinding.modifiers.contains(manualModifier) {
             return "That modifier is already part of the tap shortcut."
+        }
+        // Modifier-only bindings carry identity in keyCode, not modifiers.
+        if !holdBinding.isDisabled,
+           holdBinding.kind == .modifierKey,
+           let bindingModifier = ShortcutBinding.modifier(forKeyCode: holdBinding.keyCode),
+           bindingModifier == manualModifier {
+            return "That modifier is already the hold shortcut."
+        }
+        if !toggleBinding.isDisabled,
+           toggleBinding.kind == .modifierKey,
+           let bindingModifier = ShortcutBinding.modifier(forKeyCode: toggleBinding.keyCode),
+           bindingModifier == manualModifier {
+            return "That modifier is already the tap shortcut."
         }
 
         return nil
@@ -1705,6 +1705,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
             return .dictation
         case .manual:
+            // If the binding IS the manual modifier, the "modifier pressed"
+            // signal is the binding's own press. Fall back to plain dictation.
+            let activeBinding: ShortcutBinding = (triggerMode == .toggle) ? toggleShortcut : holdShortcut
+            if activeBinding.kind == .modifierKey,
+               let bindingModifier = ShortcutBinding.modifier(forKeyCode: activeBinding.keyCode),
+               bindingModifier == commandModeManualModifier.shortcutModifier {
+                return .dictation
+            }
             if let message = commandModeManualModifierCollisionMessage(for: commandModeManualModifier) {
                 rejectInvalidCommandModeModifier(triggerMode: triggerMode, message: message)
                 return nil
