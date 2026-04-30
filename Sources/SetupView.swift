@@ -348,6 +348,8 @@ struct SetupView: View {
                                     .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel(Text(contributor.login))
+                                .accessibilityHint(Text("Open contributor profile"))
                             }
                         }
                         .clipped()
@@ -1383,10 +1385,14 @@ class GitHubMetadataCache: ObservableObject {
 
             var contributors: [GitHubContributor] = []
             let contributorsURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/contributors?per_page=15")!
-            let contributorsResult = try await URLSession.shared.data(from: contributorsURL)
-            if let contribHTTP = contributorsResult.1 as? HTTPURLResponse,
-               (200..<300).contains(contribHTTP.statusCode) {
-                contributors = (try? JSONDecoder().decode([GitHubContributor].self, from: contributorsResult.0)) ?? []
+            do {
+                let contributorsResult = try await URLSession.shared.data(from: contributorsURL)
+                if let contribHTTP = contributorsResult.1 as? HTTPURLResponse,
+                   (200..<300).contains(contribHTTP.statusCode) {
+                    contributors = try JSONDecoder().decode([GitHubContributor].self, from: contributorsResult.0)
+                }
+            } catch {
+                contributors = []
             }
 
             starCount = count
