@@ -112,12 +112,16 @@ class TranscriptionService {
             os_log(
                 .error,
                 log: transcriptionLog,
-                "URLSession upload returned HTTP %ld for %{public}@ (bytes=%{public}lld)",
+                "URLSession upload returned HTTP %ld for %{public}@ (bytes=%{public}lld) body=%{public}@",
                 httpResponse.statusCode,
                 fileURL.lastPathComponent,
-                fileSizeBytes(for: fileURL)
+                fileSizeBytes(for: fileURL),
+                responseBody
             )
-            throw TranscriptionError.submissionFailed("Status \(httpResponse.statusCode): \(responseBody)")
+            throw TranscriptionError.submissionFailed(Self.friendlyHTTPMessage(
+                status: httpResponse.statusCode,
+                host: baseURL.host
+            ))
         }
 
         return try parseTranscript(from: data)
@@ -177,6 +181,30 @@ class TranscriptionService {
 
         return body
     }
+
+    /// Map a non-200 HTTP status into a one-line user-readable message.
+    /// Used for transcription submission failures so the menu bar shows
+    /// "Invalid API key for api.openai.com" instead of raw JSON.
+    static func friendlyHTTPMessage(status: Int, host: String?) -> String {
+        let provider = host ?? "the provider"
+        switch status {
+        case 401:
+            return "Invalid API key for \(provider). Open Settings to fix it."
+        case 403:
+            return "Key lacks permission for this endpoint at \(provider) (HTTP 403). Check the key's scopes."
+        case 404:
+            return "Endpoint not found at \(provider) (HTTP 404). Base URL is likely wrong for this provider."
+        case 413:
+            return "Audio file too large for \(provider) (HTTP 413). Try a shorter recording."
+        case 429:
+            return "Rate limit reached at \(provider) (HTTP 429). Wait a moment and try again."
+        case 500..<600:
+            return "Provider error at \(provider) (HTTP \(status)). Try again in a moment."
+        default:
+            return "Request failed at \(provider) (HTTP \(status))."
+        }
+    }
+
     private static func normalizedBaseURL(from baseURL: String) throws -> URL {
         let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
