@@ -127,7 +127,6 @@ struct MenuBarView: View {
                         Text("  Disabled")
                     }
                 }
-                .disabled(appState.toggleShortcut.isDisabled)
 
                 ForEach(ShortcutPreset.allCases) { preset in
                     Button {
@@ -172,7 +171,6 @@ struct MenuBarView: View {
                         Text("  Disabled")
                     }
                 }
-                .disabled(appState.holdShortcut.isDisabled)
 
                 ForEach(ShortcutPreset.allCases) { preset in
                     Button {

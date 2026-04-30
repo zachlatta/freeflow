@@ -1415,9 +1415,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let binding = binding.normalizedForStorageMigration()
         let otherBinding = role == .hold ? toggleShortcut : holdShortcut
-        if binding.isDisabled && otherBinding.isDisabled {
-            return "At least one shortcut must remain enabled."
-        }
         guard !binding.conflicts(with: otherBinding) else {
             return "Hold and tap shortcuts must be distinct."
         }

@@ -19,9 +19,15 @@ struct DictationShortcutEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if showsIntroText {
-                Text("Hold to record, tap to start and stop, and press the toggle shortcut while holding to latch into tap mode. You can disable either workflow if you only want one.")
+                Text("Hold to record, tap to start and stop, and press the toggle shortcut while holding to latch into tap mode. You can disable either workflow or turn both shortcuts off.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if appState.holdShortcut.isDisabled && appState.toggleShortcut.isDisabled {
+                Label("Both dictation shortcuts are disabled.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
 
             ShortcutRoleSection(
