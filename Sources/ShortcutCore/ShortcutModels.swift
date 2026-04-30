@@ -25,11 +25,11 @@ struct ShortcutModifiers: OptionSet, Hashable, Codable {
 
     var orderedDisplayNames: [String] {
         var names: [String] = []
-        if contains(.command) { names.append("⌘") }
-        if contains(.control) { names.append("⌃") }
-        if contains(.option) { names.append("⌥") }
-        if contains(.shift) { names.append("⇧") }
-        if contains(.function) { names.append("fn") }
+        if contains(.command) { names.append("Cmd ⌘") }
+        if contains(.control) { names.append("Ctrl ⌃") }
+        if contains(.option) { names.append("Option ⌥") }
+        if contains(.shift) { names.append("Shift ⇧") }
+        if contains(.function) { names.append("Fn 🌐") }
         return names
     }
 }
@@ -98,9 +98,9 @@ enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
 
     var title: String {
         switch self {
-        case .fnKey: return "Fn (Globe) Key"
-        case .rightOption: return "Right Option Key"
-        case .f5: return "F5 Key"
+        case .fnKey: return "Fn 🌐"
+        case .rightOption: return "Right Option ⌥"
+        case .f5: return "F5"
         }
     }
 
@@ -428,23 +428,23 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     static func exactModifierDisplayLabel(for keyCode: UInt16) -> String? {
         switch keyCode {
         case 55:
-            return "\u{2318}"
+            return "Cmd \u{2318}"
         case 54:
-            return "\u{2318} \u{2192}"
+            return "Right Cmd \u{2318}"
         case 59:
-            return "\u{2303}"
+            return "Ctrl \u{2303}"
         case 62:
-            return "\u{2303} \u{2192}"
+            return "Right Ctrl \u{2303}"
         case 58:
-            return "\u{2325}"
+            return "Option \u{2325}"
         case 61:
-            return "\u{2325} \u{2192}"
+            return "Right Option \u{2325}"
         case 56:
-            return "\u{21E7}"
+            return "Shift \u{21E7}"
         case 60:
-            return "\u{21E7} \u{2192}"
+            return "Right Shift \u{21E7}"
         case 63:
-            return "fn"
+            return "Fn"
         default:
             return nil
         }
@@ -530,10 +530,10 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     ]
 
     private static let modifierDisplaySpecs: [(logicalModifier: ShortcutModifiers, genericDisplayName: String, exactDisplayNames: [(UInt16, String)])] = [
-        (.command, "⌘", [(55, "⌘"), (54, "⌘ →")]),
-        (.control, "⌃", [(59, "⌃"), (62, "⌃ →")]),
-        (.option, "⌥", [(58, "⌥"), (61, "⌥ →")]),
-        (.shift, "⇧", [(56, "⇧"), (60, "⇧ →")]),
-        (.function, "fn", [(63, "fn")])
+        (.command, "Cmd ⌘", [(55, "Cmd ⌘"), (54, "Right Cmd ⌘")]),
+        (.control, "Ctrl ⌃", [(59, "Ctrl ⌃"), (62, "Right Ctrl ⌃")]),
+        (.option, "Option ⌥", [(58, "Option ⌥"), (61, "Right Option ⌥")]),
+        (.shift, "Shift ⇧", [(56, "Shift ⇧"), (60, "Right Shift ⇧")]),
+        (.function, "Fn 🌐", [(63, "Fn 🌐")])
     ]
 }
