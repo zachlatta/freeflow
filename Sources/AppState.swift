@@ -1716,10 +1716,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
             return .dictation
         case .manual:
-            if let message = commandModeManualModifierCollisionMessage(for: commandModeManualModifier) {
-                rejectInvalidCommandModeModifier(triggerMode: triggerMode, message: message)
-                return nil
-            }
             // If the binding IS the manual modifier, the "modifier pressed"
             // signal is the binding's own press. Fall back to plain dictation.
             let activeBinding: ShortcutBinding = (triggerMode == .toggle) ? toggleShortcut : holdShortcut
@@ -1727,6 +1723,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                let bindingModifier = ShortcutBinding.modifier(forKeyCode: activeBinding.keyCode),
                bindingModifier == commandModeManualModifier.shortcutModifier {
                 return .dictation
+            }
+            if let message = commandModeManualModifierCollisionMessage(for: commandModeManualModifier) {
+                rejectInvalidCommandModeModifier(triggerMode: triggerMode, message: message)
+                return nil
             }
             guard manualCommandRequested else {
                 return .dictation
