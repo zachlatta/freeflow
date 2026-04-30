@@ -207,8 +207,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let contextModelStorageKey = "context_model"
     private let holdShortcutStorageKey = "hold_shortcut"
     private let toggleShortcutStorageKey = "toggle_shortcut"
+    private let copyAgainShortcutStorageKey = "copy_again_shortcut"
     private let savedHoldCustomShortcutStorageKey = "saved_hold_custom_shortcut"
     private let savedToggleCustomShortcutStorageKey = "saved_toggle_custom_shortcut"
+    private let savedCopyAgainCustomShortcutStorageKey = "saved_copy_again_custom_shortcut"
     private let customVocabularyStorageKey = "custom_vocabulary"
     private let transcriptionLanguageStorageKey = "transcription_language"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
@@ -347,6 +349,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var copyAgainShortcut: ShortcutBinding {
+        didSet {
+            persistShortcut(copyAgainShortcut, key: copyAgainShortcutStorageKey)
+            restartHotkeyMonitoring()
+        }
+    }
+
     @Published private(set) var savedHoldCustomShortcut: ShortcutBinding? {
         didSet {
             persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
@@ -356,6 +365,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published private(set) var savedToggleCustomShortcut: ShortcutBinding? {
         didSet {
             persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
+        }
+    }
+
+    @Published private(set) var savedCopyAgainCustomShortcut: ShortcutBinding? {
+        didSet {
+            persistOptionalShortcut(savedCopyAgainCustomShortcut, key: savedCopyAgainCustomShortcutStorageKey)
         }
     }
 
@@ -597,7 +612,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let contextModel = UserDefaults.standard.string(forKey: contextModelStorageKey) ?? Self.defaultContextModel
         let shortcuts = Self.loadShortcutConfiguration(
             holdKey: holdShortcutStorageKey,
-            toggleKey: toggleShortcutStorageKey
+            toggleKey: toggleShortcutStorageKey,
+            copyAgainKey: copyAgainShortcutStorageKey
         )
         let savedHoldCustomShortcut = Self.loadSavedCustomShortcut(
             forKey: savedHoldCustomShortcutStorageKey,
@@ -606,6 +622,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let savedToggleCustomShortcut = Self.loadSavedCustomShortcut(
             forKey: savedToggleCustomShortcutStorageKey,
             fallback: shortcuts.toggle.isCustom ? shortcuts.toggle : nil
+        )
+        let savedCopyAgainCustomShortcut = Self.loadSavedCustomShortcut(
+            forKey: savedCopyAgainCustomShortcutStorageKey,
+            fallback: shortcuts.copyAgain.isCustom ? shortcuts.copyAgain : nil
         )
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
         let transcriptionLanguage = Self.normalizeTranscriptionLanguage(
@@ -688,8 +708,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.contextModel = contextModel
         self.holdShortcut = shortcuts.hold
         self.toggleShortcut = shortcuts.toggle
+        self.copyAgainShortcut = shortcuts.copyAgain
         self.savedHoldCustomShortcut = savedHoldCustomShortcut.binding
         self.savedToggleCustomShortcut = savedToggleCustomShortcut.binding
+        self.savedCopyAgainCustomShortcut = savedCopyAgainCustomShortcut.binding
         self.isCommandModeEnabled = isCommandModeEnabled
         self.commandModeStyle = commandModeStyle
         self.commandModeManualModifier = commandModeManualModifier
@@ -726,11 +748,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if shortcuts.didUpdateToggleStoredValue {
             persistShortcut(shortcuts.toggle, key: toggleShortcutStorageKey)
         }
+        if shortcuts.didUpdateCopyAgainStoredValue {
+            persistShortcut(shortcuts.copyAgain, key: copyAgainShortcutStorageKey)
+        }
         if savedHoldCustomShortcut.didUpdateStoredValue {
             persistOptionalShortcut(savedHoldCustomShortcut.binding, key: savedHoldCustomShortcutStorageKey)
         }
         if savedToggleCustomShortcut.didUpdateStoredValue {
             persistOptionalShortcut(savedToggleCustomShortcut.binding, key: savedToggleCustomShortcutStorageKey)
+        }
+        if savedCopyAgainCustomShortcut.didUpdateStoredValue {
+            persistOptionalShortcut(savedCopyAgainCustomShortcut.binding, key: savedCopyAgainCustomShortcutStorageKey)
         }
 
         overlayManager.onStopButtonPressed = { [weak self] in
@@ -782,8 +810,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private struct StoredShortcutConfiguration {
         let hold: ShortcutBinding
         let toggle: ShortcutBinding
+        let copyAgain: ShortcutBinding
         let didUpdateHoldStoredValue: Bool
         let didUpdateToggleStoredValue: Bool
+        let didUpdateCopyAgainStoredValue: Bool
     }
 
     private struct StoredOptionalShortcut {
@@ -804,7 +834,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return defaultAPIBaseURL
     }
 
-    private static func loadShortcutConfiguration(holdKey: String, toggleKey: String) -> StoredShortcutConfiguration {
+    private static func loadShortcutConfiguration(
+        holdKey: String,
+        toggleKey: String,
+        copyAgainKey: String
+    ) -> StoredShortcutConfiguration {
         let legacyPreset = ShortcutPreset(
             rawValue: UserDefaults.standard.string(forKey: "hotkey_option") ?? ShortcutPreset.fnKey.rawValue
         ) ?? .fnKey
@@ -812,11 +846,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let toggle = hold.withAddedModifiers(.command)
         let storedHold = loadShortcut(forKey: holdKey)
         let storedToggle = loadShortcut(forKey: toggleKey)
+        let storedCopyAgain = loadShortcut(forKey: copyAgainKey)
         return StoredShortcutConfiguration(
             hold: storedHold.binding ?? hold,
             toggle: storedToggle.binding ?? toggle,
+            copyAgain: storedCopyAgain.binding ?? .disabled,
             didUpdateHoldStoredValue: storedHold.binding == nil || storedHold.didNormalize,
-            didUpdateToggleStoredValue: storedToggle.binding == nil || storedToggle.didNormalize
+            didUpdateToggleStoredValue: storedToggle.binding == nil || storedToggle.didNormalize,
+            didUpdateCopyAgainStoredValue: storedCopyAgain.didNormalize
         )
     }
 
@@ -1392,6 +1429,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return savedHoldCustomShortcut
         case .toggle:
             return savedToggleCustomShortcut
+        case .copyAgain:
+            return savedCopyAgainCustomShortcut
         }
     }
 
@@ -1431,9 +1470,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let binding = binding.normalizedForStorageMigration()
-        let otherBinding = role == .hold ? toggleShortcut : holdShortcut
-        guard !binding.conflicts(with: otherBinding) else {
-            return "Hold and tap shortcuts must be distinct."
+
+        if role == .hold || role == .toggle {
+            let otherDictationBinding = role == .hold ? toggleShortcut : holdShortcut
+            guard !binding.conflicts(with: otherDictationBinding) else {
+                return "Hold and tap shortcuts must be distinct."
+            }
+        }
+
+        if role != .copyAgain, binding.conflicts(with: copyAgainShortcut) {
+            return "This shortcut is already used by Paste Again."
+        }
+        if role == .copyAgain {
+            if binding.conflicts(with: holdShortcut) {
+                return "Paste Again cannot share a shortcut with Hold to Talk."
+            }
+            if binding.conflicts(with: toggleShortcut) {
+                return "Paste Again cannot share a shortcut with Tap to Toggle."
+            }
         }
 
         switch role {
@@ -1447,6 +1501,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 savedToggleCustomShortcut = binding
             }
             toggleShortcut = binding
+        case .copyAgain:
+            if binding.isCustom {
+                savedCopyAgainCustomShortcut = binding
+            }
+            copyAgainShortcut = binding
         }
 
         return nil
@@ -1526,6 +1585,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return ShortcutConfiguration(
             hold: holdShortcut,
             toggle: toggleShortcut,
+            copyAgain: copyAgainShortcut,
             permittedAdditionalExactMatchModifiers: permittedAdditionalExactMatchModifiers
         )
     }
@@ -1546,6 +1606,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
+        if event == .copyAgainTriggered {
+            copyLastTranscriptToPasteboard()
+            return
+        }
+
         guard let action = shortcutSessionController.handle(event: event, isTranscribing: isTranscribing) else {
             return
         }
@@ -1584,6 +1649,30 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         return false
+    }
+
+    /// Copies the last transcript to the pasteboard and posts a synthetic
+    /// Cmd+V so the focused app receives the paste — Wispr Flow style.
+    func copyLastTranscriptToPasteboard() {
+        guard !lastTranscript.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lastTranscript, forType: .string)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            Self.simulatePasteKeystroke()
+        }
+    }
+
+    private static func simulatePasteKeystroke() {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        let vKeyCode: CGKeyCode = 0x09 // V
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false) else {
+            return
+        }
+        down.flags = .maskCommand
+        up.flags = .maskCommand
+        down.post(tap: .cgAnnotatedSessionEventTap)
+        up.post(tap: .cgAnnotatedSessionEventTap)
     }
 
     func toggleRecording() {

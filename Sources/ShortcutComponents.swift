@@ -10,6 +10,7 @@ struct DictationShortcutEditor: View {
     @State private var activeCaptureRole: ShortcutRole?
     @State private var holdValidationMessage: String?
     @State private var toggleValidationMessage: String?
+    @State private var copyAgainValidationMessage: String?
 
     init(showsIntroText: Bool = true, onCaptureStateChange: ((Bool) -> Void)? = nil) {
         self.showsIntroText = showsIntroText
@@ -53,6 +54,19 @@ struct DictationShortcutEditor: View {
                 ),
                 onSelect: { binding in
                     toggleValidationMessage = appState.setShortcut(binding, for: .toggle)
+                }
+            )
+
+            ShortcutRoleSection(
+                role: .copyAgain,
+                selection: appState.copyAgainShortcut,
+                validationMessage: copyAgainValidationMessage,
+                isCapturing: Binding(
+                    get: { activeCaptureRole == .copyAgain },
+                    set: { activeCaptureRole = $0 ? .copyAgain : nil }
+                ),
+                onSelect: { binding in
+                    copyAgainValidationMessage = appState.setShortcut(binding, for: .copyAgain)
                 }
             )
 
