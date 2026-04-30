@@ -2319,7 +2319,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Preparing audio..."
         errorMessage = nil
         playAlertSound(named: "Pop")
-        overlayManager.prepareForTranscribing()
+        overlayManager.showTranscribing()
         audioRecorder.stopRecording { [weak self] fileURL in
             guard let self else { return }
             guard let fileURL else {
@@ -2344,8 +2344,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.transcribingAudioFileName = savedAudioFile?.fileName
             self.statusText = "Transcribing..."
             self.debugStatusMessage = "Transcribing audio"
-
-            self.overlayManager.showTranscribing()
 
         let postProcessingService = PostProcessingService(
             apiKey: apiKey,
