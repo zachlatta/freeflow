@@ -1887,6 +1887,10 @@ struct RunLogEntryView: View {
     @State private var showPostProcessingPrompt = false
     @State private var copiedTranscript = false
     @State private var copiedTranscriptResetWorkItem: DispatchWorkItem?
+    @State private var copiedRawTranscript = false
+    @State private var copiedRawTranscriptResetWorkItem: DispatchWorkItem?
+    @State private var copiedCleanedTranscript = false
+    @State private var copiedCleanedTranscriptResetWorkItem: DispatchWorkItem?
 
     private var isError: Bool {
         item.postProcessingStatus.hasPrefix("Error:")
@@ -2125,9 +2129,23 @@ struct RunLogEntryView: View {
                                             .font(.system(.caption, design: .monospaced))
                                             .textSelection(.enabled)
                                             .padding(8)
+                                            .padding(.trailing, 24)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                             .background(Color(nsColor: .controlBackgroundColor))
                                             .cornerRadius(4)
+                                            .overlay(alignment: .topTrailing) {
+                                                Button {
+                                                    copyRawTranscriptToPasteboard()
+                                                } label: {
+                                                    Image(systemName: copiedRawTranscript ? "checkmark" : "doc.on.doc")
+                                                        .font(.caption)
+                                                        .foregroundStyle(copiedRawTranscript ? .green : .secondary)
+                                                        .padding(6)
+                                                        .contentShape(Rectangle())
+                                                }
+                                                .buttonStyle(.plain)
+                                                .help(copiedRawTranscript ? "Copied literal transcript" : "Copy literal transcript")
+                                            }
                                     } else {
                                         Text("(empty transcript)")
                                             .font(.caption)
@@ -2178,9 +2196,23 @@ struct RunLogEntryView: View {
                                             .font(.system(.caption, design: .monospaced))
                                             .textSelection(.enabled)
                                             .padding(8)
+                                            .padding(.trailing, 24)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                             .background(Color(nsColor: .controlBackgroundColor))
                                             .cornerRadius(4)
+                                            .overlay(alignment: .topTrailing) {
+                                                Button {
+                                                    copyCleanedTranscriptToPasteboard()
+                                                } label: {
+                                                    Image(systemName: copiedCleanedTranscript ? "checkmark" : "doc.on.doc")
+                                                        .font(.caption)
+                                                        .foregroundStyle(copiedCleanedTranscript ? .green : .secondary)
+                                                        .padding(6)
+                                                        .contentShape(Rectangle())
+                                                }
+                                                .buttonStyle(.plain)
+                                                .help(copiedCleanedTranscript ? "Copied cleaned transcript" : "Copy cleaned transcript")
+                                            }
                                     }
                                 }
                             }
@@ -2221,6 +2253,38 @@ struct RunLogEntryView: View {
             copiedTranscriptResetWorkItem = nil
         }
         copiedTranscriptResetWorkItem = resetWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
+    }
+
+    private func copyRawTranscriptToPasteboard() {
+        guard !item.rawTranscript.isEmpty else { return }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.rawTranscript, forType: .string)
+        copiedRawTranscript = true
+
+        copiedRawTranscriptResetWorkItem?.cancel()
+        let resetWorkItem = DispatchWorkItem {
+            copiedRawTranscript = false
+            copiedRawTranscriptResetWorkItem = nil
+        }
+        copiedRawTranscriptResetWorkItem = resetWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
+    }
+
+    private func copyCleanedTranscriptToPasteboard() {
+        guard !item.postProcessedTranscript.isEmpty else { return }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.postProcessedTranscript, forType: .string)
+        copiedCleanedTranscript = true
+
+        copiedCleanedTranscriptResetWorkItem?.cancel()
+        let resetWorkItem = DispatchWorkItem {
+            copiedCleanedTranscript = false
+            copiedCleanedTranscriptResetWorkItem = nil
+        }
+        copiedCleanedTranscriptResetWorkItem = resetWorkItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
     }
 }

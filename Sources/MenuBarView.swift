@@ -236,6 +236,11 @@ struct MenuBarView: View {
                 NotificationCenter.default.post(name: .showSettings, object: nil)
             }
 
+            Button("Open Run Log") {
+                appState.selectedSettingsTab = .runLog
+                NotificationCenter.default.post(name: .showSettings, object: nil)
+            }
+
             Divider()
 
             Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
