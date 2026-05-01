@@ -403,14 +403,11 @@ struct SettingsView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(SettingsTab.allCases) { tab in
+                ForEach(SettingsTab.visibleCases) { tab in
                     Button {
                         appState.selectedSettingsTab = tab
                     } label: {
-                        Label(tab.title, systemImage: tab.icon)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 10)
+                        SettingsSidebarRow(title: tab.title, icon: tab.icon)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
                                     .fill(appState.selectedSettingsTab == tab
@@ -420,6 +417,7 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
                 Spacer()
             }
             .padding(10)
@@ -438,9 +436,76 @@ struct SettingsView: View {
                     VoiceMacrosSettingsView()
                 case .runLog:
                     RunLogView()
+                case .debug:
+                    DebugSettingsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct SettingsSidebarRow: View {
+    let title: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .regular))
+                .frame(width: 16, height: 16, alignment: .center)
+                .foregroundStyle(.primary)
+
+            Text(title)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+    }
+}
+
+// MARK: - Debug Settings
+
+struct DebugSettingsView: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Debug")
+                    .font(.largeTitle.bold())
+
+                SettingsCard("Overlay", icon: "wrench.and.screwdriver") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Show the recording overlay with simulated audio levels.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
+                            appState.toggleDebugOverlay()
+                        }
+                    }
+                }
+
+                SettingsCard("Update Overlay", icon: "arrow.down.circle") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Display the update available overlay after dictation finishes.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Toggle("Show after dictation", isOn: $appState.debugShowsUpdateReminderAfterDictation)
+
+                        Button("Show Update Overlay Now") {
+                            appState.showDebugUpdateAvailableOverlay()
+                        }
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
