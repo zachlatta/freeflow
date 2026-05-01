@@ -8,6 +8,44 @@ struct MenuBarView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
+    private var recentHistoryItems: [PipelineHistoryItem] {
+        Array(appState.pipelineHistory.filter { !transcriptText(for: $0).isEmpty }.prefix(10))
+    }
+
+    private func transcriptText(for item: PipelineHistoryItem) -> String {
+        let cleaned = item.postProcessedTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleaned.isEmpty {
+            return cleaned
+        }
+        return item.rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func transcriptFull(for item: PipelineHistoryItem) -> String {
+        if !item.postProcessedTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return item.postProcessedTranscript
+        }
+        return item.rawTranscript
+    }
+
+    private func transcriptSnippet(for item: PipelineHistoryItem) -> String {
+        let text = transcriptText(for: item)
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "(no transcript)" }
+        return text.count > 48 ? String(text.prefix(48)) + "..." : text
+    }
+
+    private func copyTranscriptToPasteboard(_ transcript: String) {
+        guard !transcript.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(transcript, forType: .string)
+    }
+
+    private func openRunLog() {
+        appState.selectedSettingsTab = .runLog
+        NotificationCenter.default.post(name: .showSettings, object: nil)
+    }
+
     var body: some View {
         VStack(spacing: 4) {
             Text("\(AppName.displayName) v\(appVersion)")
@@ -98,8 +136,9 @@ struct MenuBarView: View {
                     .lineLimit(3)
             }
 
+            Divider()
+
             if !appState.lastTranscript.isEmpty && !appState.isRecording && !appState.isTranscribing {
-                Divider()
                 Text(appState.lastTranscript.count > 35
                     ? String(appState.lastTranscript.prefix(35)) + "…"
                     : appState.lastTranscript)
@@ -112,6 +151,28 @@ struct MenuBarView: View {
                 Button("Copy Again") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(appState.lastTranscript, forType: .string)
+                }
+            }
+
+            Menu("History") {
+                if recentHistoryItems.isEmpty {
+                    Text("No transcripts yet")
+                } else {
+                    ForEach(recentHistoryItems) { item in
+                        let transcript = transcriptText(for: item)
+                        Button {
+                            copyTranscriptToPasteboard(transcriptFull(for: item))
+                        } label: {
+                            Text(transcriptSnippet(for: item))
+                        }
+                        .disabled(transcript.isEmpty)
+                    }
+
+                    Divider()
+                }
+
+                Button("Open Run Log") {
+                    openRunLog()
                 }
             }
 
@@ -233,11 +294,6 @@ struct MenuBarView: View {
             }
 
             Button("Settings") {
-                NotificationCenter.default.post(name: .showSettings, object: nil)
-            }
-
-            Button("Open Run Log") {
-                appState.selectedSettingsTab = .runLog
                 NotificationCenter.default.post(name: .showSettings, object: nil)
             }
 
