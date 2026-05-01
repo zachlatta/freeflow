@@ -2868,6 +2868,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let updateManager = UpdateManager.shared
         let version = updateManager.latestReleaseVersion.isEmpty ? "9.9.9" : updateManager.latestReleaseVersion
         let dismissToken = UUID()
+        if isDebugOverlayActive || debugOverlayTimer != nil {
+            stopDebugOverlay()
+        }
         pendingOverlayDismissToken = dismissToken
         overlayManager.showUpdateAvailable(version: version)
 
