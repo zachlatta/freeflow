@@ -241,12 +241,6 @@ struct MenuBarView: View {
                 NotificationCenter.default.post(name: .showSettings, object: nil)
             }
 
-            Divider()
-
-            Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
-                appState.toggleDebugOverlay()
-            }
-
             if updateManager.updateAvailable {
                 Divider()
 
