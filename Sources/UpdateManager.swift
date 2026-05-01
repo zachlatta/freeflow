@@ -211,6 +211,7 @@ final class UpdateManager: ObservableObject {
 
     // MARK: - Check for Updates
 
+    @MainActor
     func checkForUpdates(userInitiated: Bool) async {
         let currentBuildTag = Bundle.main.infoDictionary?["FreeFlowBuildTag"] as? String
         let currentVersionString = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
