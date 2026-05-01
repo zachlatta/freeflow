@@ -241,6 +241,21 @@ struct MenuBarView: View {
                 NotificationCenter.default.post(name: .showSettings, object: nil)
             }
 
+            Button {
+                Task {
+                    await updateManager.checkForUpdates(userInitiated: true)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if updateManager.isChecking {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(updateManager.isChecking ? "Checking for Updates..." : "Check for Updates")
+                }
+            }
+            .disabled(updateManager.isChecking)
+
             if updateManager.updateAvailable {
                 Divider()
 
