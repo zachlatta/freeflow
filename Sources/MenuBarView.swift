@@ -20,6 +20,13 @@ struct MenuBarView: View {
         return item.rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func transcriptFull(for item: PipelineHistoryItem) -> String {
+        if !item.postProcessedTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return item.postProcessedTranscript
+        }
+        return item.rawTranscript
+    }
+
     private func transcriptSnippet(for item: PipelineHistoryItem) -> String {
         let text = transcriptText(for: item)
             .replacingOccurrences(of: "\n", with: " ")
@@ -154,7 +161,7 @@ struct MenuBarView: View {
                     ForEach(recentHistoryItems) { item in
                         let transcript = transcriptText(for: item)
                         Button {
-                            copyTranscriptToPasteboard(transcript)
+                            copyTranscriptToPasteboard(transcriptFull(for: item))
                         } label: {
                             Text(transcriptSnippet(for: item))
                         }
