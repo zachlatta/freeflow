@@ -255,11 +255,6 @@ struct MenuBarView: View {
                 }
             }
             .disabled(updateManager.isChecking)
-            Divider()
-
-            Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
-                appState.toggleDebugOverlay()
-            }
 
             if updateManager.updateAvailable {
                 Divider()

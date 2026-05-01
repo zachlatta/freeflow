@@ -25,8 +25,15 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case prompts
     case macros
     case runLog
+    case debug
 
     var id: String { rawValue }
+
+    static var visibleCases: [SettingsTab] {
+        allCases.filter { tab in
+            tab != .debug || AppBuild.isDevBundle
+        }
+    }
 
     var title: String {
         switch self {
@@ -34,6 +41,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .prompts: return "Prompts"
         case .macros: return "Voice Macros"
         case .runLog: return "Run Log"
+        case .debug: return "Debug"
         }
     }
 
@@ -43,7 +51,14 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .prompts: return "text.bubble"
         case .macros: return "music.mic"
         case .runLog: return "clock.arrow.circlepath"
+        case .debug: return "wrench.and.screwdriver"
         }
+    }
+}
+
+enum AppBuild {
+    static var isDevBundle: Bool {
+        (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) == "FreeFlow Dev"
     }
 }
 
@@ -509,6 +524,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var selectedSettingsTab: SettingsTab? = .general
     @Published var pipelineHistory: [PipelineHistoryItem] = []
     @Published var debugStatusMessage = "Idle"
+    @Published var debugShowsUpdateReminderAfterDictation = false
     @Published var lastRawTranscript = ""
     @Published var lastPostProcessedTranscript = ""
     @Published var lastPostProcessingPrompt = ""
@@ -2825,6 +2841,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @MainActor
     private func showPostTranscriptionUpdateReminderIfNeeded() -> Bool {
+        if debugShowsUpdateReminderAfterDictation {
+            showDebugUpdateAvailableOverlay()
+            return true
+        }
+
         let updateManager = UpdateManager.shared
         guard updateManager.shouldShowPostTranscriptionReminder() else { return false }
 
@@ -2840,6 +2861,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         return true
+    }
+
+    @MainActor
+    func showDebugUpdateAvailableOverlay() {
+        let updateManager = UpdateManager.shared
+        let version = updateManager.latestReleaseVersion.isEmpty ? "9.9.9" : updateManager.latestReleaseVersion
+        let dismissToken = UUID()
+        if isDebugOverlayActive || debugOverlayTimer != nil {
+            stopDebugOverlay()
+        }
+        pendingOverlayDismissToken = dismissToken
+        overlayManager.showUpdateAvailable(version: version)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + postTranscriptionUpdateReminderDuration) { [weak self] in
+            guard let self, self.pendingOverlayDismissToken == dismissToken else { return }
+            self.pendingOverlayDismissToken = nil
+            self.overlayManager.dismiss()
+        }
     }
 
     @MainActor
