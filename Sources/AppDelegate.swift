@@ -74,6 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.appState.startAccessibilityPolling()
                     NSApp.setActivationPolicy(.accessory)
                 }
+                self.setupWindow = nil
             }
         }
     }
