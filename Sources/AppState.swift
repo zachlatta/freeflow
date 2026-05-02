@@ -573,6 +573,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
     private var realtimeService: RealtimeTranscriptionService?
+    private var automaticTerminationDisabled = false
     private var activeAudioInterruption: ActiveAudioInterruption?
     private var pendingOverlayDismissToken: UUID?
     private var shouldMonitorHotkeys = false
@@ -1624,6 +1625,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         tearDownRealtimeService()
         audioRecorder.cancelRecording()
         restoreAudioInterruptionIfNeeded()
+        endCriticalDictationActivity()
         refreshAvailableMicrophonesIfNeeded()
         if !isRecording && !isTranscribing && statusText == "Cancelled" {
             scheduleReadyStatusReset(after: 2, matching: ["Cancelled"])
@@ -1652,6 +1654,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             Self.deleteAudioFile(transcribingAudioFileName)
             self.transcribingAudioFileName = nil
         }
+        endCriticalDictationActivity()
         refreshAvailableMicrophonesIfNeeded()
         if !isRecording && !isTranscribing && statusText == "Cancelled" {
             scheduleReadyStatusReset(after: 2, matching: ["Cancelled"])
@@ -1968,8 +1971,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private func beginCriticalDictationActivity() {
+        guard !automaticTerminationDisabled else { return }
+        ProcessInfo.processInfo.disableAutomaticTermination("FreeFlow dictation in progress")
+        automaticTerminationDisabled = true
+    }
+
+    private func endCriticalDictationActivity() {
+        guard automaticTerminationDisabled else { return }
+        ProcessInfo.processInfo.enableAutomaticTermination("FreeFlow dictation in progress")
+        automaticTerminationDisabled = false
+    }
+
     private func beginRecording(triggerMode: RecordingTriggerMode) {
         os_log(.info, log: recordingLog, "beginRecording() entered")
+        beginCriticalDictationActivity()
         clearPendingOverlayDismissToken()
         errorMessage = nil
 
@@ -2078,6 +2094,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         activeRecordingTriggerMode = nil
         currentSessionIntent = .dictation
         shortcutSessionController.reset()
+        endCriticalDictationActivity()
         errorMessage = formattedRecordingStartError(error)
         statusText = "Error"
         overlayManager.dismiss()
@@ -2346,6 +2363,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             guard let fileURL else {
                 self.isTranscribing = false
                 self.audioRecorder.cleanup()
+                self.endCriticalDictationActivity()
                 self.errorMessage = "No audio recorded"
                 self.statusText = "Error"
                 self.overlayManager.dismiss()
@@ -2384,6 +2402,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.transcribingAudioFileName = nil
                 activeRealtime?.cancel()
                 self.audioRecorder.cleanup()
+                self.endCriticalDictationActivity()
                 self.refreshAvailableMicrophonesIfNeeded()
                 return
             }
@@ -2462,6 +2481,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.transcribingAudioFileName = nil
                         self.lastTranscript = trimmedFinalTranscript
                         self.isTranscribing = false
+                        self.endCriticalDictationActivity()
                         self.debugStatusMessage = "Done"
                         let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
                         let enterOnlyStatusText = "Pressed Enter"
@@ -2515,6 +2535,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 } catch is CancellationError {
                     await MainActor.run {
                         self.transcriptionTask = nil
+                        self.endCriticalDictationActivity()
                     }
                 } catch {
                     let resolvedContext: AppContext
@@ -2531,6 +2552,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.transcribingAudioFileName = nil
                         self.errorMessage = error.localizedDescription
                         self.isTranscribing = false
+                        self.endCriticalDictationActivity()
                         self.statusText = "Error"
                         self.overlayManager.dismiss()
                         self.lastPostProcessedTranscript = ""
@@ -2762,6 +2784,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             restoreAudioInterruptionIfNeeded()
             shortcutSessionController.reset()
             activeRecordingTriggerMode = nil
+            endCriticalDictationActivity()
             statusText = "Screenshot Required"
             overlayManager.dismiss()
 
