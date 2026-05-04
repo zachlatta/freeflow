@@ -21,6 +21,7 @@ final class GlobalShortcutBackend {
     private var eventTap: CFMachPort?
     private var eventTapRunLoopSource: CFRunLoopSource?
     private var fnKeyIsDown = false
+    private var capsLockKeyIsDown = false
 
     var onInputEvent: ((ShortcutInputEvent) -> ShortcutConsumeDecision)?
     var onEscapeKeyPressed: (() -> Bool)?
@@ -96,6 +97,7 @@ final class GlobalShortcutBackend {
 
     private func notifyBackendReset() {
         fnKeyIsDown = false
+        capsLockKeyIsDown = false
         _ = onInputEvent?(.backendReset)
     }
 
@@ -141,6 +143,8 @@ final class GlobalShortcutBackend {
 
         if event.keyCode == ModifierKeyEventState.fnKeyCode {
             fnKeyIsDown = isDown
+        } else if event.keyCode == ModifierKeyEventState.capsLockKeyCode {
+            capsLockKeyIsDown = isDown
         }
 
         return onInputEvent?(.modifierChanged(keyCode: event.keyCode, isDown: isDown)) == .consume
@@ -156,7 +160,8 @@ final class GlobalShortcutBackend {
         let snapshotDecision = onInputEvent?(
             .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(
                 for: event,
-                trustedFunctionKeyIsDown: fnKeyIsDown
+                trustedFunctionKeyIsDown: fnKeyIsDown,
+                trustedCapsLockKeyIsDown: capsLockKeyIsDown
             ))
         ) ?? .passthrough
         let keyDecision = onInputEvent?(
@@ -170,7 +175,8 @@ final class GlobalShortcutBackend {
         let snapshotDecision = onInputEvent?(
             .modifierSnapshot(ModifierKeyEventState.pressedModifierKeyCodes(
                 for: event,
-                trustedFunctionKeyIsDown: fnKeyIsDown
+                trustedFunctionKeyIsDown: fnKeyIsDown,
+                trustedCapsLockKeyIsDown: capsLockKeyIsDown
             ))
         ) ?? .passthrough
         let keyDecision = onInputEvent?(

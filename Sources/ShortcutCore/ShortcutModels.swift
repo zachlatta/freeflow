@@ -8,6 +8,7 @@ struct ShortcutModifiers: OptionSet, Hashable, Codable {
     static let option = ShortcutModifiers(rawValue: 1 << 2)
     static let shift = ShortcutModifiers(rawValue: 1 << 3)
     static let function = ShortcutModifiers(rawValue: 1 << 4)
+    static let capsLock = ShortcutModifiers(rawValue: 1 << 5)
 
     init(rawValue: Int) {
         self.rawValue = rawValue
@@ -30,6 +31,7 @@ struct ShortcutModifiers: OptionSet, Hashable, Codable {
         if contains(.option) { names.append("Option ⌥") }
         if contains(.shift) { names.append("Shift ⇧") }
         if contains(.function) { names.append("Fn 🌐") }
+        if contains(.capsLock) { names.append("Caps Lock ⇪") }
         return names
     }
 }
@@ -91,6 +93,7 @@ struct ShortcutConfiguration: Equatable {
 
 enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
     case fnKey = "fn"
+    case capsLock = "capsLock"
     case rightOption = "rightOption"
     case f5 = "f5"
 
@@ -99,6 +102,7 @@ enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
     var title: String {
         switch self {
         case .fnKey: return "Fn 🌐"
+        case .capsLock: return "Caps Lock ⇪"
         case .rightOption: return "Right Option ⌥"
         case .f5: return "F5"
         }
@@ -110,6 +114,14 @@ enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
             return ShortcutBinding(
                 keyCode: 63,
                 keyDisplay: "Fn",
+                modifiers: [],
+                kind: .modifierKey,
+                preset: self
+            )
+        case .capsLock:
+            return ShortcutBinding(
+                keyCode: ShortcutBinding.capsLockKeyCode,
+                keyDisplay: "Caps Lock",
                 modifiers: [],
                 kind: .modifierKey,
                 preset: self
@@ -338,12 +350,15 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     static let defaultHold = ShortcutPreset.fnKey.binding
     static let defaultToggle = ShortcutPreset.fnKey.binding.withAddedModifiers(.command)
 
-    static let modifierKeyCodes: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62, 63]
+    static let capsLockKeyCode: UInt16 = 57
+    static let modifierKeyCodes: Set<UInt16> = [54, 55, 56, 57, 58, 59, 60, 61, 62, 63]
 
     static func logicalModifier(forKeyCode keyCode: UInt16) -> ShortcutModifiers? {
         switch keyCode {
         case 54, 55:
             return .command
+        case capsLockKeyCode:
+            return .capsLock
         case 59, 62:
             return .control
         case 58, 61:
@@ -389,6 +404,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         if modifiers.contains(.option) { keyCodes.insert(58) }
         if modifiers.contains(.shift) { keyCodes.insert(56) }
         if modifiers.contains(.function) { keyCodes.insert(63) }
+        if modifiers.contains(.capsLock) { keyCodes.insert(capsLockKeyCode) }
         return keyCodes
     }
 
@@ -399,6 +415,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         if modifiers.contains(.option) { keyCodes.formUnion([58, 61]) }
         if modifiers.contains(.shift) { keyCodes.formUnion([56, 60]) }
         if modifiers.contains(.function) { keyCodes.insert(63) }
+        if modifiers.contains(.capsLock) { keyCodes.insert(capsLockKeyCode) }
         return keyCodes
     }
 
@@ -420,6 +437,8 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             return "Shift"
         case 63:
             return "Fn"
+        case capsLockKeyCode:
+            return "Caps Lock"
         default:
             return "Modifier"
         }
@@ -456,6 +475,8 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             return "Right Shift \u{21E7}"
         case 63:
             return "Fn"
+        case capsLockKeyCode:
+            return "Caps Lock ⇪"
         default:
             return nil
         }
@@ -530,14 +551,15 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         return names
     }
 
-    private static let modifierDisplayOrder: [UInt16] = [55, 54, 59, 62, 58, 61, 56, 60, 63]
+    private static let modifierDisplayOrder: [UInt16] = [55, 54, 59, 62, 58, 61, 56, 60, 63, capsLockKeyCode]
 
     private static let modifierKeyCodeMatchSpecs: [(logicalModifier: ShortcutModifiers, keyCodes: Set<UInt16>)] = [
         (.command, [54, 55]),
         (.control, [59, 62]),
         (.option, [58, 61]),
         (.shift, [56, 60]),
-        (.function, [63])
+        (.function, [63]),
+        (.capsLock, [capsLockKeyCode])
     ]
 
     private static let modifierDisplaySpecs: [(logicalModifier: ShortcutModifiers, genericDisplayName: String, exactDisplayNames: [(UInt16, String)])] = [
@@ -545,6 +567,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         (.control, "Ctrl ⌃", [(59, "Ctrl ⌃"), (62, "Right Ctrl ⌃")]),
         (.option, "Option ⌥", [(58, "Option ⌥"), (61, "Right Option ⌥")]),
         (.shift, "Shift ⇧", [(56, "Shift ⇧"), (60, "Right Shift ⇧")]),
-        (.function, "Fn 🌐", [(63, "Fn 🌐")])
+        (.function, "Fn 🌐", [(63, "Fn 🌐")]),
+        (.capsLock, "Caps Lock ⇪", [(capsLockKeyCode, "Caps Lock ⇪")])
     ]
 }

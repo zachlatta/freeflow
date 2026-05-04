@@ -129,6 +129,7 @@ extension ShortcutBinding {
         54: "Right Command",
         55: "Command",
         56: "Shift",
+        57: "Caps Lock",
         58: "Option",
         59: "Control",
         60: "Right Shift",

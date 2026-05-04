@@ -11,7 +11,8 @@ enum ModifierKeyEventState {
 
     static func pressedModifierKeyCodes(
         for event: NSEvent,
-        trustedFunctionKeyIsDown: Bool? = nil
+        trustedFunctionKeyIsDown: Bool? = nil,
+        trustedCapsLockKeyIsDown: Bool? = nil
     ) -> Set<UInt16> {
         ShortcutBinding.modifierKeyCodes.filter { keyCode in
             // macOS sets NSEvent.ModifierFlags.function for arrow keys, F-keys,
@@ -22,6 +23,9 @@ enum ModifierKeyEventState {
             if keyCode == fnKeyCode, let trustedFunctionKeyIsDown {
                 return trustedFunctionKeyIsDown
             }
+            if keyCode == capsLockKeyCode {
+                return trustedCapsLockKeyIsDown ?? false
+            }
             guard let mappedFlag = mappedFlag(for: keyCode) else {
                 return false
             }
@@ -30,6 +34,7 @@ enum ModifierKeyEventState {
     }
 
     static let fnKeyCode: UInt16 = 63
+    static let capsLockKeyCode = ShortcutBinding.capsLockKeyCode
 
     /// Reads the current system-wide Fn state. Useful for seeding a backend's
     /// tracked Fn state at start or after a tap reset, since flagsChanged events
@@ -46,6 +51,8 @@ enum ModifierKeyEventState {
             return .leftCommand
         case 56:
             return .leftShift
+        case 57:
+            return .capsLock
         case 58:
             return .leftOption
         case 59:
