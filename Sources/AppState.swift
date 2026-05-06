@@ -229,7 +229,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let outputLanguageStorageKey = "output_language"
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
-    private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
+    private static let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
+    /// Migrates users who stored the picker `mute`/`pause`/`disabled` variant.
+    private static let dictationAudioInterruptionModeStorageKey = "dictation_audio_interruption_mode"
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
     private let clipboardRestoreDelay: TimeInterval = 1.0
@@ -465,10 +467,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @Published var dictationAudioInterruptionEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(
-                dictationAudioInterruptionEnabled,
-                forKey: dictationAudioInterruptionEnabledStorageKey
-            )
+            UserDefaults.standard.set(dictationAudioInterruptionEnabled, forKey: Self.dictationAudioInterruptionEnabledStorageKey)
+            UserDefaults.standard.removeObject(forKey: Self.dictationAudioInterruptionModeStorageKey)
         }
     }
 
@@ -635,9 +635,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
         let realtimeStreamingEnabled = UserDefaults.standard.bool(forKey: realtimeStreamingEnabledStorageKey)
         let realtimeStreamingModel = UserDefaults.standard.string(forKey: realtimeStreamingModelStorageKey) ?? ""
-        let dictationAudioInterruptionEnabled = UserDefaults.standard.bool(
-            forKey: dictationAudioInterruptionEnabledStorageKey
-        )
+        let dictationAudioInterruptionEnabled = Self.loadDictationAudioInterruptionEnabled()
         let isPressEnterVoiceCommandEnabled = UserDefaults.standard.object(forKey: pressEnterVoiceCommandStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: pressEnterVoiceCommandStorageKey)
@@ -848,6 +846,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
             binding: fallback,
             didUpdateStoredValue: stored.hadStoredValue || fallback != nil
         )
+    }
+
+    private static func loadDictationAudioInterruptionEnabled() -> Bool {
+        if UserDefaults.standard.object(forKey: dictationAudioInterruptionEnabledStorageKey) != nil {
+            return UserDefaults.standard.bool(forKey: dictationAudioInterruptionEnabledStorageKey)
+        }
+        if let raw = UserDefaults.standard.string(forKey: dictationAudioInterruptionModeStorageKey) {
+            let enabled = (raw == "mute")
+            UserDefaults.standard.set(enabled, forKey: dictationAudioInterruptionEnabledStorageKey)
+            UserDefaults.standard.removeObject(forKey: dictationAudioInterruptionModeStorageKey)
+            return enabled
+        }
+        return false
     }
 
     static func normalizedContextScreenshotMaxDimension(_ value: Int) -> Int {
