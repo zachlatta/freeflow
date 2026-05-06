@@ -19,9 +19,15 @@ struct DictationShortcutEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if showsIntroText {
-                Text("Hold to record, tap to start and stop, and press the toggle shortcut while holding to latch into tap mode. You can disable either workflow if you only want one.")
+                Text("Hold to record, tap to start and stop, and press the toggle shortcut while holding to latch into tap mode. You can disable either workflow or turn both shortcuts off.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if appState.holdShortcut.isDisabled && appState.toggleShortcut.isDisabled {
+                Label("Both dictation shortcuts are disabled.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
 
             ShortcutRoleSection(
@@ -50,7 +56,7 @@ struct DictationShortcutEditor: View {
                 }
             )
 
-            Text("Custom shortcuts can use modifier-only or modifier combos, extra mouse buttons, two keys together, or a mouse button plus a key (e.g. middle-click + Space). Left click is not allowed.")
+            Text("Custom shortcuts can use regular keys, modifier-only shortcuts, or modifier combinations.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -148,14 +154,8 @@ private struct ShortcutCaptureRow: View {
     let onSelectSaved: (ShortcutBinding) -> Void
     let onCapture: (ShortcutBinding) -> Void
 
-    @State private var localKeyMonitor: Any?
-    @State private var localKeyUpMonitor: Any?
-    @State private var localFlagsMonitor: Any?
-    @State private var localMouseMonitor: Any?
-    @State private var localMouseUpMonitor: Any?
-    @State private var pressedModifierKeyCodes: Set<UInt16> = []
-    @State private var pressedCaptureKeys: Set<UInt16> = []
-    @State private var pressedCaptureMouse: Set<Int> = []
+    @State private var captureBackend: LocalShortcutCaptureBackend?
+    @State private var captureInputState = ShortcutInputState()
     @State private var currentBinding: ShortcutBinding?
 
     var body: some View {
@@ -230,98 +230,86 @@ private struct ShortcutCaptureRow: View {
     private func startCapture() {
         stopCapture(clearCaptureState: false)
         isCapturing = true
-        pressedModifierKeyCodes.removeAll()
-        pressedCaptureKeys.removeAll()
-        pressedCaptureMouse.removeAll()
+        captureInputState = ShortcutInputState()
         currentBinding = nil
 
-        localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
-            if ShortcutBinding.modifierKeyCodes.contains(event.keyCode) {
-                if pressedModifierKeyCodes.contains(event.keyCode) {
-                    pressedModifierKeyCodes.remove(event.keyCode)
-                } else {
-                    pressedModifierKeyCodes.insert(event.keyCode)
-                }
-            }
-            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: event.keyCode)
-            return nil
-        }
+        let backend = LocalShortcutCaptureBackend()
+        backend.onInputEvent = { inputEvent in
+            let result = ShortcutMatcher.reduce(
+                state: captureInputState,
+                event: inputEvent,
+                configuration: .disabled
+            )
+            captureInputState = result.state
 
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard case .modifierChanged(let keyCode, _) = inputEvent else { return }
+            if let binding = ShortcutBinding.fromModifierKeyCode(
+                keyCode,
+                pressedModifierKeyCodes: captureInputState.pressedModifierKeyCodes,
+                allowBareModifier: true
+            ) {
+                currentBinding = binding
+            }
+        }
+        backend.onMouseDownEvent = { event in
+            guard event.buttonNumber != 0 else { return }
+            currentBinding = ShortcutBinding.fromCaptureState(
+                pressedKeys: captureInputState.pressedKeyCodes,
+                pressedMouse: captureInputState.pressedMouseButtons,
+                modifierFlags: event.modifierFlags
+            )
+        }
+        backend.onMouseUpEvent = { event in
+            currentBinding = ShortcutBinding.fromCaptureState(
+                pressedKeys: captureInputState.pressedKeyCodes,
+                pressedMouse: captureInputState.pressedMouseButtons,
+                modifierFlags: event.modifierFlags
+            )
+        }
+        backend.onKeyUpEvent = { event in
+            currentBinding = ShortcutBinding.fromCaptureState(
+                pressedKeys: captureInputState.pressedKeyCodes,
+                pressedMouse: captureInputState.pressedMouseButtons,
+                modifierFlags: event.modifierFlags
+            )
+        }
+        backend.onKeyDownEvent = { event in
             let isReturnKey = event.keyCode == 36 || event.keyCode == 76
             let hasPendingCapture = currentBinding != nil
 
             if isReturnKey && hasPendingCapture {
                 finishCapture()
-                return nil
+                return
             }
             if event.keyCode == 53 && hasPendingCapture {
                 finishCapture()
-                return nil
+                return
             }
 
             guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else {
-                return nil
+                return
             }
 
-            pressedCaptureKeys.insert(event.keyCode)
-            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: nil)
-            return nil
-        }
-
-        localKeyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { event in
-            pressedCaptureKeys.remove(event.keyCode)
-            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: nil)
-            return event
-        }
-
-        let mouseMask = NSEvent.EventTypeMask.leftMouseDown
-            .union(.rightMouseDown)
-            .union(.otherMouseDown)
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseMask) { event in
-            let button = event.buttonNumber
-            guard button != 0 else { return event }
-            pressedCaptureMouse.insert(button)
-            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: nil)
-            return nil
-        }
-
-        let mouseUpMask = NSEvent.EventTypeMask.leftMouseUp
-            .union(.rightMouseUp)
-            .union(.otherMouseUp)
-        localMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseUpMask) { event in
-            pressedCaptureMouse.remove(event.buttonNumber)
-            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: nil)
-            return event
-        }
-    }
-
-    private func refreshCaptureBinding(modifierFlags: NSEvent.ModifierFlags, flagsEventKeyCode: UInt16?) {
-        if let chord = ShortcutBinding.fromCaptureState(
-            pressedKeys: pressedCaptureKeys,
-            pressedMouse: pressedCaptureMouse,
-            modifierFlags: modifierFlags
-        ) {
-            currentBinding = chord
-            return
-        }
-
-        let nonMod = pressedCaptureKeys.filter { !ShortcutBinding.modifierKeyCodes.contains($0) }
-        if nonMod.isEmpty && pressedCaptureMouse.isEmpty {
-            if let kc = flagsEventKeyCode,
-               let binding = ShortcutBinding.fromModifierKeyCode(
-                   kc,
-                   pressedModifierKeyCodes: pressedModifierKeyCodes,
-                   allowBareModifier: true
-               ) {
-                currentBinding = binding
-            } else {
-                currentBinding = nil
+            if let chordBinding = ShortcutBinding.fromCaptureState(
+                pressedKeys: captureInputState.pressedKeyCodes,
+                pressedMouse: captureInputState.pressedMouseButtons,
+                modifierFlags: event.modifierFlags
+            ) {
+                currentBinding = chordBinding
+                return
             }
-            return
-        }
 
-        currentBinding = nil
+            guard let binding = ShortcutBinding.from(
+                event: event,
+                pressedModifierKeyCodes: captureInputState.pressedModifierKeyCodes
+            ) else {
+                return
+            }
+
+            currentBinding = binding
+        }
+        backend.start()
+        captureBackend = backend
     }
 
     private func finishCapture() {
@@ -338,29 +326,9 @@ private struct ShortcutCaptureRow: View {
     }
 
     private func stopCapture(clearCaptureState: Bool) {
-        if let monitor = localKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-            localKeyMonitor = nil
-        }
-        if let monitor = localKeyUpMonitor {
-            NSEvent.removeMonitor(monitor)
-            localKeyUpMonitor = nil
-        }
-        if let monitor = localFlagsMonitor {
-            NSEvent.removeMonitor(monitor)
-            localFlagsMonitor = nil
-        }
-        if let monitor = localMouseMonitor {
-            NSEvent.removeMonitor(monitor)
-            localMouseMonitor = nil
-        }
-        if let monitor = localMouseUpMonitor {
-            NSEvent.removeMonitor(monitor)
-            localMouseUpMonitor = nil
-        }
-        pressedModifierKeyCodes.removeAll()
-        pressedCaptureKeys.removeAll()
-        pressedCaptureMouse.removeAll()
+        captureBackend?.stop()
+        captureBackend = nil
+        captureInputState = ShortcutInputState()
         currentBinding = nil
         if clearCaptureState {
             isCapturing = false

@@ -4,6 +4,52 @@ import Combine
 import Foundation
 import ServiceManagement
 
+private struct SetupProviderSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var apiBaseURLInput: String
+    @Binding var transcriptionAPIURLInput: String
+    @Binding var transcriptionAPIKeyInput: String
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Advanced Provider Settings")
+                    .font(.title2.weight(.semibold))
+                Text("Use these fields when pointing \(AppName.displayName) at another OpenAI-compatible provider or when you need custom model IDs.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                ProviderSettingsFields(
+                    apiBaseURLInput: $apiBaseURLInput,
+                    transcriptionAPIURLInput: $transcriptionAPIURLInput,
+                    transcriptionAPIKeyInput: $transcriptionAPIKeyInput,
+                    showsModelDescription: true
+                )
+                .padding(20)
+            }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 560, height: 520)
+    }
+}
+
 struct SetupView: View {
     var onComplete: () -> Void
     @EnvironmentObject var appState: AppState
@@ -17,6 +63,7 @@ struct SetupView: View {
         case screenRecording
         case holdShortcut
         case toggleShortcut
+        case commandMode
         case vocabulary
         case launchAtLogin
         case testTranscription
@@ -27,8 +74,12 @@ struct SetupView: View {
     @State private var micPermissionGranted = false
     @State private var accessibilityGranted = false
     @State private var apiKeyInput: String = ""
+    @State private var apiBaseURLInput: String = ""
+    @State private var transcriptionAPIURLInput: String = ""
+    @State private var transcriptionAPIKeyInput: String = ""
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
+    @State private var showingProviderSettingsSheet = false
     @State private var accessibilityTimer: Timer?
     @State private var screenRecordingTimer: Timer?
     @State private var customVocabularyInput: String = ""
@@ -140,6 +191,9 @@ struct SetupView: View {
         .frame(width: 520, height: 680)
         .onAppear {
             apiKeyInput = appState.apiKey
+            apiBaseURLInput = appState.apiBaseURL
+            transcriptionAPIURLInput = appState.transcriptionAPIURL
+            transcriptionAPIKeyInput = appState.transcriptionAPIKey
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             checkAccessibility()
@@ -151,6 +205,14 @@ struct SetupView: View {
             accessibilityTimer?.invalidate()
             screenRecordingTimer?.invalidate()
             appState.resumeHotkeyMonitoringAfterShortcutCapture()
+        }
+        .sheet(isPresented: $showingProviderSettingsSheet) {
+            SetupProviderSettingsSheet(
+                apiBaseURLInput: $apiBaseURLInput,
+                transcriptionAPIURLInput: $transcriptionAPIURLInput,
+                transcriptionAPIKeyInput: $transcriptionAPIKeyInput
+            )
+                .environmentObject(appState)
         }
         .onChange(of: isCapturingShortcut) { isCapturing in
             if isCapturing {
@@ -178,6 +240,8 @@ struct SetupView: View {
             holdShortcutStep
         case .toggleShortcut:
             toggleShortcutStep
+        case .commandMode:
+            commandModeStep
         case .vocabulary:
             vocabularyStep
         case .launchAtLogin:
@@ -199,7 +263,7 @@ struct SetupView: View {
                 .frame(width: 128, height: 128)
 
             VStack(spacing: 6) {
-                Text("Welcome to FreeFlow")
+                Text("Welcome to \(AppName.displayName)")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
 
                 Text("Dictate text anywhere on your Mac.\nHold to talk or tap to toggle dictation.")
@@ -263,15 +327,15 @@ struct SetupView: View {
                     .buttonStyle(.plain)
                 }
 
-                if !githubCache.recentStargazers.isEmpty {
+                if !githubCache.recentContributors.isEmpty {
                     Divider()
                     HStack(spacing: 8) {
                         HStack(spacing: -6) {
-                            ForEach(githubCache.recentStargazers) { star in
+                            ForEach(githubCache.recentContributors) { contributor in
                                 Button {
-                                    openURL(star.user.htmlUrl)
+                                    openURL(contributor.htmlUrl)
                                 } label: {
-                                    AsyncImage(url: star.user.avatarThumbnailUrl) { phase in
+                                    AsyncImage(url: contributor.avatarThumbnailUrl) { phase in
                                         switch phase {
                                         case .success(let image):
                                             image.resizable().aspectRatio(contentMode: .fill)
@@ -284,10 +348,12 @@ struct SetupView: View {
                                     .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 1.5))
                                 }
                                 .buttonStyle(.plain)
+                                .accessibilityLabel(Text(contributor.login))
+                                .accessibilityHint(Text("Open contributor profile"))
                             }
                         }
                         .clipped()
-                        Text("recently starred")
+                        Text("recent contributors")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .fixedSize()
@@ -310,57 +376,96 @@ struct SetupView: View {
     }
 
     var apiKeyStep: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.blue)
+        VStack {
+            Spacer(minLength: 0)
 
-            Text("Groq API Key")
-                .font(.title)
-                .fontWeight(.bold)
+            VStack(spacing: 20) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 60))
+                    .foregroundStyle(.blue)
 
-            Text("FreeFlow uses Groq for fast, high-accuracy transcription.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("API Key")
+                    .font(.title)
+                    .fontWeight(.bold)
 
-            VStack(alignment: .leading, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("How to get a free API key:")
-                        .font(.subheadline.weight(.semibold))
-                    VStack(alignment: .leading, spacing: 2) {
-                        instructionRow(number: "1", text: "Go to [console.groq.com/keys](https://console.groq.com/keys)")
-                        instructionRow(number: "2", text: "Create a free account (if you don't have one)")
-                        instructionRow(number: "3", text: "Click **Create API Key** and copy it")
-                    }
-                }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.blue.opacity(0.06))
-                )
+                Text("Enter an API key for your OpenAI-compatible provider. If you are not using Groq, expand the advanced provider settings and enter that provider's base URL and model IDs before continuing.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("API Key")
-                        .font(.headline)
-                    SecureField("Paste your Groq API key", text: $apiKeyInput)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                        .disabled(isValidatingKey)
-                        .onChange(of: apiKeyInput) { _ in
-                            keyValidationError = nil
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Using Groq?")
+                            .font(.subheadline.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            instructionRow(number: "1", text: "Go to [console.groq.com/keys](https://console.groq.com/keys)")
+                            instructionRow(number: "2", text: "Create a free account (if you don't have one)")
+                            instructionRow(number: "3", text: "Click **Create API Key** and copy it")
                         }
-
-                    if let error = keyValidationError {
-                        Label(error, systemImage: "xmark.circle.fill")
-                            .foregroundStyle(.red)
-                            .font(.caption)
                     }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.blue.opacity(0.06))
+                    )
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("API Key")
+                            .font(.headline)
+                        SecureField("Paste your API key", text: $apiKeyInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .disabled(isValidatingKey)
+                            .onChange(of: apiKeyInput) { _ in
+                                keyValidationError = nil
+                            }
+
+                        if let error = keyValidationError {
+                            Label(error, systemImage: "xmark.circle.fill")
+                                .foregroundStyle(.red)
+                                .font(.caption)
+                        }
+                    }
+
+                    Button {
+                        showingProviderSettingsSheet = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Advanced Provider Settings")
+                                    .foregroundStyle(.primary)
+                                Text("Base URL and model IDs")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right.square")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 8)
                 }
             }
+            .frame(maxWidth: 440)
 
+            Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     var micPermissionStep: some View {
@@ -373,7 +478,7 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("FreeFlow needs access to your microphone to record audio for transcription.")
+            Text("\(AppName.displayName) needs access to your microphone to record audio for transcription.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -412,7 +517,7 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("FreeFlow needs Accessibility access to paste transcribed text into your apps.")
+            Text("\(AppName.displayName) needs Accessibility access to paste transcribed text into your apps.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -438,13 +543,6 @@ struct SetupView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
 
-            if !accessibilityGranted {
-                Text("Note: If you rebuilt the app, you may need to\nremove and re-add it in Accessibility settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
         }
         .onAppear {
             startAccessibilityPolling()
@@ -464,12 +562,12 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("FreeFlow intelligently adapts the transcription to the current app you're working in (ex. spelling names in an email correctly).")
+            Text("\(AppName.displayName) intelligently adapts the transcription to the current app you're working in (ex. spelling names in an email correctly).")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("It needs this permission to see which app you're working in and any in-progress work. Nothing is stored on FreeFlow's servers (FreeFlow doesn't have servers).")
+            Text("It needs this permission to see which app you're working in and any in-progress work. Nothing is stored on \(AppName.displayName)'s servers (\(AppName.displayName) doesn't have servers).")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .font(.callout)
@@ -551,7 +649,7 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Choose the shortcut you want to tap once to start dictating and tap again to stop.\nIf this shortcut becomes active while you are holding the hold shortcut, FreeFlow latches into tap mode. You can also disable tap-to-toggle entirely.")
+            Text("Choose the shortcut you want to tap once to start dictating and tap again to stop.\nIf this shortcut becomes active while you are holding the hold shortcut, \(AppName.displayName) latches into tap mode. You can also disable tap-to-toggle entirely.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -612,6 +710,85 @@ struct SetupView: View {
         }
     }
 
+    var commandModeStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "pencil")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Edit Mode")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Transform selected text with a spoken instruction instead of dictating over it.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 14) {
+                Toggle("Enable Edit Mode", isOn: Binding(
+                    get: { appState.isCommandModeEnabled },
+                    set: { newValue in
+                        _ = appState.setCommandModeEnabled(newValue)
+                    }
+                ))
+
+                Picker("Invocation Style", selection: Binding(
+                    get: { appState.commandModeStyle },
+                    set: { newValue in
+                        _ = appState.setCommandModeStyle(newValue)
+                    }
+                )) {
+                    ForEach(CommandModeStyle.allCases) { style in
+                        Text(style.title).tag(style)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!appState.isCommandModeEnabled)
+
+                Group {
+                    switch appState.commandModeStyle {
+                    case .automatic:
+                        Text("Automatic mode uses your normal dictation shortcut. If text is selected, \(AppName.displayName) transforms that selection instead of dictating new text.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    case .manual:
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Manual mode only triggers when you hold an extra modifier together with your normal dictation shortcut.")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            Picker("Extra Modifier", selection: Binding(
+                                get: { appState.commandModeManualModifier },
+                                set: { newValue in
+                                    _ = appState.setCommandModeManualModifier(newValue)
+                                }
+                            )) {
+                                ForEach(CommandModeManualModifier.allCases) { modifier in
+                                    Text(modifier.title).tag(modifier)
+                                }
+                            }
+                            .disabled(!appState.isCommandModeEnabled || appState.commandModeStyle != .manual)
+                        }
+                    }
+                }
+                .opacity(appState.isCommandModeEnabled ? 1 : 0.5)
+
+                if let validationMessage = appState.commandModeManualModifierValidationMessage {
+                    Label(validationMessage, systemImage: "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .cornerRadius(10)
+        }
+    }
+
     var launchAtLoginStep: some View {
         VStack(spacing: 20) {
             Image(systemName: "sunrise.fill")
@@ -622,7 +799,7 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Start FreeFlow automatically when you log in so it's always ready.")
+            Text("Start \(AppName.displayName) automatically when you log in so it's always ready.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -631,7 +808,7 @@ struct SetupView: View {
                 Image(systemName: "sunrise.fill")
                     .frame(width: 24)
                     .foregroundStyle(.blue)
-                Toggle("Launch FreeFlow at login", isOn: $appState.launchAtLogin)
+                Toggle("Launch \(AppName.displayName) at login", isOn: $appState.launchAtLogin)
             }
             .padding(12)
             .background(Color(nsColor: .controlBackgroundColor))
@@ -745,7 +922,7 @@ struct SetupView: View {
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
                         } else {
-                            Text("Perfect — FreeFlow is ready to go.")
+                            Text("Perfect — \(AppName.displayName) is ready to go.")
                                 .font(.title2)
                                 .fontWeight(.semibold)
 
@@ -789,7 +966,7 @@ struct SetupView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("FreeFlow lives in your menu bar.")
+            Text("\(AppName.displayName) lives in your menu bar.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
 
@@ -802,6 +979,17 @@ struct SetupView: View {
                 }
                 if appState.hasEnabledHoldShortcut && appState.hasEnabledToggleShortcut {
                     HowToRow(icon: "arrow.triangle.branch", text: "While holding, press the toggle shortcut to latch on")
+                }
+                if appState.isCommandModeEnabled {
+                    switch appState.commandModeStyle {
+                    case .automatic:
+                        HowToRow(icon: "wand.and.stars", text: "With text selected, your normal shortcut transforms the selection")
+                    case .manual:
+                        HowToRow(
+                            icon: "wand.and.stars",
+                            text: "Hold \(appState.commandModeManualModifier.title) with your normal shortcut to transform selected text"
+                        )
+                    }
                 }
                 HowToRow(icon: "doc.on.clipboard", text: "Text is typed at your cursor & copied")
             }
@@ -870,11 +1058,14 @@ struct SetupView: View {
 
     func validateAndContinue() {
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedBaseURL = baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
+        appState.apiBaseURL = resolvedBaseURL
         isValidatingKey = true
         keyValidationError = nil
 
         Task {
-            let valid = await TranscriptionService.validateAPIKey(key, baseURL: appState.apiBaseURL)
+            let valid = await TranscriptionService.validateAPIKey(key, baseURL: resolvedBaseURL)
             await MainActor.run {
                 isValidatingKey = false
                 if valid {
@@ -883,7 +1074,7 @@ struct SetupView: View {
                         currentStep = nextStep(currentStep)
                     }
                 } else {
-                    keyValidationError = "Invalid API key. Please check and try again."
+                    keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
                 }
             }
         }
@@ -916,10 +1107,8 @@ struct SetupView: View {
     }
 
     func requestMicPermission() {
-        AVCaptureDevice.requestAccess(for: .audio) { granted in
-            DispatchQueue.main.async {
-                micPermissionGranted = granted
-            }
+        appState.requestMicrophoneAccess { granted in
+            micPermissionGranted = granted
         }
     }
 
@@ -937,8 +1126,7 @@ struct SetupView: View {
     }
 
     func requestAccessibility() {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
+        appState.openAccessibilitySettings()
     }
 
     func startScreenRecordingPolling() {
@@ -962,8 +1150,24 @@ struct SetupView: View {
                 }
                 do {
                     let recorder = AudioRecorder()
+                    recorder.onRecordingFailure = { [weak recorder] error in
+                        guard let recorder else { return }
+                        Task { @MainActor in
+                            testAudioLevelCancellable?.cancel()
+                            testAudioLevelCancellable = nil
+                            testAudioLevel = 0.0
+                            testHotkeyHarness.isTranscribing = false
+                            testAudioRecorder = nil
+                            testError = error.localizedDescription
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
+                                testPhase = .done
+                            }
+                            recorder.cleanup()
+                        }
+                    }
                     try recorder.startRecording(deviceUID: appState.selectedMicrophoneID)
                     testAudioRecorder = recorder
+                    testError = nil
                     testAudioLevelCancellable = recorder.$audioLevel
                         .receive(on: DispatchQueue.main)
                         .sink { level in
@@ -982,7 +1186,6 @@ struct SetupView: View {
 
             case .stop:
                 guard testPhase == .recording, let recorder = testAudioRecorder else { return }
-                let fileURL = recorder.stopRecording()
                 testAudioLevelCancellable?.cancel()
                 testAudioLevelCancellable = nil
                 testAudioLevel = 0.0
@@ -991,41 +1194,48 @@ struct SetupView: View {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     testPhase = .transcribing
                 }
-
-                guard let url = fileURL else {
-                    testHotkeyHarness.isTranscribing = false
-                    testError = "No audio file was created."
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
-                        testPhase = .done
-                    }
-                    return
-                }
-
-                Task {
-                    do {
-                        let service = TranscriptionService(
-                            apiKey: appState.apiKey,
-                            baseURL: appState.apiBaseURL,
-                            forceHTTP2: appState.forceHTTP2Transcription
-                        )
-                        let transcript = try await service.transcribe(fileURL: url)
-                        await MainActor.run {
+                recorder.stopRecording { url in
+                    guard let url else {
+                        Task { @MainActor in
                             testHotkeyHarness.isTranscribing = false
-                            testTranscript = transcript
-                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                            testAudioRecorder = nil
+                            if testError == nil {
+                                testError = "No audio file was created."
+                            }
+                            withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                                 testPhase = .done
                             }
+                            recorder.cleanup()
                         }
-                    } catch {
-                        await MainActor.run {
-                            testHotkeyHarness.isTranscribing = false
-                            testError = error.localizedDescription
-                            withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
-                                testPhase = .done
+                        return
+                    }
+
+                    Task {
+                        do {
+                            let service = try appState.makeTranscriptionService()
+                            let transcript = try await service.transcribe(fileURL: url)
+                            await MainActor.run {
+                                testHotkeyHarness.isTranscribing = false
+                                testAudioRecorder = nil
+                                testTranscript = transcript
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                    testPhase = .done
+                                }
+                            }
+                        } catch {
+                            await MainActor.run {
+                                testHotkeyHarness.isTranscribing = false
+                                testAudioRecorder = nil
+                                testError = error.localizedDescription
+                                withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                                    testPhase = .done
+                                }
                             }
                         }
+                        await MainActor.run {
+                            recorder.cleanup()
+                        }
                     }
-                    recorder.cleanup()
                 }
 
             case .switchedToToggle:
@@ -1033,10 +1243,15 @@ struct SetupView: View {
             }
         }
 
-        testHotkeyHarness.start(configuration: ShortcutConfiguration(
-            hold: appState.holdShortcut,
-            toggle: appState.toggleShortcut
-        ), startDelay: appState.shortcutStartDelay)
+        do {
+            try testHotkeyHarness.start(configuration: ShortcutConfiguration(
+                hold: appState.holdShortcut,
+                toggle: appState.toggleShortcut
+            ), startDelay: appState.shortcutStartDelay)
+        } catch {
+            testError = error.localizedDescription
+            testPhase = .done
+        }
     }
 
     private func stopTestHotkeyMonitoring() {
@@ -1044,8 +1259,7 @@ struct SetupView: View {
         testAudioLevelCancellable?.cancel()
         testAudioLevelCancellable = nil
         if let recorder = testAudioRecorder, recorder.isRecording {
-            _ = recorder.stopRecording()
-            recorder.cleanup()
+            recorder.cancelRecording()
         }
         testAudioRecorder = nil
     }
@@ -1060,9 +1274,8 @@ struct SetupView: View {
         testHotkeyHarness.resetSession()
         if let recorder = testAudioRecorder {
             if recorder.isRecording {
-                _ = recorder.stopRecording()
+                recorder.cancelRecording()
             }
-            recorder.cleanup()
             testAudioRecorder = nil
         }
     }
@@ -1106,12 +1319,32 @@ struct GitHubStarUser: Decodable {
     }
 }
 
+struct GitHubContributor: Decodable, Identifiable {
+    let id: Int
+    let login: String
+    let avatarUrl: URL
+    let htmlUrl: URL
+
+    var avatarThumbnailUrl: URL {
+        let separator = avatarUrl.absoluteString.contains("?") ? "&" : "?"
+        return URL(string: avatarUrl.absoluteString + "\(separator)s=44") ?? avatarUrl
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case login
+        case avatarUrl = "avatar_url"
+        case htmlUrl = "html_url"
+    }
+}
+
 @MainActor
 class GitHubMetadataCache: ObservableObject {
     static let shared = GitHubMetadataCache()
 
     @Published var starCount: Int?
     @Published var recentStargazers: [GitHubStarRecord] = []
+    @Published var recentContributors: [GitHubContributor] = []
     @Published var isLoading = true
 
     private var lastFetchDate: Date?
@@ -1150,8 +1383,21 @@ class GitHubMetadataCache: ObservableObject {
                 }
             }
 
+            var contributors: [GitHubContributor] = []
+            let contributorsURL = URL(string: "https://api.github.com/repos/zachlatta/freeflow/contributors?per_page=15")!
+            do {
+                let contributorsResult = try await URLSession.shared.data(from: contributorsURL)
+                if let contribHTTP = contributorsResult.1 as? HTTPURLResponse,
+                   (200..<300).contains(contribHTTP.statusCode) {
+                    contributors = try JSONDecoder().decode([GitHubContributor].self, from: contributorsResult.0)
+                }
+            } catch {
+                contributors = []
+            }
+
             starCount = count
             recentStargazers = recent
+            recentContributors = contributors
             isLoading = false
             lastFetchDate = Date()
         } catch {

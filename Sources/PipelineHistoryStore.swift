@@ -11,7 +11,7 @@ final class PipelineHistoryStore {
 
         var storeURL: URL?
         if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
-            let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "FreeFlow"
+            let appName = AppName.displayName
             let baseURL = appSupport.appendingPathComponent(appName, isDirectory: true)
             try? FileManager.default.createDirectory(at: baseURL, withIntermediateDirectories: true)
             storeURL = baseURL.appendingPathComponent("PipelineHistory.sqlite")
@@ -88,11 +88,19 @@ final class PipelineHistoryStore {
                 let request = pipelineHistoryRequest()
                 request.predicate = NSPredicate(format: "id == %@", item.id as CVarArg)
                 guard let entity = try container.viewContext.fetch(request).first else { return }
+                entity.intent = item.intent.rawValue
+                entity.selectedText = item.selectedText
+                entity.capturedSelection = item.capturedSelection
                 entity.rawTranscript = item.rawTranscript
                 entity.postProcessedTranscript = item.postProcessedTranscript
                 entity.postProcessingPrompt = item.postProcessingPrompt
+                entity.systemPrompt = item.systemPrompt
+                entity.contextSystemPrompt = item.contextSystemPrompt
                 entity.postProcessingStatus = item.postProcessingStatus
                 entity.debugStatus = item.debugStatus
+                entity.contextAppName = item.contextAppName
+                entity.contextBundleIdentifier = item.contextBundleIdentifier
+                entity.contextWindowTitle = item.contextWindowTitle
                 try saveContext()
             } catch {
                 thrownError = error
@@ -182,11 +190,16 @@ final class PipelineHistoryStore {
                 let context = container.viewContext
                 let entity = PipelineHistoryEntry(context: context)
                 entity.id = item.id
+                entity.intent = item.intent.rawValue
+                entity.selectedText = item.selectedText
+                entity.capturedSelection = item.capturedSelection
                 entity.timestamp = item.timestamp
                 entity.rawTranscript = item.rawTranscript
                 entity.postProcessedTranscript = item.postProcessedTranscript
                 entity.postProcessingPrompt = item.postProcessingPrompt
+                entity.systemPrompt = item.systemPrompt
                 entity.contextSummary = item.contextSummary
+                entity.contextSystemPrompt = item.contextSystemPrompt
                 entity.contextPrompt = item.contextPrompt
                 entity.contextScreenshotDataURL = item.contextScreenshotDataURL
                 entity.contextScreenshotStatus = item.contextScreenshotStatus
@@ -194,6 +207,9 @@ final class PipelineHistoryStore {
                 entity.debugStatus = item.debugStatus
                 entity.customVocabulary = item.customVocabulary
                 entity.audioFileName = item.audioFileName
+                entity.contextAppName = item.contextAppName
+                entity.contextBundleIdentifier = item.contextBundleIdentifier
+                entity.contextWindowTitle = item.contextWindowTitle
                 try saveContext()
             } catch {
                 thrownError = error
@@ -251,19 +267,27 @@ final class PipelineHistoryStore {
 
     private static func makeHistoryItem(from entity: PipelineHistoryEntry) -> PipelineHistoryItem {
         PipelineHistoryItem(
+            intent: PipelineHistoryItemIntent(rawValue: entity.intent ?? "") ?? .dictation,
+            selectedText: entity.selectedText,
+            capturedSelection: entity.capturedSelection,
             id: entity.id,
             timestamp: entity.timestamp ?? Date(),
             rawTranscript: entity.rawTranscript ?? "",
             postProcessedTranscript: entity.postProcessedTranscript ?? "",
             postProcessingPrompt: entity.postProcessingPrompt,
+            systemPrompt: entity.systemPrompt,
             contextSummary: entity.contextSummary ?? "",
+            contextSystemPrompt: entity.contextSystemPrompt,
             contextPrompt: entity.contextPrompt,
             contextScreenshotDataURL: entity.contextScreenshotDataURL,
             contextScreenshotStatus: entity.contextScreenshotStatus ?? "available (image)",
             postProcessingStatus: entity.postProcessingStatus ?? "",
             debugStatus: entity.debugStatus ?? "",
             customVocabulary: entity.customVocabulary ?? "",
-            audioFileName: entity.audioFileName
+            audioFileName: entity.audioFileName,
+            contextAppName: entity.contextAppName,
+            contextBundleIdentifier: entity.contextBundleIdentifier,
+            contextWindowTitle: entity.contextWindowTitle
         )
     }
 
@@ -275,30 +299,44 @@ final class PipelineHistoryStore {
         entity.managedObjectClassName = NSStringFromClass(PipelineHistoryEntry.self)
 
         entity.properties = [
+            makeAttribute(name: "intent", type: .stringAttributeType, isOptional: true, defaultValue: "dictation"),
+            makeAttribute(name: "selectedText", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "capturedSelection", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "id", type: .UUIDAttributeType, isOptional: false),
             makeAttribute(name: "timestamp", type: .dateAttributeType, isOptional: false),
             makeAttribute(name: "rawTranscript", type: .stringAttributeType, isOptional: false),
             makeAttribute(name: "postProcessedTranscript", type: .stringAttributeType, isOptional: false),
             makeAttribute(name: "postProcessingPrompt", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "systemPrompt", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextSummary", type: .stringAttributeType, isOptional: false),
+            makeAttribute(name: "contextSystemPrompt", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextPrompt", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextScreenshotDataURL", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextScreenshotStatus", type: .stringAttributeType, isOptional: false),
             makeAttribute(name: "postProcessingStatus", type: .stringAttributeType, isOptional: false),
             makeAttribute(name: "debugStatus", type: .stringAttributeType, isOptional: false),
             makeAttribute(name: "customVocabulary", type: .stringAttributeType, isOptional: false),
-            makeAttribute(name: "audioFileName", type: .stringAttributeType, isOptional: true)
+            makeAttribute(name: "audioFileName", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "contextAppName", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "contextBundleIdentifier", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "contextWindowTitle", type: .stringAttributeType, isOptional: true)
         ]
 
         model.entities = [entity]
         return model
     }
 
-    private static func makeAttribute(name: String, type: NSAttributeType, isOptional: Bool) -> NSAttributeDescription {
+    private static func makeAttribute(
+        name: String,
+        type: NSAttributeType,
+        isOptional: Bool,
+        defaultValue: Any? = nil
+    ) -> NSAttributeDescription {
         let attribute = NSAttributeDescription()
         attribute.name = name
         attribute.attributeType = type
         attribute.isOptional = isOptional
+        attribute.defaultValue = defaultValue
         return attribute
     }
 }
@@ -306,11 +344,16 @@ final class PipelineHistoryStore {
 @objc(PipelineHistoryEntry)
 final class PipelineHistoryEntry: NSManagedObject {
     @NSManaged var id: UUID
+    @NSManaged var intent: String?
+    @NSManaged var selectedText: String?
+    @NSManaged var capturedSelection: String?
     @NSManaged var timestamp: Date?
     @NSManaged var rawTranscript: String?
     @NSManaged var postProcessedTranscript: String?
     @NSManaged var postProcessingPrompt: String?
+    @NSManaged var systemPrompt: String?
     @NSManaged var contextSummary: String?
+    @NSManaged var contextSystemPrompt: String?
     @NSManaged var contextPrompt: String?
     @NSManaged var contextScreenshotDataURL: String?
     @NSManaged var contextScreenshotStatus: String?
@@ -318,4 +361,7 @@ final class PipelineHistoryEntry: NSManagedObject {
     @NSManaged var debugStatus: String?
     @NSManaged var customVocabulary: String?
     @NSManaged var audioFileName: String?
+    @NSManaged var contextAppName: String?
+    @NSManaged var contextBundleIdentifier: String?
+    @NSManaged var contextWindowTitle: String?
 }

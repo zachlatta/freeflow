@@ -8,9 +8,47 @@ struct MenuBarView: View {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
     }
 
+    private var recentHistoryItems: [PipelineHistoryItem] {
+        Array(appState.pipelineHistory.filter { !transcriptText(for: $0).isEmpty }.prefix(10))
+    }
+
+    private func transcriptText(for item: PipelineHistoryItem) -> String {
+        let cleaned = item.postProcessedTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !cleaned.isEmpty {
+            return cleaned
+        }
+        return item.rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func transcriptFull(for item: PipelineHistoryItem) -> String {
+        if !item.postProcessedTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return item.postProcessedTranscript
+        }
+        return item.rawTranscript
+    }
+
+    private func transcriptSnippet(for item: PipelineHistoryItem) -> String {
+        let text = transcriptText(for: item)
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "(no transcript)" }
+        return text.count > 48 ? String(text.prefix(48)) + "..." : text
+    }
+
+    private func copyTranscriptToPasteboard(_ transcript: String) {
+        guard !transcript.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(transcript, forType: .string)
+    }
+
+    private func openRunLog() {
+        appState.selectedSettingsTab = .runLog
+        NotificationCenter.default.post(name: .showSettings, object: nil)
+    }
+
     var body: some View {
         VStack(spacing: 4) {
-            Text("FreeFlow v\(appVersion)")
+            Text("\(AppName.displayName) v\(appVersion)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
@@ -80,6 +118,15 @@ struct MenuBarView: View {
             }
             .disabled(appState.isTranscribing)
 
+            if let hotkeyError = appState.hotkeyMonitoringErrorMessage {
+                Divider()
+                Text(hotkeyError)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .padding(.horizontal, 16)
+                    .lineLimit(3)
+            }
+
             if let error = appState.errorMessage {
                 Divider()
                 Text(error)
@@ -89,8 +136,9 @@ struct MenuBarView: View {
                     .lineLimit(3)
             }
 
+            Divider()
+
             if !appState.lastTranscript.isEmpty && !appState.isRecording && !appState.isTranscribing {
-                Divider()
                 Text(appState.lastTranscript.count > 35
                     ? String(appState.lastTranscript.prefix(35)) + "…"
                     : appState.lastTranscript)
@@ -106,6 +154,28 @@ struct MenuBarView: View {
                 }
             }
 
+            Menu("History") {
+                if recentHistoryItems.isEmpty {
+                    Text("No transcripts yet")
+                } else {
+                    ForEach(recentHistoryItems) { item in
+                        let transcript = transcriptText(for: item)
+                        Button {
+                            copyTranscriptToPasteboard(transcriptFull(for: item))
+                        } label: {
+                            Text(transcriptSnippet(for: item))
+                        }
+                        .disabled(transcript.isEmpty)
+                    }
+
+                    Divider()
+                }
+
+                Button("Open Run Log") {
+                    openRunLog()
+                }
+            }
+
             Divider()
 
             Menu("Hold Shortcut") {
@@ -118,7 +188,6 @@ struct MenuBarView: View {
                         Text("  Disabled")
                     }
                 }
-                .disabled(appState.toggleShortcut.isDisabled)
 
                 ForEach(ShortcutPreset.allCases) { preset in
                     Button {
@@ -163,7 +232,6 @@ struct MenuBarView: View {
                         Text("  Disabled")
                     }
                 }
-                .disabled(appState.holdShortcut.isDisabled)
 
                 ForEach(ShortcutPreset.allCases) { preset in
                     Button {
@@ -229,11 +297,20 @@ struct MenuBarView: View {
                 NotificationCenter.default.post(name: .showSettings, object: nil)
             }
 
-            Divider()
-
-            Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
-                appState.toggleDebugOverlay()
+            Button {
+                Task {
+                    await updateManager.checkForUpdates(userInitiated: true)
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if updateManager.isChecking {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(updateManager.isChecking ? "Checking for Updates..." : "Check for Updates")
+                }
             }
+            .disabled(updateManager.isChecking)
 
             if updateManager.updateAvailable {
                 Divider()
@@ -270,7 +347,7 @@ struct MenuBarView: View {
                     Button {
                         updateManager.showUpdateAlert()
                     } label: {
-                        Label("Update Available", systemImage: "arrow.down.circle.fill")
+                        Label("Update available", systemImage: "arrow.down.circle.fill")
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.white)
@@ -284,16 +361,11 @@ struct MenuBarView: View {
 
             Divider()
 
-            Button("Quit FreeFlow") {
+            Button("Quit \(AppName.displayName)") {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")
         }
         .padding(4)
     }
-}
-
-extension Notification.Name {
-    static let showSetup = Notification.Name("showSetup")
-    static let showSettings = Notification.Name("showSettings")
 }

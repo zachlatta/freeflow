@@ -10,11 +10,20 @@ space := $(empty) $(empty)
 APP_EXECUTABLE = $(MACOS_DIR)/$(APP_NAME)
 APP_EXECUTABLE_TARGET := $(subst $(space),\ ,$(APP_EXECUTABLE))
 
-SOURCES = $(wildcard Sources/*.swift)
+SOURCES = $(shell find Sources -name '*.swift' -type f | LC_ALL=C sort)
 RESOURCES = $(CONTENTS)/Resources
 ARCH ?= $(shell uname -m)
+
+# Pick the icon source based on which bundle we are building. Dev builds get
+# a distinct hammer-on-waveform icon so a developer's dock shows at a glance
+# which FreeFlow they are running when both are installed side by side.
+ifeq ($(APP_NAME),FreeFlow Dev)
+ICON_SOURCE = Resources/AppIcon-Dev-Source.png
+ICON_ICNS = Resources/AppIcon-Dev.icns
+else
 ICON_SOURCE = Resources/AppIcon-Source.png
 ICON_ICNS = Resources/AppIcon.icns
+endif
 
 .PHONY: all clean run icon dmg codesign-dmg notarize
 
@@ -52,7 +61,10 @@ endif
 	@plutil -replace CFBundleDisplayName -string "$(APP_NAME)" "$(CONTENTS)/Info.plist"
 	@plutil -replace CFBundleExecutable -string "$(APP_NAME)" "$(CONTENTS)/Info.plist"
 	@plutil -replace CFBundleIdentifier -string "$(BUNDLE_ID)" "$(CONTENTS)/Info.plist"
-	@cp $(ICON_ICNS) "$(RESOURCES)/"
+	@cp $(ICON_ICNS) "$(RESOURCES)/AppIcon.icns"
+	@plutil -replace NSMicrophoneUsageDescription -string "$(APP_NAME) needs microphone access to transcribe your speech." "$(CONTENTS)/Info.plist"
+	@plutil -replace NSSpeechRecognitionUsageDescription -string "$(APP_NAME) needs speech recognition to convert your voice to text." "$(CONTENTS)/Info.plist"
+	@plutil -replace NSAccessibilityUsageDescription -string "$(APP_NAME) needs accessibility access to detect the text cursor position and paste transcribed text." "$(CONTENTS)/Info.plist"
 	@codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" --entitlements FreeFlow.entitlements "$(APP_BUNDLE)"
 	@echo "Built $(APP_BUNDLE)"
 

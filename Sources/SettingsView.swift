@@ -38,6 +38,363 @@ private let iso8601DayFormatter: DateFormatter = {
     return formatter
 }()
 
+struct ProviderSettingsFields: View {
+    @EnvironmentObject var appState: AppState
+    @Binding var apiBaseURLInput: String
+    @Binding var transcriptionAPIURLInput: String
+    @Binding var transcriptionAPIKeyInput: String
+    @FocusState private var isEditingAPIBaseURL: Bool
+    @FocusState private var isEditingTranscriptionModel: Bool
+    @FocusState private var isEditingRealtimeStreamingModel: Bool
+    @FocusState private var isEditingPostProcessingModel: Bool
+    @FocusState private var isEditingPostProcessingFallbackModel: Bool
+    @FocusState private var isEditingContextModel: Bool
+    @FocusState private var transcriptionAPIURLFocused: Bool
+    @FocusState private var transcriptionAPIKeyFocused: Bool
+    @State private var transcriptionModelDraft: String = ""
+    @State private var realtimeStreamingModelDraft: String = ""
+    @State private var postProcessingModelDraft: String = ""
+    @State private var postProcessingFallbackModelDraft: String = ""
+    @State private var contextModelDraft: String = ""
+
+    let showsModelDescription: Bool
+
+    private func commitAPIBaseURL() {
+        let trimmed = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedBaseURL = trimmed.isEmpty ? AppState.defaultAPIBaseURL : trimmed
+        apiBaseURLInput = resolvedBaseURL
+        appState.apiBaseURL = resolvedBaseURL
+    }
+
+    private func commitTranscriptionModel() {
+        let trimmed = transcriptionModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        transcriptionModelDraft = trimmed
+        guard appState.transcriptionModel != trimmed else { return }
+        appState.transcriptionModel = trimmed
+    }
+
+    private func commitRealtimeStreamingModel() {
+        let trimmed = realtimeStreamingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        realtimeStreamingModelDraft = trimmed
+        guard appState.realtimeStreamingModel != trimmed else { return }
+        appState.realtimeStreamingModel = trimmed
+    }
+
+    private func commitPostProcessingModel() {
+        let trimmed = postProcessingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        postProcessingModelDraft = trimmed
+        guard appState.postProcessingModel != trimmed else { return }
+        appState.postProcessingModel = trimmed
+    }
+
+    private func commitPostProcessingFallbackModel() {
+        let trimmed = postProcessingFallbackModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        postProcessingFallbackModelDraft = trimmed
+        guard appState.postProcessingFallbackModel != trimmed else { return }
+        appState.postProcessingFallbackModel = trimmed
+    }
+
+    private func commitContextModel() {
+        let trimmed = contextModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        contextModelDraft = trimmed
+        guard appState.contextModel != trimmed else { return }
+        appState.contextModel = trimmed
+    }
+
+    private func commitTranscriptionAPIURL() {
+        let trimmed = transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        transcriptionAPIURLInput = trimmed
+        guard appState.transcriptionAPIURL != trimmed else { return }
+        appState.transcriptionAPIURL = trimmed
+    }
+
+    private func commitTranscriptionAPIKey() {
+        let trimmed = transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        transcriptionAPIKeyInput = trimmed
+        guard appState.transcriptionAPIKey != trimmed else { return }
+        appState.transcriptionAPIKey = trimmed
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("API Base URL")
+                .font(.caption.weight(.semibold))
+
+            Text("Change this to use a different OpenAI-compatible API provider.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 8) {
+                TextField(AppState.defaultAPIBaseURL, text: $apiBaseURLInput)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .focused($isEditingAPIBaseURL)
+                    .onSubmit {
+                        commitAPIBaseURL()
+                    }
+                    .onChange(of: isEditingAPIBaseURL) { isEditing in
+                        if !isEditing {
+                            commitAPIBaseURL()
+                        }
+                    }
+
+                Button("Reset to Default") {
+                    apiBaseURLInput = AppState.defaultAPIBaseURL
+                    appState.apiBaseURL = AppState.defaultAPIBaseURL
+                }
+                .font(.caption)
+            }
+
+            if showsModelDescription {
+                Text("If you use another provider, enter that provider's model IDs here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Post-Processing Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultPostProcessingModel, text: $postProcessingModelDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isEditingPostProcessingModel)
+                        .onSubmit {
+                            commitPostProcessingModel()
+                        }
+                        .onChange(of: isEditingPostProcessingModel) { isEditing in
+                            if !isEditing {
+                                commitPostProcessingModel()
+                            }
+                        }
+                    Button("Reset to Default") {
+                        postProcessingModelDraft = AppState.defaultPostProcessingModel
+                        appState.postProcessingModel = AppState.defaultPostProcessingModel
+                    }
+                    .font(.caption)
+                }
+                Text("Used for transcript cleanup and Edit Mode transforms.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Post-Processing Fallback Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultPostProcessingFallbackModel, text: $postProcessingFallbackModelDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isEditingPostProcessingFallbackModel)
+                        .onSubmit {
+                            commitPostProcessingFallbackModel()
+                        }
+                        .onChange(of: isEditingPostProcessingFallbackModel) { isEditing in
+                            if !isEditing {
+                                commitPostProcessingFallbackModel()
+                            }
+                        }
+                    Button("Reset to Default") {
+                        postProcessingFallbackModelDraft = AppState.defaultPostProcessingFallbackModel
+                        appState.postProcessingFallbackModel = AppState.defaultPostProcessingFallbackModel
+                    }
+                    .font(.caption)
+                }
+                Text("Used as the explicit retry model for transcript cleanup and Edit Mode transforms.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Context Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultContextModel, text: $contextModelDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isEditingContextModel)
+                        .onSubmit {
+                            commitContextModel()
+                        }
+                        .onChange(of: isEditingContextModel) { isEditing in
+                            if !isEditing {
+                                commitContextModel()
+                            }
+                        }
+                    Button("Reset to Default") {
+                        contextModelDraft = AppState.defaultContextModel
+                        appState.contextModel = AppState.defaultContextModel
+                    }
+                    .font(.caption)
+                }
+                Text("Used for context inference, with a text-only retry when screenshot analysis fails.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField(AppState.defaultTranscriptionModel, text: $transcriptionModelDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isEditingTranscriptionModel)
+                        .onSubmit {
+                            commitTranscriptionModel()
+                        }
+                        .onChange(of: isEditingTranscriptionModel) { isEditing in
+                            if !isEditing {
+                                commitTranscriptionModel()
+                            }
+                        }
+                    Button("Reset to Default") {
+                        transcriptionModelDraft = AppState.defaultTranscriptionModel
+                        appState.transcriptionModel = AppState.defaultTranscriptionModel
+                    }
+                    .font(.caption)
+                }
+                Text("Used for speech-to-text transcription.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription Language")
+                    .font(.caption.weight(.semibold))
+                Picker("", selection: $appState.transcriptionLanguage) {
+                    ForEach(AppState.transcriptionLanguageOptions, id: \.code) { option in
+                        Text(option.name).tag(option.code)
+                    }
+                }
+                .accessibilityLabel("Transcription Language")
+                .labelsHidden()
+                Text("Hint to the transcription model. Auto-detect works for most users. Pick a specific language if you see wrong-script characters (for example Chinese) appear in your output.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription API URL")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField("Uses API Base URL when empty", text: $transcriptionAPIURLInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .focused($transcriptionAPIURLFocused)
+                        .onSubmit {
+                            commitTranscriptionAPIURL()
+                        }
+                        .onChange(of: transcriptionAPIURLFocused) { isFocused in
+                            if !isFocused {
+                                commitTranscriptionAPIURL()
+                            }
+                        }
+                    if !transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Clear") {
+                            transcriptionAPIURLInput = ""
+                            appState.transcriptionAPIURL = ""
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription API Key")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    SecureField("Uses API Key when empty", text: $transcriptionAPIKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .focused($transcriptionAPIKeyFocused)
+                        .onSubmit {
+                            commitTranscriptionAPIKey()
+                        }
+                        .onChange(of: transcriptionAPIKeyFocused) { isFocused in
+                            if !isFocused {
+                                commitTranscriptionAPIKey()
+                            }
+                        }
+                    if !transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Clear") {
+                            transcriptionAPIKeyInput = ""
+                            appState.transcriptionAPIKey = ""
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+
+            Divider()
+
+            Toggle(
+                "Stream audio while recording (realtime)",
+                isOn: $appState.realtimeStreamingEnabled
+            )
+            Text("Streams audio through the provider's OpenAI-compatible /v1/realtime WebSocket so transcription runs while you speak.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Realtime Transcription Model")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    TextField("Required by some providers, e.g. gpt-4o-transcribe", text: $realtimeStreamingModelDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isEditingRealtimeStreamingModel)
+                        .onSubmit {
+                            commitRealtimeStreamingModel()
+                        }
+                        .onChange(of: isEditingRealtimeStreamingModel) { isEditing in
+                            if !isEditing {
+                                commitRealtimeStreamingModel()
+                            }
+                        }
+                    if !realtimeStreamingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button("Reset") {
+                            realtimeStreamingModelDraft = ""
+                            appState.realtimeStreamingModel = ""
+                        }
+                        .font(.caption)
+                    }
+                }
+                Text("Used only for realtime streaming. Leave empty for providers that supply a server default.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .onAppear {
+            transcriptionModelDraft = appState.transcriptionModel
+            realtimeStreamingModelDraft = appState.realtimeStreamingModel
+            postProcessingModelDraft = appState.postProcessingModel
+            postProcessingFallbackModelDraft = appState.postProcessingFallbackModel
+            contextModelDraft = appState.contextModel
+        }
+        .onChange(of: appState.transcriptionModel) { value in
+            if !isEditingTranscriptionModel {
+                transcriptionModelDraft = value
+            }
+        }
+        .onChange(of: appState.realtimeStreamingModel) { value in
+            if !isEditingRealtimeStreamingModel {
+                realtimeStreamingModelDraft = value
+            }
+        }
+        .onChange(of: appState.postProcessingModel) { value in
+            if !isEditingPostProcessingModel {
+                postProcessingModelDraft = value
+            }
+        }
+        .onChange(of: appState.postProcessingFallbackModel) { value in
+            if !isEditingPostProcessingFallbackModel {
+                postProcessingFallbackModelDraft = value
+            }
+        }
+        .onChange(of: appState.contextModel) { value in
+            if !isEditingContextModel {
+                contextModelDraft = value
+            }
+        }
+    }
+}
+
 // MARK: - Settings
 
 struct SettingsView: View {
@@ -46,14 +403,11 @@ struct SettingsView: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(SettingsTab.allCases) { tab in
+                ForEach(SettingsTab.visibleCases) { tab in
                     Button {
                         appState.selectedSettingsTab = tab
                     } label: {
-                        Label(tab.title, systemImage: tab.icon)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 10)
+                        SettingsSidebarRow(title: tab.title, icon: tab.icon)
                             .background(
                                 RoundedRectangle(cornerRadius: 6)
                                     .fill(appState.selectedSettingsTab == tab
@@ -63,6 +417,7 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
                 Spacer()
             }
             .padding(10)
@@ -81,9 +436,76 @@ struct SettingsView: View {
                     VoiceMacrosSettingsView()
                 case .runLog:
                     RunLogView()
+                case .debug:
+                    DebugSettingsView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+}
+
+private struct SettingsSidebarRow: View {
+    let title: String
+    let icon: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .regular))
+                .frame(width: 16, height: 16, alignment: .center)
+                .foregroundStyle(.primary)
+
+            Text(title)
+                .font(.body)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+    }
+}
+
+// MARK: - Debug Settings
+
+struct DebugSettingsView: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Debug")
+                    .font(.largeTitle.bold())
+
+                SettingsCard("Overlay", icon: "wrench.and.screwdriver") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Show the recording overlay with simulated audio levels.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button(appState.isDebugOverlayActive ? "Stop Debug Overlay" : "Debug Overlay") {
+                            appState.toggleDebugOverlay()
+                        }
+                    }
+                }
+
+                SettingsCard("Update Overlay", icon: "arrow.down.circle") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Display the update available overlay after dictation finishes.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Toggle("Show after dictation", isOn: $appState.debugShowsUpdateReminderAfterDictation)
+
+                        Button("Show Update Overlay Now") {
+                            appState.showDebugUpdateAvailableOverlay()
+                        }
+                    }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -96,14 +518,55 @@ struct GeneralSettingsView: View {
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
+    @State private var transcriptionAPIURLInput: String = ""
+    @State private var transcriptionAPIKeyInput: String = ""
+    @State private var advancedProviderSettingsExpanded = false
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
     @State private var keyValidationSuccess = false
     @State private var customVocabularyInput: String = ""
     @State private var micPermissionGranted = false
+    @State private var showMutedHint = false
+    @State private var copiedBuildInfo = false
+    @State private var copiedBuildInfoResetWorkItem: DispatchWorkItem?
     @StateObject private var githubCache = GitHubMetadataCache.shared
     @ObservedObject private var updateManager = UpdateManager.shared
     private let freeflowRepoURL = URL(string: "https://github.com/zachlatta/freeflow")!
+
+    private var appDisplayName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+            ?? "\(AppName.displayName)"
+    }
+
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+    }
+
+    private var appBuildNumber: String {
+        Bundle.main.object(forInfoDictionaryKey: "FreeFlowBuildTag") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+            ?? "unknown"
+    }
+
+    private var macOSVersion: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+    }
+
+    private var appArchitecture: String {
+        #if arch(arm64)
+        return "arm64"
+        #elseif arch(x86_64)
+        return "x86_64"
+        #else
+        return "unknown"
+        #endif
+    }
+
+    private var buildDiagnosticsText: String {
+        "\(appDisplayName) \(appVersion) (\(appBuildNumber))\nmacOS \(macOSVersion) (\(appArchitecture))"
+    }
 
     var body: some View {
         ScrollView {
@@ -115,10 +578,10 @@ struct GeneralSettingsView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 64, height: 64)
 
-                    Text("FreeFlow")
+                    Text(AppName.displayName)
                         .font(.system(size: 20, weight: .bold, design: .rounded))
 
-                    Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")")
+                    Text("v\(appVersion)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -234,8 +697,17 @@ struct GeneralSettingsView: View {
                 SettingsCard("API Key", icon: "key.fill") {
                     apiKeySection
                 }
+                SettingsCard("Output Language", icon: "globe") {
+                    outputLanguageSection
+                }
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
+                }
+                SettingsCard("Audio During Dictation", icon: "speaker.slash.fill") {
+                    dictationAudioSection
+                }
+                SettingsCard("Edit Mode", icon: "pencil") {
+                    commandModeSection
                 }
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
                     clipboardSection
@@ -252,16 +724,31 @@ struct GeneralSettingsView: View {
                 SettingsCard("Permissions", icon: "lock.shield.fill") {
                     permissionsSection
                 }
+                SettingsCard("Build", icon: "info.circle.fill") {
+                    buildInfoSection
+                }
             }
             .padding(24)
         }
         .onAppear {
             apiKeyInput = appState.apiKey
             apiBaseURLInput = appState.apiBaseURL
+            transcriptionAPIURLInput = appState.transcriptionAPIURL
+            transcriptionAPIKeyInput = appState.transcriptionAPIKey
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             appState.refreshLaunchAtLoginStatus()
             Task { await githubCache.fetchIfNeeded() }
+        }
+        .onChange(of: appState.transcriptionAPIURL) { value in
+            if transcriptionAPIURLInput != value {
+                transcriptionAPIURLInput = value
+            }
+        }
+        .onChange(of: appState.transcriptionAPIKey) { value in
+            if transcriptionAPIKeyInput != value {
+                transcriptionAPIKeyInput = value
+            }
         }
     }
 
@@ -269,7 +756,7 @@ struct GeneralSettingsView: View {
 
     private var startupSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Launch FreeFlow at login", isOn: $appState.launchAtLogin)
+            Toggle("Launch \(AppName.displayName) at login", isOn: $appState.launchAtLogin)
             Toggle("Show menu bar icon", isOn: $showMenuBarIcon)
 
             if SMAppService.mainApp.status == .requiresApproval {
@@ -385,9 +872,15 @@ struct GeneralSettingsView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "arrow.down.circle.fill")
                                 .foregroundStyle(.blue)
-                            Text("A new version of FreeFlow is available!")
+                            Text(updateManager.latestReleaseVersion.isEmpty
+                                ? "A new version of \(AppName.displayName) is available!"
+                                : "\(AppName.displayName) v\(updateManager.latestReleaseVersion) is available!")
                                 .font(.caption.weight(.semibold))
                             Spacer()
+                            Button("What's New") {
+                                updateManager.showReleaseNotes()
+                            }
+                            .font(.caption)
                             Button("Update Now") {
                                 if let release = updateManager.latestRelease {
                                     updateManager.downloadAndInstall(release: release)
@@ -404,11 +897,58 @@ struct GeneralSettingsView: View {
         }
     }
 
+    // MARK: Build
+
+    private var buildInfoSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Build number")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(appBuildNumber)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            HStack(alignment: .top, spacing: 12) {
+                Text(buildDiagnosticsText)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                Spacer()
+
+                Button {
+                    copyBuildDiagnostics()
+                } label: {
+                    Label(copiedBuildInfo ? "Copied" : "Copy", systemImage: copiedBuildInfo ? "checkmark" : "doc.on.doc")
+                }
+                .font(.caption)
+            }
+        }
+    }
+
+    private func copyBuildDiagnostics() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(buildDiagnosticsText, forType: .string)
+        copiedBuildInfo = true
+
+        copiedBuildInfoResetWorkItem?.cancel()
+
+        let resetWorkItem = DispatchWorkItem {
+            copiedBuildInfo = false
+            copiedBuildInfoResetWorkItem = nil
+        }
+        copiedBuildInfoResetWorkItem = resetWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
+    }
+
     // MARK: API Key
 
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("FreeFlow uses Groq's whisper-large-v3 model for transcription.")
+            Text("\(AppName.displayName) uses the configured transcription model with your selected OpenAI-compatible provider.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -438,50 +978,27 @@ struct GeneralSettingsView: View {
                     .font(.caption)
             }
 
-            Divider()
-
-            Text("API Base URL")
-                .font(.caption.weight(.semibold))
-
-            Text("Change this to use a different OpenAI-compatible API provider.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            HStack(spacing: 8) {
-                TextField("https://api.groq.com/openai/v1", text: $apiBaseURLInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onChange(of: apiBaseURLInput) { newValue in
-                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmed.isEmpty {
-                            appState.apiBaseURL = trimmed
-                        }
-                    }
-
-                Button("Reset to Default") {
-                    apiBaseURLInput = "https://api.groq.com/openai/v1"
-                    appState.apiBaseURL = "https://api.groq.com/openai/v1"
+            DisclosureGroup(isExpanded: $advancedProviderSettingsExpanded) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Divider()
+                    ProviderSettingsFields(
+                        apiBaseURLInput: $apiBaseURLInput,
+                        transcriptionAPIURLInput: $transcriptionAPIURLInput,
+                        transcriptionAPIKeyInput: $transcriptionAPIKeyInput,
+                        showsModelDescription: false
+                    )
                 }
-                .font(.caption)
-            }
-
-            Divider()
-
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Force HTTP/2 for Transcription")
-                        .font(.caption.weight(.semibold))
-                    Text("Uses `curl --http2` for audio transcription uploads. Leave this off unless the default transport is failing.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            } label: {
+                HStack {
+                    Text("Advanced Provider Settings")
+                    Spacer()
                 }
-
-                Spacer(minLength: 0)
-
-                Toggle("", isOn: $appState.forceHTTP2Transcription)
-                    .toggleStyle(.checkbox)
-                    .labelsHidden()
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    advancedProviderSettingsExpanded.toggle()
+                }
             }
+            .padding(.top, 4)
         }
     }
 
@@ -493,16 +1010,50 @@ struct GeneralSettingsView: View {
         keyValidationSuccess = false
 
         Task {
-            let valid = await TranscriptionService.validateAPIKey(key, baseURL: baseURL.isEmpty ? "https://api.groq.com/openai/v1" : baseURL)
+            let valid = await TranscriptionService.validateAPIKey(
+                key,
+                baseURL: baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
+            )
             await MainActor.run {
                 isValidatingKey = false
                 if valid {
                     appState.apiKey = key
                     keyValidationSuccess = true
                 } else {
-                    keyValidationError = "Invalid API key. Please check and try again."
+                    keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
                 }
             }
+        }
+    }
+
+    // MARK: Output Language
+
+    private static let outputLanguageOptions = [
+        "",
+        "English",
+        "Chinese (Simplified)",
+        "Chinese (Traditional)",
+        "Spanish",
+        "French",
+        "Japanese",
+        "Korean",
+        "German",
+        "Portuguese",
+    ]
+
+    private var outputLanguageSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Language", selection: $appState.outputLanguage) {
+                Text("Same as spoken").tag("")
+                ForEach(Self.outputLanguageOptions.dropFirst(), id: \.self) { lang in
+                    Text(lang).tag(lang)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text("When set, FreeFlow translates your speech into the selected language.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -543,13 +1094,97 @@ struct GeneralSettingsView: View {
         }
     }
 
+    private var dictationAudioSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(
+                "Mute audio when dictation starts",
+                isOn: $appState.dictationAudioInterruptionEnabled
+            )
+
+            Text("\(AppName.displayName) restores the audio state it changed when dictation ends.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var commandModeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle("Enable Edit Mode", isOn: Binding(
+                get: { appState.isCommandModeEnabled },
+                set: { newValue in
+                    _ = appState.setCommandModeEnabled(newValue)
+                }
+            ))
+
+            Text("Transform highlighted text with a spoken instruction instead of dictating over it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Invocation Style", selection: Binding(
+                get: { appState.commandModeStyle },
+                set: { newValue in
+                    _ = appState.setCommandModeStyle(newValue)
+                }
+            )) {
+                ForEach(CommandModeStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .pickerStyle(.segmented)
+            .disabled(!appState.isCommandModeEnabled)
+
+            Group {
+                switch appState.commandModeStyle {
+                case .automatic:
+                    Text("If text is selected, your normal dictation shortcut transforms the selection instead of dictating over it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                case .manual:
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Hold the extra modifier together with your normal dictation shortcut to transform selected text.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Picker("Extra Modifier", selection: Binding(
+                            get: { appState.commandModeManualModifier },
+                            set: { newValue in
+                                _ = appState.setCommandModeManualModifier(newValue)
+                            }
+                        )) {
+                            ForEach(CommandModeManualModifier.allCases) { modifier in
+                                Text(modifier.title).tag(modifier)
+                            }
+                        }
+                        .disabled(!appState.isCommandModeEnabled || appState.commandModeStyle != .manual)
+                    }
+                }
+            }
+            .opacity(appState.isCommandModeEnabled ? 1 : 0.5)
+
+            if let validationMessage = appState.commandModeManualModifierValidationMessage {
+                Label(validationMessage, systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
     // MARK: Clipboard
 
     private var clipboardSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle("Preserve clipboard after paste", isOn: $appState.preserveClipboard)
 
-            Text("FreeFlow will temporarily place the transcript on your clipboard to paste it, then restore whatever was there before. If you copy something else before the restore happens, FreeFlow leaves it alone.")
+            Text("\(AppName.displayName) will temporarily place the transcript on your clipboard to paste it, then restore whatever was there before. If you copy something else before the restore happens, \(AppName.displayName) leaves it alone.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+                .padding(.vertical, 2)
+
+            Toggle("Say \"press enter\" to submit after paste", isOn: $appState.isPressEnterVoiceCommandEnabled)
+
+            Text("When the transcription ends with \"press enter\", \(AppName.displayName) removes those words before cleanup, pastes the remaining transcript, then presses Return.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -587,9 +1222,7 @@ struct GeneralSettingsView: View {
 
     private var soundVolumeSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Adjust the volume of feedback sounds.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Toggle("Play alert sounds", isOn: $appState.alertSoundsEnabled)
 
             HStack(spacing: 12) {
                 Image(systemName: "speaker.fill")
@@ -604,11 +1237,35 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
                     .frame(width: 36, alignment: .trailing)
             }
+            .disabled(!appState.alertSoundsEnabled)
+            .opacity(appState.alertSoundsEnabled ? 1 : 0.5)
 
-            Button("Preview") {
-                let s = NSSound(named: "Tink"); s?.volume = appState.soundVolume; s?.play()
+            HStack(spacing: 8) {
+                Button("Preview") {
+                    let muted = SystemAudioStatus.isDefaultOutputMuted()
+                    let volume = SystemAudioStatus.defaultOutputVolume()
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showMutedHint = muted || (volume ?? 1) < 0.10
+                    }
+                    appState.playAlertSound(named: "Tink")
+                }
+                .font(.caption)
+                .disabled(!appState.alertSoundsEnabled)
+
+                if showMutedHint {
+                    HStack(spacing: 4) {
+                        Image(systemName: "speaker.slash.fill")
+                            .foregroundStyle(.orange)
+                        Text("System volume is muted or very low. Unmute to hear the preview.")
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption)
+                    .transition(.opacity)
+                }
             }
-            .font(.caption)
+        }
+        .onChange(of: appState.alertSoundsEnabled) { enabled in
+            if !enabled { showMutedHint = false }
         }
     }
 
@@ -646,10 +1303,8 @@ struct GeneralSettingsView: View {
                 icon: "mic.fill",
                 granted: micPermissionGranted,
                 action: {
-                    AVCaptureDevice.requestAccess(for: .audio) { granted in
-                        DispatchQueue.main.async {
-                            micPermissionGranted = granted
-                        }
+                    appState.requestMicrophoneAccess { granted in
+                        micPermissionGranted = granted
                     }
                 }
             )
@@ -959,17 +1614,23 @@ struct PromptsSettingsView: View {
         systemTestError = nil
         systemTestPrompt = nil
 
-        let service = PostProcessingService(apiKey: appState.apiKey, baseURL: appState.apiBaseURL)
+        let service = PostProcessingService(
+            apiKey: appState.apiKey,
+            baseURL: appState.apiBaseURL,
+            preferredModel: appState.postProcessingModel,
+            preferredFallbackModel: appState.postProcessingFallbackModel
+        )
         let input = systemTestInput
         let customPrompt = appState.customSystemPrompt
         let vocabulary = appState.customVocabulary
 
         let context = AppContext(
-            appName: "FreeFlow Settings",
+            appName: "\(AppName.displayName) Settings",
             bundleIdentifier: "com.zachlatta.freeflow",
             windowTitle: "System Prompt Test",
             selectedText: nil,
-            currentActivity: "User is testing the system prompt in FreeFlow settings.",
+            currentActivity: "User is testing the system prompt in \(AppName.displayName) settings.",
+            contextSystemPrompt: nil,
             contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,
@@ -1007,7 +1668,7 @@ struct PromptsSettingsView: View {
             && appState.customContextPromptLastModified < AppContextService.defaultContextPromptDate
 
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Controls how FreeFlow infers your current activity from app metadata and screenshots.")
+            Text("Controls how \(AppName.displayName) infers your current activity from app metadata and screenshots.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -1102,6 +1763,45 @@ struct PromptsSettingsView: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Screenshot Resolution")
+                    .font(.caption.weight(.semibold))
+
+                Text("Controls the maximum image dimension sent for context inference.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Picker("", selection: $appState.contextScreenshotMaxDimension) {
+                    ForEach(AppState.contextScreenshotDimensionOptions, id: \.self) { dimension in
+                        Text("\(dimension) px").tag(dimension)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel("Screenshot Resolution")
+
+                HStack {
+                    if appState.contextScreenshotMaxDimension == AppState.defaultContextScreenshotMaxDimension {
+                        Label("Using default", systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Label("Using custom value", systemImage: "pencil")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                    Spacer()
+                    if appState.contextScreenshotMaxDimension != AppState.defaultContextScreenshotMaxDimension {
+                        Button("Reset to Default") {
+                            appState.contextScreenshotMaxDimension = AppState.defaultContextScreenshotMaxDimension
+                        }
+                        .font(.caption)
+                    }
+                }
+            }
+
+            Divider()
+
             // Test section
             VStack(alignment: .leading, spacing: 8) {
                 Text("Test Context Prompt")
@@ -1172,11 +1872,7 @@ struct PromptsSettingsView: View {
         contextTestError = nil
         contextTestPrompt = nil
 
-        let service = AppContextService(
-            apiKey: appState.apiKey,
-            baseURL: appState.apiBaseURL,
-            customContextPrompt: appState.customContextPrompt
-        )
+        let service = appState.makeAppContextService()
 
         Task {
             let context = await service.collectContext()
@@ -1247,21 +1943,69 @@ struct RunLogView: View {
 // MARK: - Run Log Entry
 
 struct RunLogEntryView: View {
+    private let actionIconSize: CGFloat = 28
     let item: PipelineHistoryItem
     @EnvironmentObject var appState: AppState
     @State private var isExpanded = false
     @State private var isRetrying = false
     @State private var showContextPrompt = false
     @State private var showPostProcessingPrompt = false
+    @State private var copiedTranscript = false
+    @State private var copiedTranscriptResetWorkItem: DispatchWorkItem?
+    @State private var copiedRawTranscript = false
+    @State private var copiedRawTranscriptResetWorkItem: DispatchWorkItem?
+    @State private var copiedCleanedTranscript = false
+    @State private var copiedCleanedTranscriptResetWorkItem: DispatchWorkItem?
 
     private var isError: Bool {
         item.postProcessingStatus.hasPrefix("Error:")
+    }
+
+    private var copyableTranscript: String {
+        if !item.postProcessedTranscript.isEmpty {
+            return item.postProcessedTranscript
+        }
+        return item.rawTranscript
+    }
+
+    @ViewBuilder
+    private func actionIconButton(
+        systemName: String,
+        color: Color = .secondary,
+        help: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.caption)
+                .foregroundStyle(color)
+                .frame(width: actionIconSize, height: actionIconSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .help(help)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Collapsed header
             HStack(spacing: 0) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                }) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: actionIconSize, height: actionIconSize)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isExpanded.toggle()
@@ -1283,49 +2027,58 @@ struct RunLogEntryView: View {
                                 .truncationMode(.tail)
                         }
                         Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
-                if isError && item.audioFileName != nil {
-                    Button {
-                        appState.retryTranscription(item: item)
-                    } label: {
-                        if isRetrying {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .frame(width: 28, height: 28)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
+                HStack(spacing: 4) {
+                    if isError && item.audioFileName != nil {
+                        Button {
+                            appState.retryTranscription(item: item)
+                        } label: {
+                            if isRetrying {
+                                ProgressView()
+                                    .controlSize(.mini)
+                                    .frame(width: actionIconSize, height: actionIconSize)
+                            } else {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    .frame(width: actionIconSize, height: actionIconSize)
+                                    .contentShape(Rectangle())
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isRetrying)
+                        .help("Retry transcription")
+                    } else {
+                        Color.clear
+                            .frame(width: actionIconSize, height: actionIconSize)
+                    }
+
+                    actionIconButton(systemName: "square.and.arrow.up", help: "Export run log") {
+                        TestCaseExporter.exportWithSavePanel(
+                            item: item,
+                            audioDirURL: AppState.audioStorageDirectory()
+                        )
+                    }
+
+                    actionIconButton(
+                        systemName: copiedTranscript ? "checkmark" : "doc.on.doc",
+                        color: copiedTranscript ? .green : .secondary,
+                        help: copiedTranscript ? "Copied transcript" : "Copy transcript",
+                        disabled: copyableTranscript.isEmpty
+                    ) {
+                        copyTranscriptToPasteboard()
+                    }
+
+                    actionIconButton(systemName: "trash", help: "Delete this run") {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            appState.deleteHistoryEntry(id: item.id)
                         }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(isRetrying)
-                    .help("Retry transcription")
                 }
-
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        appState.deleteHistoryEntry(id: item.id)
-                    }
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Delete this run")
             }
             .padding(12)
 
@@ -1432,7 +2185,7 @@ struct RunLogEntryView: View {
                             title: "Transcribe Audio",
                             content: {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Sent audio to Groq whisper-large-v3")
+                                    Text("Sent audio to the configured transcription model")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .textSelection(.enabled)
@@ -1441,9 +2194,23 @@ struct RunLogEntryView: View {
                                             .font(.system(.caption, design: .monospaced))
                                             .textSelection(.enabled)
                                             .padding(8)
+                                            .padding(.trailing, 24)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                             .background(Color(nsColor: .controlBackgroundColor))
                                             .cornerRadius(4)
+                                            .overlay(alignment: .topTrailing) {
+                                                Button {
+                                                    copyRawTranscriptToPasteboard()
+                                                } label: {
+                                                    Image(systemName: copiedRawTranscript ? "checkmark" : "doc.on.doc")
+                                                        .font(.caption)
+                                                        .foregroundStyle(copiedRawTranscript ? .green : .secondary)
+                                                        .padding(6)
+                                                        .contentShape(Rectangle())
+                                                }
+                                                .buttonStyle(.plain)
+                                                .help(copiedRawTranscript ? "Copied literal transcript" : "Copy literal transcript")
+                                            }
                                     } else {
                                         Text("(empty transcript)")
                                             .font(.caption)
@@ -1494,14 +2261,29 @@ struct RunLogEntryView: View {
                                             .font(.system(.caption, design: .monospaced))
                                             .textSelection(.enabled)
                                             .padding(8)
+                                            .padding(.trailing, 24)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                             .background(Color(nsColor: .controlBackgroundColor))
                                             .cornerRadius(4)
+                                            .overlay(alignment: .topTrailing) {
+                                                Button {
+                                                    copyCleanedTranscriptToPasteboard()
+                                                } label: {
+                                                    Image(systemName: copiedCleanedTranscript ? "checkmark" : "doc.on.doc")
+                                                        .font(.caption)
+                                                        .foregroundStyle(copiedCleanedTranscript ? .green : .secondary)
+                                                        .padding(6)
+                                                        .contentShape(Rectangle())
+                                                }
+                                                .buttonStyle(.plain)
+                                                .help(copiedCleanedTranscript ? "Copied cleaned transcript" : "Copy cleaned transcript")
+                                            }
                                     }
                                 }
                             }
                         )
                     }
+
                 }
                 .padding(12)
             }
@@ -1521,6 +2303,54 @@ struct RunLogEntryView: View {
         text.components(separatedBy: CharacterSet(charactersIn: ",;\n"))
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+
+    private func copyTranscriptToPasteboard() {
+        guard !copyableTranscript.isEmpty else { return }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(copyableTranscript, forType: .string)
+        copiedTranscript = true
+
+        copiedTranscriptResetWorkItem?.cancel()
+        let resetWorkItem = DispatchWorkItem {
+            copiedTranscript = false
+            copiedTranscriptResetWorkItem = nil
+        }
+        copiedTranscriptResetWorkItem = resetWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
+    }
+
+    private func copyRawTranscriptToPasteboard() {
+        guard !item.rawTranscript.isEmpty else { return }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.rawTranscript, forType: .string)
+        copiedRawTranscript = true
+
+        copiedRawTranscriptResetWorkItem?.cancel()
+        let resetWorkItem = DispatchWorkItem {
+            copiedRawTranscript = false
+            copiedRawTranscriptResetWorkItem = nil
+        }
+        copiedRawTranscriptResetWorkItem = resetWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
+    }
+
+    private func copyCleanedTranscriptToPasteboard() {
+        guard !item.postProcessedTranscript.isEmpty else { return }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(item.postProcessedTranscript, forType: .string)
+        copiedCleanedTranscript = true
+
+        copiedCleanedTranscriptResetWorkItem?.cancel()
+        let resetWorkItem = DispatchWorkItem {
+            copiedCleanedTranscript = false
+            copiedCleanedTranscriptResetWorkItem = nil
+        }
+        copiedCleanedTranscriptResetWorkItem = resetWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: resetWorkItem)
     }
 }
 

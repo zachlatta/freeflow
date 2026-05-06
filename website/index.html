@@ -1,0 +1,1037 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FreeFlow - Free Open Source Mac Dictation</title>
+    <meta name="description" content="FreeFlow is a free, open source Mac dictation app with hold-to-talk shortcuts, context-aware cleanup, custom vocabulary, voice macros, and privacy-first API calls.">
+    <meta name="robots" content="index,follow,max-image-preview:large">
+    <meta name="author" content="FreeFlow">
+    <meta name="application-name" content="FreeFlow">
+    <meta name="apple-mobile-web-app-title" content="FreeFlow">
+    <meta name="theme-color" content="#0b0c20">
+    <meta name="color-scheme" content="dark light">
+    <meta name="keywords" content="FreeFlow, Mac dictation app, open source dictation, speech to text Mac, Groq transcription, Wispr Flow alternative, Superwhisper alternative, Monologue alternative">
+    <meta name="ai-summary" content="FreeFlow is a free open source macOS dictation app. It uses Groq by default, supports customizable hold-to-talk and tap-to-toggle shortcuts, context-aware cleanup, custom vocabulary, voice macros, configurable API base URL, and has no FreeFlow server.">
+    <link rel="canonical" href="https://freeflow.zachlatta.com/">
+    <link rel="icon" href="assets/app-icon.png" type="image/png">
+    <link rel="apple-touch-icon" href="assets/app-icon.png">
+    <link rel="preload" href="assets/demo.gif" as="image">
+    <link rel="license" href="https://github.com/zachlatta/freeflow/blob/main/LICENSE">
+    <link rel="help" href="https://github.com/zachlatta/freeflow#readme">
+    <link rel="alternate" type="text/plain" href="llms.txt" title="FreeFlow information for AI agents">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="FreeFlow">
+    <meta property="og:title" content="FreeFlow - Free Open Source Mac Dictation">
+    <meta property="og:description" content="A free and open source Mac alternative to Wispr Flow, Superwhisper, and Monologue. Dictate into any text field with context-aware cleanup and privacy-first API calls.">
+    <meta property="og:image" content="https://freeflow.zachlatta.com/assets/app-icon.png">
+    <meta property="og:image:alt" content="FreeFlow app icon">
+    <meta property="og:url" content="https://freeflow.zachlatta.com/">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="FreeFlow - Free Open Source Mac Dictation">
+    <meta name="twitter:description" content="Free open source Mac dictation with hold-to-talk, context-aware cleanup, custom vocabulary, and no FreeFlow server.">
+    <meta name="twitter:image" content="https://freeflow.zachlatta.com/assets/app-icon.png">
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://freeflow.zachlatta.com/#website",
+            "name": "FreeFlow",
+            "url": "https://freeflow.zachlatta.com/",
+            "description": "Free and open source macOS dictation app.",
+            "inLanguage": "en"
+          },
+          {
+            "@type": "WebPage",
+            "@id": "https://freeflow.zachlatta.com/#webpage",
+            "url": "https://freeflow.zachlatta.com/",
+            "name": "FreeFlow - Free Open Source Mac Dictation",
+            "description": "FreeFlow is a free, open source Mac dictation app with hold-to-talk shortcuts, context-aware cleanup, custom vocabulary, voice macros, and privacy-first API calls.",
+            "isPartOf": {
+              "@id": "https://freeflow.zachlatta.com/#website"
+            },
+            "about": {
+              "@id": "https://freeflow.zachlatta.com/#software"
+            },
+            "inLanguage": "en"
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://freeflow.zachlatta.com/#software",
+            "name": "FreeFlow",
+            "url": "https://freeflow.zachlatta.com/",
+            "alternateName": "FreeFlow Dictation",
+            "description": "FreeFlow is a free and open source macOS dictation app with customizable shortcuts, context-aware cleanup, custom vocabulary, voice macros, and privacy-first API calls.",
+            "applicationCategory": "ProductivityApplication",
+            "operatingSystem": "macOS",
+            "softwareRequirements": "macOS on Apple Silicon or Intel Macs",
+            "isAccessibleForFree": true,
+            "downloadUrl": "https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg",
+            "installUrl": "https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg",
+            "codeRepository": "https://github.com/zachlatta/freeflow",
+            "license": "https://github.com/zachlatta/freeflow/blob/main/LICENSE",
+            "image": "https://freeflow.zachlatta.com/assets/app-icon.png",
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD"
+            },
+            "featureList": [
+              "Hold-to-talk and tap-to-toggle dictation shortcuts",
+              "Context-aware transcript cleanup",
+              "Custom vocabulary",
+              "Voice macros",
+              "Configurable API base URL",
+              "No FreeFlow server"
+            ],
+            "sameAs": [
+              "https://github.com/zachlatta/freeflow"
+            ]
+          },
+          {
+            "@type": "HowTo",
+            "@id": "https://freeflow.zachlatta.com/#quick-start",
+            "name": "How to start using FreeFlow",
+            "step": [
+              {
+                "@type": "HowToStep",
+                "name": "Download FreeFlow",
+                "text": "Download the FreeFlow DMG for Mac.",
+                "url": "https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg"
+              },
+              {
+                "@type": "HowToStep",
+                "name": "Get a Groq API key",
+                "text": "Get a free Groq API key at groq.com."
+              },
+              {
+                "@type": "HowToStep",
+                "name": "Dictate into a text field",
+                "text": "Hold Fn to talk, or tap Command-Fn to start and stop dictation. FreeFlow pastes the cleaned text into the current text field."
+              }
+            ]
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://freeflow.zachlatta.com/#faq",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Why does FreeFlow use Groq?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Groq provides fast transcription and LLM responses for a smooth dictation experience. Local models currently introduce too much latency and can affect battery life."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Does FreeFlow store my data?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "There is no FreeFlow server, so FreeFlow does not store or retain your data. The only information that leaves your computer is sent through API calls to your configured transcription and LLM provider."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Can I customize FreeFlow?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. FreeFlow supports custom dictation shortcuts, custom vocabulary, custom cleanup prompts, voice macros, and a configurable API base URL."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+    <style>
+      :root {
+        --ink: #090b15;
+        --muted: #4f5160;
+        --purple: #6c4df6;
+        --purple-2: #9b74ff;
+        --line: #e6e7ec;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #fafafa;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", sans-serif;
+        letter-spacing: 0;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .hero {
+        position: relative;
+        min-height: 574px;
+        overflow: hidden;
+        color: white;
+        background:
+          radial-gradient(circle at 83% 20%, rgba(94, 68, 235, .42), transparent 31%),
+          radial-gradient(circle at 76% 100%, rgba(86, 73, 196, .42), transparent 31%),
+          radial-gradient(circle at 12% 51%, rgba(39, 59, 120, .22), transparent 34%),
+          linear-gradient(116deg, #030814 0%, #070b18 45%, #0b0c20 100%);
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        inset: auto 0 0;
+        height: 150px;
+        background: linear-gradient(to bottom, transparent, rgba(32, 38, 76, .38));
+        pointer-events: none;
+      }
+
+      .container {
+        position: relative;
+        z-index: 1;
+        width: min(950px, calc(100% - 48px));
+        margin: 0 auto;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 100px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 16px;
+        font-size: 31px;
+        font-weight: 760;
+      }
+
+      .app-icon {
+        width: 52px;
+        height: 52px;
+        border-radius: 14px;
+        box-shadow: 0 18px 42px rgba(101, 68, 255, .34);
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: rgba(255, 255, 255, .92);
+        font-size: 15px;
+        font-weight: 500;
+      }
+
+      .external {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .external svg {
+        width: 14px;
+        height: 14px;
+      }
+
+      .star-count {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 32px;
+        padding: 0 11px;
+        border: 1px solid rgba(255,255,255,.16);
+        border-radius: 16px;
+        background: rgba(255,255,255,.07);
+        color: rgba(255,255,255,.88);
+        font-size: 13px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .star-count svg {
+        width: 14px;
+        height: 14px;
+        color: #a98cff;
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: 430px 1fr;
+        gap: 54px;
+        align-items: start;
+        padding-top: 26px;
+      }
+
+      .hero-copy {
+        display: contents;
+      }
+
+      .hero-main {
+        grid-column: 1;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 84px;
+        line-height: .95;
+        font-weight: 820;
+        letter-spacing: 0;
+      }
+
+      .tagline {
+        margin: 24px 0 29px;
+        max-width: 438px;
+        color: rgba(255, 255, 255, .76);
+        font-size: 22.5px;
+        line-height: 1.34;
+        font-weight: 440;
+      }
+
+      .download {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 13px;
+        width: 388px;
+        height: 75px;
+        border-radius: 16px;
+        color: white;
+        background:
+          radial-gradient(circle at 23% 0%, rgba(255,255,255,.36), transparent 28%),
+          linear-gradient(135deg, #744dff 0%, #9c72ff 48%, #6744ef 100%);
+        box-shadow: 0 24px 65px rgba(96, 74, 255, .34), inset 0 1px 0 rgba(255,255,255,.25);
+        font-size: 21px;
+        font-weight: 760;
+      }
+
+      .download svg {
+        flex: 0 0 auto;
+      }
+
+      .compat {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 28px;
+        color: rgba(255, 255, 255, .88);
+        font-size: 15px;
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 35px;
+        padding: 0 10px;
+        border: 1px solid rgba(255, 255, 255, .42);
+        border-radius: 9px;
+        color: white;
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      .chip svg {
+        width: 16px;
+        height: 16px;
+      }
+
+      .credit {
+        grid-column: 1;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin-top: -30px;
+        color: rgba(255,255,255,.68);
+        font-size: 15px;
+      }
+
+      .credit svg {
+        width: 18px;
+        height: 18px;
+      }
+
+      .credit a {
+        color: #9c7cff;
+      }
+
+      .hero-visual {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        padding-top: 7px;
+      }
+
+      .hero-demo {
+        width: 466px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,.28);
+        border-radius: 13px;
+        background:
+          radial-gradient(circle at 78% 21%, rgba(122, 85, 255, .2), transparent 28%),
+          linear-gradient(145deg, rgba(45,47,65,.92), rgba(25,28,44,.92));
+        box-shadow: 0 32px 84px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08);
+        backdrop-filter: blur(18px);
+      }
+
+      .traffic {
+        display: flex;
+        gap: 10px;
+        padding: 14px 0 0 13px;
+      }
+
+      .dot {
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+      }
+
+      .red { background: #ff5f57; }
+      .yellow { background: #ffbd2e; }
+      .green { background: #28c840; }
+
+      .demo-media {
+        position: relative;
+        margin: 13px;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 9px;
+        background:
+          linear-gradient(145deg, rgba(255,255,255,.1), rgba(255,255,255,.03));
+        aspect-ratio: 600 / 327;
+        box-shadow: 0 18px 42px rgba(0,0,0,.2);
+      }
+
+      .demo-media img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .hero-demo-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 18px 16px;
+        color: rgba(255,255,255,.78);
+        font-size: 13px;
+      }
+
+      .shortcut-pills {
+        display: flex;
+        align-items: center;
+        overflow: hidden;
+        border: 1px solid rgba(255,255,255,.08);
+        border-radius: 18px;
+        background: rgba(255,255,255,.08);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+      }
+
+      .shortcut-pills span {
+        padding: 8px 12px;
+        white-space: nowrap;
+      }
+
+      .shortcut-pills span + span {
+        border-left: 1px solid rgba(255,255,255,.08);
+      }
+
+      .features {
+        background:
+          radial-gradient(circle at 50% -20%, rgba(105, 78, 255, .08), transparent 36%),
+          #fbfbfd;
+        border-top: 1px solid rgba(0,0,0,.08);
+      }
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        min-height: 236px;
+        padding-top: 24px;
+      }
+
+      .feature {
+        min-height: 176px;
+        padding: 0 10px;
+        text-align: center;
+        border-left: 1px solid #dddfe8;
+      }
+
+      .feature:first-child {
+        border-left: 0;
+      }
+
+      .feature svg {
+        width: 44px;
+        height: 44px;
+        color: #684be6;
+        stroke-width: 1.9;
+      }
+
+      .feature h3 {
+        margin: 14px 0 8px;
+        font-size: 16px;
+        line-height: 1.13;
+        font-weight: 790;
+      }
+
+      .feature p {
+        margin: 0 auto;
+        color: #434654;
+        font-size: 12px;
+        line-height: 1.28;
+      }
+
+      .quick {
+        padding: 36px 0 0;
+        background: #fbfbfd;
+      }
+
+      .quick-grid {
+        display: grid;
+        grid-template-columns: 318px 1fr;
+        gap: 45px;
+        align-items: start;
+      }
+
+      .quick h2 {
+        margin: 10px 0 22px;
+        font-size: 29px;
+        line-height: 1.08;
+        font-weight: 820;
+      }
+
+      .steps {
+        display: grid;
+        gap: 22px;
+      }
+
+      .step {
+        display: grid;
+        grid-template-columns: 28px 1fr;
+        gap: 10px;
+        color: #3d404d;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .num {
+        display: grid;
+        place-items: center;
+        width: 25px;
+        height: 25px;
+        border-radius: 50%;
+        color: white;
+        background: linear-gradient(135deg, #8064ff, #5740d7);
+        font-size: 15px;
+        font-weight: 780;
+      }
+
+      .quick a,
+      .cards a {
+        color: #5f42df;
+      }
+
+      .result-panel {
+        position: relative;
+        width: 566px;
+        min-height: 254px;
+        border: 1px solid #d7d8df;
+        border-radius: 13px;
+        background:
+          linear-gradient(180deg, #ffffff, #fbfbff);
+        overflow: hidden;
+        box-shadow: 0 18px 42px rgba(21, 24, 38, .12);
+      }
+
+      .result-panel::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto;
+        height: 36px;
+        border-bottom: 1px solid #eef0f3;
+        background: rgba(255,255,255,.86);
+      }
+
+      .result-chrome {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        height: 36px;
+        padding: 0 13px;
+      }
+
+      .result-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+
+      .result-content {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr);
+        gap: 14px;
+        align-items: start;
+        padding: 28px 24px 16px;
+      }
+
+      .result-block {
+        min-height: 134px;
+      }
+
+      .result-label {
+        display: inline-flex;
+        align-items: center;
+        height: 24px;
+        padding: 0 9px;
+        border-radius: 12px;
+        background: #f0edff;
+        color: #5f42df;
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .result-block p {
+        margin: 14px 0 0;
+        color: #222531;
+        font-size: 14px;
+        line-height: 1.48;
+      }
+
+      .result-block p strong {
+        font-weight: 760;
+      }
+
+      .result-block.muted p {
+        color: #666a77;
+      }
+
+      .result-arrow {
+        width: 32px;
+        height: 32px;
+        margin: 53px auto 0;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        color: white;
+        background: linear-gradient(135deg, #8064ff, #5740d7);
+        box-shadow: 0 12px 22px rgba(91, 65, 220, .26);
+      }
+
+      .result-tags {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 24px 24px;
+      }
+
+      .result-tags span {
+        display: inline-flex;
+        align-items: center;
+        height: 26px;
+        padding: 0 10px;
+        border: 1px solid #e6e3f7;
+        border-radius: 13px;
+        color: #5f42df;
+        background: #faf9ff;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .cards {
+        padding: 51px 0 18px;
+        background: #fbfbfd;
+      }
+
+      .card-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 13px;
+      }
+
+      .card {
+        min-height: 218px;
+        padding: 23px 20px 18px;
+        border: 1px solid #dedfe7;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 12px 30px rgba(28, 31, 45, .04);
+      }
+
+      .card-head {
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        min-height: 29px;
+      }
+
+      .card h3 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 780;
+      }
+
+      .card p {
+        margin: 12px 0 12px;
+        color: #4c4f5d;
+        font-size: 12.5px;
+        line-height: 1.32;
+      }
+
+      .card a {
+        font-size: 13px;
+        font-weight: 520;
+      }
+
+      .card-icon {
+        display: grid;
+        place-items: center;
+        width: 33px;
+        height: 33px;
+        color: #6547e9;
+      }
+
+      .card-icon.filled {
+        border-radius: 50%;
+        color: white;
+        background: linear-gradient(135deg, #8064ff, #5740d7);
+        font-weight: 800;
+        font-size: 20px;
+      }
+
+      .footer {
+        padding: 0 0 14px;
+        color: #8a8d98;
+        background: #fbfbfd;
+        text-align: center;
+        font-size: 12px;
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      @media (max-width: 860px) {
+        .hero {
+          min-height: auto;
+          padding-bottom: 44px;
+        }
+
+        .header {
+          height: 84px;
+        }
+
+        .nav {
+          gap: 16px;
+          font-size: 13px;
+        }
+
+        .hero-grid,
+        .quick-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-main,
+        .hero-visual,
+        .credit {
+          grid-column: 1;
+        }
+
+        .hero-main {
+          order: 1;
+        }
+
+        .hero-visual {
+          grid-row: auto;
+          order: 2;
+        }
+
+        .credit {
+          order: 3;
+          margin-top: 6px;
+        }
+
+        h1 {
+          font-size: 58px;
+        }
+
+        .download,
+        .hero-demo,
+        .result-panel {
+          width: 100%;
+        }
+
+        .feature-grid,
+        .card-grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+
+        .feature:nth-child(odd) {
+          border-left: 0;
+        }
+
+        .result-content {
+          grid-template-columns: 1fr;
+        }
+
+        .result-arrow {
+          position: static;
+          transform: none;
+          margin: -4px auto;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .container {
+          width: min(100% - 28px, 950px);
+        }
+
+        .brand .brand-name {
+          display: none;
+        }
+
+        .nav {
+          gap: 12px;
+        }
+
+        .hero-grid {
+          padding-top: 6px;
+        }
+
+        .tagline {
+          font-size: 20px;
+        }
+
+        .compat {
+          flex-wrap: wrap;
+        }
+
+        .hero-demo-footer {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .feature-grid,
+        .card-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .feature {
+          border-left: 0;
+          border-top: 1px solid var(--line);
+        }
+
+      }
+    </style>
+  </head>
+  <body>
+    <section class="hero">
+      <div class="container">
+        <header class="header">
+          <a class="brand" href="#" aria-label="FreeFlow home">
+            <img class="app-icon" src="assets/app-icon.png" width="52" height="52" alt="">
+            <span class="brand-name">FreeFlow</span>
+          </a>
+          <nav class="nav" aria-label="Primary">
+            <a class="external" href="https://github.com/zachlatta/freeflow">GitHub
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg>
+            </a>
+            <span class="star-count" title="GitHub stars">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m12 2 2.96 6 6.62.96-4.79 4.67 1.13 6.59L12 17.11l-5.92 3.11 1.13-6.59-4.79-4.67L9.04 8 12 2Z"/></svg>
+              <span id="github-stars" aria-live="polite">1,438 stars</span>
+            </span>
+          </nav>
+        </header>
+
+        <div class="hero-grid">
+          <div class="hero-copy">
+          <div class="hero-main">
+            <h1>FreeFlow</h1>
+            <p class="tagline">Free and open source alternative to<br>Wispr Flow, Superwhisper, and Monologue.</p>
+            <a class="download" href="https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg">
+              <svg width="35" height="35" viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M22.38 16.72c-.03-3.24 2.65-4.8 2.77-4.87-1.51-2.22-3.85-2.52-4.68-2.55-1.99-.2-3.88 1.17-4.89 1.17-1 0-2.55-1.14-4.2-1.11-2.16.03-4.15 1.25-5.26 3.18-2.25 3.9-.58 9.68 1.62 12.84 1.07 1.54 2.35 3.28 4.03 3.22 1.62-.06 2.23-1.04 4.18-1.04 1.96 0 2.5 1.04 4.21 1.01 1.74-.03 2.84-1.58 3.9-3.13 1.23-1.8 1.74-3.54 1.77-3.63-.04-.02-3.4-1.31-3.45-5.09ZM19.17 7.2c.89-1.08 1.49-2.58 1.32-4.08-1.28.05-2.83.85-3.75 1.93-.82.95-1.54 2.48-1.35 3.94 1.43.11 2.89-.72 3.78-1.79Z"/></svg>
+              <svg width="19" height="22" viewBox="0 0 18 22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 1v16"/><path d="m2 10 7 7 7-7"/></svg>
+              <span>Download FreeFlow.dmg</span>
+            </a>
+            <div class="compat">
+              <span>Works on all Macs (Apple Silicon + Intel)</span>
+              <span class="chip">
+                <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M22.38 16.72c-.03-3.24 2.65-4.8 2.77-4.87-1.51-2.22-3.85-2.52-4.68-2.55-1.99-.2-3.88 1.17-4.89 1.17-1 0-2.55-1.14-4.2-1.11-2.16.03-4.15 1.25-5.26 3.18-2.25 3.9-.58 9.68 1.62 12.84 1.07 1.54 2.35 3.28 4.03 3.22 1.62-.06 2.23-1.04 4.18-1.04 1.96 0 2.5 1.04 4.21 1.01 1.74-.03 2.84-1.58 3.9-3.13 1.23-1.8 1.74-3.54 1.77-3.63-.04-.02-3.4-1.31-3.45-5.09ZM19.17 7.2c.89-1.08 1.49-2.58 1.32-4.08-1.28.05-2.83.85-3.75 1.93-.82.95-1.54 2.48-1.35 3.94 1.43.11 2.89-.72 3.78-1.79Z"/></svg>M
+              </span>
+              <span class="chip">Intel</span>
+            </div>
+          </div>
+            <div class="credit">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78Z"/></svg>
+              <span>Thank you to <a href="https://github.com/marcbodea">@marcbodea</a> for maintaining FreeFlow!</span>
+            </div>
+          </div>
+
+          <div class="hero-visual">
+            <div class="hero-demo" id="demo" aria-label="FreeFlow demo">
+              <div class="traffic"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+              <div class="demo-media">
+                <img src="assets/demo.gif" width="600" height="327" fetchpriority="high" alt="FreeFlow dictating text into a Mac app">
+              </div>
+              <div class="hero-demo-footer">
+                <span>Dictate into any focused text field</span>
+                <div class="shortcut-pills"><span>Hold Fn</span><span>⌘ Fn toggle</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <main>
+      <section class="features" aria-label="Features">
+        <div class="container feature-grid">
+          <article class="feature">
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="38" height="28" rx="4"/><path d="M12 17h1M18 17h1M24 17h1M30 17h1M36 17h1M12 24h1M18 24h1M24 24h1M30 24h1M36 24h1M14 31h20"/></svg>
+            <h3>Custom shortcuts</h3>
+            <p>Customize hold-to-talk and tap-to-toggle shortcuts, including latching from hold mode into toggle mode.</p>
+          </article>
+          <article class="feature">
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 39 30 16"/><path d="m27 7 2 6 6 2-6 2-2 6-2-6-6-2 6-2 2-6ZM39 5l1.5 4.5L45 11l-4.5 1.5L39 17l-1.5-4.5L33 11l4.5-1.5L39 5ZM36 27l1.5 4.5L42 33l-4.5 1.5L36 39l-1.5-4.5L30 33l4.5-1.5L36 27Z"/></svg>
+            <h3>Context-aware cleanup</h3>
+            <p>Uses nearby app context to spell names, terms, and phrases correctly.</p>
+          </article>
+          <article class="feature">
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M24 15c-4-6-14-5-14 2v21c0-7 10-8 14-2 4-6 14-5 14 2V17c0-7-10-8-14-2Z"/><path d="M24 15v21"/></svg>
+            <h3>Custom vocabulary</h3>
+            <p>Add names, jargon, and project-specific words to preserve during cleanup.</p>
+          </article>
+          <article class="feature">
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 36h19a8 8 0 0 0 1-15 12 12 0 0 0-23-3A9 9 0 0 0 17 36Z"/></svg>
+            <h3>Configurable API base URL</h3>
+            <p>Use Groq by default, or point FreeFlow at compatible API endpoints.</p>
+          </article>
+          <article class="feature">
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 34c4-8 20-8 24 0"/><path d="M17 18a7 7 0 0 1 14 0c0 4-3 7-7 7s-7-3-7-7Z"/><path d="M9 19v7M39 19v7M14 12l-3-3M34 12l3-3"/></svg>
+            <h3>Voice Macros</h3>
+            <p>Define spoken commands that paste predefined text immediately.</p>
+          </article>
+          <article class="feature" id="privacy">
+            <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="12" y="21" width="24" height="18" rx="3"/><path d="M17 21v-7a7 7 0 0 1 14 0v7"/></svg>
+            <h3>Privacy first</h3>
+            <p>No FreeFlow server. Only API calls to your configured providers leave your Mac.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="quick">
+        <div class="container quick-grid">
+          <div>
+            <h2>Quick Start</h2>
+            <div class="steps">
+              <div class="step"><span class="num">1</span><span>Download the app using the button at the top of this page or <a href="https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg">click here</a>.</span></div>
+              <div class="step"><span class="num">2</span><span>Get a free Groq API key at <a href="https://groq.com/">groq.com</a>.</span></div>
+              <div class="step"><span class="num">3</span><span>Hold Fn to talk, or tap Command-Fn to start and stop dictation, and have whatever you say pasted into the current text field.</span></div>
+            </div>
+          </div>
+          <div class="result-panel" aria-label="FreeFlow cleanup example">
+            <div class="result-chrome"><span class="result-dot red"></span><span class="result-dot yellow"></span><span class="result-dot green"></span></div>
+            <div class="result-content">
+              <div class="result-block muted">
+                <span class="result-label">Raw dictation</span>
+                <p>hey um can you add uh zach latta to the launch notes and mention the grock api key setup</p>
+              </div>
+              <div class="result-arrow" aria-hidden="true">→</div>
+              <div class="result-block">
+                <span class="result-label">Cleaned output</span>
+                <p>Can you add <strong>Zach Latta</strong> to the launch notes and mention the <strong>Groq</strong> API key setup?</p>
+              </div>
+            </div>
+            <div class="result-tags" aria-label="Cleanup capabilities"><span>Fixes punctuation</span><span>Preserves names</span><span>Uses nearby context</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="cards" id="faq">
+        <div class="container card-grid">
+          <article class="card">
+            <div class="card-head"><span class="card-icon filled">?</span><h3>Why Groq?</h3></div>
+            <p>Groq provides extremely fast transcription and LLM responses (&lt;1s) for a smooth experience. Local models currently introduce too much latency (5-10s) and can impact battery life.</p>
+            <a href="#faq">Learn more in the FAQ →</a>
+          </article>
+          <article class="card">
+            <div class="card-head"><span class="card-icon"><svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="30" height="20" rx="3"/><path d="m12 14 5 4-5 4M20 23h7"/></svg></span><h3>Use another API endpoint</h3></div>
+            <p>Change the API base URL in settings when you have compatible transcription and chat endpoints.</p>
+            <a href="https://github.com/taciturnaxolotl">Thanks @taciturnaxolotl! 🙌</a>
+          </article>
+          <article class="card">
+            <div class="card-head"><span class="card-icon"><svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 10h26M5 18h26M5 26h26"/><circle cx="14" cy="10" r="3"/><circle cx="23" cy="18" r="3"/><circle cx="12" cy="26" r="3"/></svg></span><h3>Custom cleanup</h3></div>
+            <p>Prefer a more literal cleanup? Use a simpler prompt in the custom system prompt setting.</p>
+            <a href="https://github.com/zachlatta/freeflow#readme">View simple prompt →</a>
+          </article>
+          <article class="card">
+            <div class="card-head"><span class="card-icon"><svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 4 12 7v14l-12 7-12-7V11Z"/><path d="m6 11 12 7 12-7M18 18v14"/></svg></span><h3>Open source</h3></div>
+            <p>FreeFlow is and always will be free and open source, licensed under the MIT license.</p>
+            <a href="https://github.com/zachlatta/freeflow">View on GitHub →</a>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">© 2024 FreeFlow. Licensed under the MIT license.</footer>
+    <script>
+      (() => {
+        const starsEl = document.getElementById("github-stars");
+        if (!starsEl) return;
+
+        const cacheKey = "freeflow.githubStars";
+        const formatStars = (count) => {
+          if (!Number.isFinite(count)) return "Stars";
+          return count.toLocaleString();
+        };
+        const render = (count) => {
+          starsEl.textContent = `${formatStars(count)} stars`;
+        };
+
+        try {
+          const cached = JSON.parse(localStorage.getItem(cacheKey) || "null");
+          if (cached && Date.now() - cached.timestamp < 6 * 60 * 60 * 1000) {
+            render(cached.count);
+          }
+        } catch {}
+
+        fetch("https://api.github.com/repos/zachlatta/freeflow", {
+          headers: { "Accept": "application/vnd.github+json" }
+        })
+          .then((response) => response.ok ? response.json() : Promise.reject(new Error("GitHub request failed")))
+          .then((repo) => {
+            const count = Number(repo.stargazers_count);
+            if (!Number.isFinite(count)) return;
+            render(count);
+            try {
+              localStorage.setItem(cacheKey, JSON.stringify({ count, timestamp: Date.now() }));
+            } catch {}
+          })
+          .catch(() => {});
+      })();
+    </script>
+  </body>
+</html>

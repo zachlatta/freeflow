@@ -33,11 +33,29 @@ struct PipelineDebugPanelView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Pipeline Debug")
-                .font(.title3)
-            Text("Live data for the transcription + post-processing pipeline.")
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Pipeline Debug")
+                        .font(.title3)
+                    Text("Live data for the transcription + post-processing pipeline.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Export Test Case…") {
+                    exportTestCase()
+                }
                 .font(.body)
-                .foregroundStyle(.secondary)
+                .disabled(appState.pipelineHistory.first == nil)
+            }
         }
+    }
+
+    private func exportTestCase() {
+        guard let item = appState.pipelineHistory.first else { return }
+        TestCaseExporter.exportWithSavePanel(
+            item: item,
+            audioDirURL: AppState.audioStorageDirectory()
+        )
     }
 }
