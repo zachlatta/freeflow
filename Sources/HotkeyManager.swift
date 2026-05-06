@@ -4,6 +4,8 @@ final class HotkeyManager {
     private var localFlagsMonitor: Any?
     private var localKeyDownMonitor: Any?
     private var localKeyUpMonitor: Any?
+    private var localMouseDownMonitor: Any?
+    private var localMouseUpMonitor: Any?
     private var eventTap: CFMachPort?
     private var eventTapRunLoopSource: CFRunLoopSource?
 
@@ -13,6 +15,7 @@ final class HotkeyManager {
     )
     private var pressedKeyCodes: Set<UInt16> = []
     private var pressedModifierKeyCodes: Set<UInt16> = []
+    private var pressedMouseButtons: Set<Int> = []
     private var holdIsActive = false
     private var toggleIsActive = false
 
@@ -28,9 +31,13 @@ final class HotkeyManager {
         if let monitor = localFlagsMonitor { NSEvent.removeMonitor(monitor) }
         if let monitor = localKeyDownMonitor { NSEvent.removeMonitor(monitor) }
         if let monitor = localKeyUpMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = localMouseDownMonitor { NSEvent.removeMonitor(monitor) }
+        if let monitor = localMouseUpMonitor { NSEvent.removeMonitor(monitor) }
         localFlagsMonitor = nil
         localKeyDownMonitor = nil
         localKeyUpMonitor = nil
+        localMouseDownMonitor = nil
+        localMouseUpMonitor = nil
         if let source = eventTapRunLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
         }
@@ -41,6 +48,7 @@ final class HotkeyManager {
         eventTap = nil
         pressedKeyCodes.removeAll()
         pressedModifierKeyCodes.removeAll()
+        pressedMouseButtons.removeAll()
         holdIsActive = false
         toggleIsActive = false
     }
@@ -67,18 +75,40 @@ final class HotkeyManager {
             let shouldConsume = self?.handleKeyUp(event) ?? false
             return shouldConsume ? nil : event
         }
+
+        let mouseDownMask = NSEvent.EventTypeMask.leftMouseDown
+            .union(.rightMouseDown)
+            .union(.otherMouseDown)
+        localMouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseDownMask) { [weak self] event in
+            let shouldConsume = self?.handleMouseDown(event) ?? false
+            return shouldConsume ? nil : event
+        }
+        let mouseUpMask = NSEvent.EventTypeMask.leftMouseUp
+            .union(.rightMouseUp)
+            .union(.otherMouseUp)
+        localMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseUpMask) { [weak self] event in
+            let shouldConsume = self?.handleMouseUp(event) ?? false
+            return shouldConsume ? nil : event
+        }
     }
 
     var hasPressedShortcutInputs: Bool {
         pressedKeyCodes.contains(where: shortcutReferencesKeyCode)
             || pressedModifierKeyCodes.contains(where: shortcutReferencesModifierKeyCode)
+            || pressedMouseButtons.contains(where: shortcutReferencesMouseButton)
     }
 
     private func installEventTap() {
         let eventMask = [
             CGEventType.flagsChanged,
             CGEventType.keyDown,
-            CGEventType.keyUp
+            CGEventType.keyUp,
+            CGEventType.leftMouseDown,
+            CGEventType.leftMouseUp,
+            CGEventType.rightMouseDown,
+            CGEventType.rightMouseUp,
+            CGEventType.otherMouseDown,
+            CGEventType.otherMouseUp
         ].reduce(CGEventMask(0)) { partialResult, eventType in
             partialResult | (CGEventMask(1) << eventType.rawValue)
         }
@@ -136,6 +166,18 @@ final class HotkeyManager {
             }
 
             return shouldConsume ? nil : Unmanaged.passUnretained(event)
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            guard let nsEvent = NSEvent(cgEvent: event) else {
+                return Unmanaged.passUnretained(event)
+            }
+            let shouldConsume = handleMouseDown(nsEvent)
+            return shouldConsume ? nil : Unmanaged.passUnretained(event)
+        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            guard let nsEvent = NSEvent(cgEvent: event) else {
+                return Unmanaged.passUnretained(event)
+            }
+            let shouldConsume = handleMouseUp(nsEvent)
+            return shouldConsume ? nil : Unmanaged.passUnretained(event)
         default:
             return Unmanaged.passUnretained(event)
         }
@@ -145,7 +187,8 @@ final class HotkeyManager {
         let shouldConsumeBefore = shouldConsumeModifierEvent(
             for: event.keyCode,
             pressedKeys: pressedKeyCodes,
-            pressedModifiers: pressedModifierKeyCodes
+            pressedModifiers: pressedModifierKeyCodes,
+            pressedMouse: pressedMouseButtons
         )
 
         if ShortcutBinding.modifierKeyCodes.contains(event.keyCode) {
@@ -161,7 +204,8 @@ final class HotkeyManager {
         let shouldConsumeAfter = shouldConsumeModifierEvent(
             for: event.keyCode,
             pressedKeys: pressedKeyCodes,
-            pressedModifiers: pressedModifierKeyCodes
+            pressedModifiers: pressedModifierKeyCodes,
+            pressedMouse: pressedMouseButtons
         )
         evaluateActiveBindings()
         return shouldConsumeBefore || shouldConsumeAfter
@@ -173,7 +217,8 @@ final class HotkeyManager {
         let shouldConsumeBefore = shouldConsumeKeyEvent(
             for: event.keyCode,
             pressedKeys: pressedKeyCodes,
-            pressedModifiers: pressedModifierKeyCodes
+            pressedModifiers: pressedModifierKeyCodes,
+            pressedMouse: pressedMouseButtons
         )
         guard !event.isARepeat else { return shouldConsumeBefore }
 
@@ -184,7 +229,8 @@ final class HotkeyManager {
         let shouldConsumeAfter = shouldConsumeKeyEvent(
             for: event.keyCode,
             pressedKeys: pressedKeyCodes,
-            pressedModifiers: pressedModifierKeyCodes
+            pressedModifiers: pressedModifierKeyCodes,
+            pressedMouse: pressedMouseButtons
         )
         evaluateActiveBindings()
         return shouldConsumeBefore || shouldConsumeAfter
@@ -196,7 +242,8 @@ final class HotkeyManager {
         let shouldConsumeBefore = shouldConsumeKeyEvent(
             for: event.keyCode,
             pressedKeys: pressedKeyCodes,
-            pressedModifiers: pressedModifierKeyCodes
+            pressedModifiers: pressedModifierKeyCodes,
+            pressedMouse: pressedMouseButtons
         )
 
         var updatedKeyCodes = pressedKeyCodes
@@ -205,6 +252,53 @@ final class HotkeyManager {
 
         let shouldConsumeAfter = shouldConsumeKeyEvent(
             for: event.keyCode,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes,
+            pressedMouse: pressedMouseButtons
+        )
+        evaluateActiveBindings()
+        return shouldConsumeBefore || shouldConsumeAfter
+    }
+
+    private func handleMouseDown(_ event: NSEvent) -> Bool {
+        let button = event.buttonNumber
+        let shouldConsumeBefore = shouldConsumeMouseEvent(
+            for: button,
+            pressedMouse: pressedMouseButtons,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
+
+        var updated = pressedMouseButtons
+        updated.insert(button)
+        pressedMouseButtons = updated
+
+        let shouldConsumeAfter = shouldConsumeMouseEvent(
+            for: button,
+            pressedMouse: pressedMouseButtons,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
+        evaluateActiveBindings()
+        return shouldConsumeBefore || shouldConsumeAfter
+    }
+
+    private func handleMouseUp(_ event: NSEvent) -> Bool {
+        let button = event.buttonNumber
+        let shouldConsumeBefore = shouldConsumeMouseEvent(
+            for: button,
+            pressedMouse: pressedMouseButtons,
+            pressedKeys: pressedKeyCodes,
+            pressedModifiers: pressedModifierKeyCodes
+        )
+
+        var updated = pressedMouseButtons
+        updated.remove(button)
+        pressedMouseButtons = updated
+
+        let shouldConsumeAfter = shouldConsumeMouseEvent(
+            for: button,
+            pressedMouse: pressedMouseButtons,
             pressedKeys: pressedKeyCodes,
             pressedModifiers: pressedModifierKeyCodes
         )
@@ -261,14 +355,16 @@ final class HotkeyManager {
         bindingIsActive(
             binding,
             pressedKeys: pressedKeyCodes,
-            pressedModifiers: pressedModifierKeyCodes
+            pressedModifiers: pressedModifierKeyCodes,
+            pressedMouse: pressedMouseButtons
         )
     }
 
     private func bindingIsActive(
         _ binding: ShortcutBinding,
         pressedKeys: Set<UInt16>,
-        pressedModifiers: Set<UInt16>
+        pressedModifiers: Set<UInt16>,
+        pressedMouse: Set<Int>
     ) -> Bool {
         guard !binding.isDisabled else { return false }
         let activeModifiers = currentModifiers(for: pressedModifiers)
@@ -280,9 +376,23 @@ final class HotkeyManager {
         case .disabled:
             return false
         case .key:
-            return pressedKeys.contains(binding.keyCode)
+            guard pressedKeys.contains(binding.keyCode) else { return false }
+            if let ck = binding.chordKeyCode {
+                guard pressedKeys.contains(ck) else { return false }
+            }
+            if let cm = binding.chordMouseButton {
+                guard cm != 0, pressedMouse.contains(Int(cm)) else { return false }
+            }
+            return true
         case .modifierKey:
             return pressedModifiers.contains(binding.keyCode)
+        case .mouseButton:
+            guard binding.keyCode != 0 else { return false }
+            guard pressedMouse.contains(Int(binding.keyCode)) else { return false }
+            if let ck = binding.chordKeyCode {
+                guard pressedKeys.contains(ck) else { return false }
+            }
+            return true
         }
     }
 
@@ -313,20 +423,33 @@ final class HotkeyManager {
     private func shouldConsumeKeyEvent(
         for keyCode: UInt16,
         pressedKeys: Set<UInt16>,
-        pressedModifiers: Set<UInt16>
+        pressedModifiers: Set<UInt16>,
+        pressedMouse: Set<Int>
     ) -> Bool {
-        relevantBindings(for: keyCode, kind: .key).contains {
-            bindingIsActive($0, pressedKeys: pressedKeys, pressedModifiers: pressedModifiers)
+        relevantKeyBindings(for: keyCode).contains {
+            bindingIsActive($0, pressedKeys: pressedKeys, pressedModifiers: pressedModifiers, pressedMouse: pressedMouse)
         }
     }
 
     private func shouldConsumeModifierEvent(
         for keyCode: UInt16,
         pressedKeys: Set<UInt16>,
-        pressedModifiers: Set<UInt16>
+        pressedModifiers: Set<UInt16>,
+        pressedMouse: Set<Int>
     ) -> Bool {
         relevantBindings(for: keyCode, kind: .modifierKey).contains {
-            bindingIsActive($0, pressedKeys: pressedKeys, pressedModifiers: pressedModifiers)
+            bindingIsActive($0, pressedKeys: pressedKeys, pressedModifiers: pressedModifiers, pressedMouse: pressedMouse)
+        }
+    }
+
+    private func shouldConsumeMouseEvent(
+        for button: Int,
+        pressedMouse: Set<Int>,
+        pressedKeys: Set<UInt16>,
+        pressedModifiers: Set<UInt16>
+    ) -> Bool {
+        relevantMouseBindings(for: button).contains {
+            bindingIsActive($0, pressedKeys: pressedKeys, pressedModifiers: pressedModifiers, pressedMouse: pressedMouse)
         }
     }
 
@@ -336,9 +459,39 @@ final class HotkeyManager {
         }
     }
 
+    /// Key events that participate in `.key` shortcuts (primary or chord) or in `.mouseButton` keyboard partners.
+    private func relevantKeyBindings(for keyCode: UInt16) -> [ShortcutBinding] {
+        [configuration.hold, configuration.toggle].filter { binding in
+            if binding.kind == .key {
+                return binding.keyCode == keyCode || binding.chordKeyCode == keyCode
+            }
+            if binding.kind == .mouseButton, let ck = binding.chordKeyCode {
+                return ck == keyCode
+            }
+            return false
+        }
+    }
+
+    /// Mouse buttons that participate in `.mouseButton` shortcuts or `.key` shortcuts with a mouse chord.
+    private func relevantMouseBindings(for button: Int) -> [ShortcutBinding] {
+        let b = UInt16(button)
+        return [configuration.hold, configuration.toggle].filter { binding in
+            if binding.kind == .mouseButton, binding.keyCode != 0 {
+                return binding.keyCode == b
+            }
+            if binding.kind == .key, let cm = binding.chordMouseButton, cm != 0 {
+                return cm == b
+            }
+            return false
+        }
+    }
+
     private func shortcutReferencesKeyCode(_ keyCode: UInt16) -> Bool {
-        configuration.hold.kind == .key && configuration.hold.keyCode == keyCode
-            || configuration.toggle.kind == .key && configuration.toggle.keyCode == keyCode
+        !relevantKeyBindings(for: keyCode).isEmpty
+    }
+
+    private func shortcutReferencesMouseButton(_ button: Int) -> Bool {
+        !relevantMouseBindings(for: button).isEmpty
     }
 
     private func shortcutReferencesModifierKeyCode(_ keyCode: UInt16) -> Bool {

@@ -48,6 +48,7 @@ enum ShortcutBindingKind: String, Codable {
     case disabled
     case key
     case modifierKey
+    case mouseButton
 }
 
 enum RecordingTriggerMode: String, Codable {
@@ -131,20 +132,48 @@ enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-struct ShortcutBinding: Codable, Hashable, Identifiable {
+struct ShortcutBinding: Hashable, Identifiable {
     let keyCode: UInt16
     let keyDisplay: String
     let modifiers: ShortcutModifiers
     let kind: ShortcutBindingKind
     let preset: ShortcutPreset?
+    /// Secondary key that must be held (e.g. two-key chord, or keyboard partner for a mouse shortcut).
+    let chordKeyCode: UInt16?
+    /// Secondary mouse button that must be held (e.g. key + side button chord).
+    let chordMouseButton: UInt16?
+
+    init(
+        keyCode: UInt16,
+        keyDisplay: String,
+        modifiers: ShortcutModifiers,
+        kind: ShortcutBindingKind,
+        preset: ShortcutPreset?,
+        chordKeyCode: UInt16? = nil,
+        chordMouseButton: UInt16? = nil
+    ) {
+        self.keyCode = keyCode
+        self.keyDisplay = keyDisplay
+        self.modifiers = modifiers
+        self.kind = kind
+        self.preset = preset
+        self.chordKeyCode = chordKeyCode
+        self.chordMouseButton = chordMouseButton
+    }
 
     var id: String {
-        "\(kind.rawValue):\(keyCode):\(modifiers.rawValue):\(preset?.rawValue ?? "custom")"
+        "\(kind.rawValue):\(keyCode):\(modifiers.rawValue):\(chordKeyCode.map(String.init) ?? ""):\(chordMouseButton.map(String.init) ?? ""):\(preset?.rawValue ?? "custom")"
     }
 
     var displayName: String {
         if isDisabled { return "Disabled" }
-        let parts = modifiers.orderedDisplayNames + [keyDisplay]
+        var parts = modifiers.orderedDisplayNames + [keyDisplay]
+        if let ck = chordKeyCode {
+            parts.append(Self.displayLabel(for: ck))
+        }
+        if let cm = chordMouseButton {
+            parts.append(Self.mouseButtonDisplayLabel(button: Int(cm)))
+        }
         return parts.joined(separator: " + ")
     }
 
@@ -161,7 +190,10 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
     }
 
     var specificityScore: Int {
-        modifiers.orderedDisplayNames.count
+        var n = modifiers.orderedDisplayNames.count
+        if chordKeyCode != nil { n += 1 }
+        if chordMouseButton != nil { n += 1 }
+        return n
     }
 
     var usesFnKey: Bool {
@@ -176,7 +208,9 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
             keyDisplay: keyDisplay,
             modifiers: modifiers.union(extraModifiers),
             kind: kind,
-            preset: preset
+            preset: preset,
+            chordKeyCode: chordKeyCode,
+            chordMouseButton: chordMouseButton
         )
     }
 
@@ -185,7 +219,9 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
         keyDisplay: "Disabled",
         modifiers: [],
         kind: .disabled,
-        preset: nil
+        preset: nil,
+        chordKeyCode: nil,
+        chordMouseButton: nil
     )
     static let defaultHold = ShortcutPreset.fnKey.binding
     static let defaultToggle = ShortcutPreset.fnKey.binding.withAddedModifiers(.command)
@@ -202,8 +238,106 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
             keyDisplay: label,
             modifiers: ShortcutModifiers(eventFlags: event.modifierFlags),
             kind: .key,
-            preset: nil
+            preset: nil,
+            chordKeyCode: nil,
+            chordMouseButton: nil
         )
+    }
+
+    static func from(mouseEvent: NSEvent) -> ShortcutBinding? {
+        let mouseDownTypes: Set<NSEvent.EventType> = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        guard mouseDownTypes.contains(mouseEvent.type) else { return nil }
+        let button = mouseEvent.buttonNumber
+        guard button >= 0, button <= 31 else { return nil }
+        // Left click would steal normal UI interaction (e.g. Done) and isn't useful globally.
+        guard button != 0 else { return nil }
+        return ShortcutBinding(
+            keyCode: UInt16(button),
+            keyDisplay: mouseButtonDisplayLabel(button: button),
+            modifiers: ShortcutModifiers(eventFlags: mouseEvent.modifierFlags),
+            kind: .mouseButton,
+            preset: nil,
+            chordKeyCode: nil,
+            chordMouseButton: nil
+        )
+    }
+
+    /// Builds chords from simultaneous keys / mouse buttons (used while recording a custom shortcut).
+    static func fromCaptureState(
+        pressedKeys: Set<UInt16>,
+        pressedMouse: Set<Int>,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> ShortcutBinding? {
+        let mods = ShortcutModifiers(eventFlags: modifierFlags)
+        let nonModKeys = pressedKeys.filter { !modifierKeyCodes.contains($0) }
+        let mouseNonLeft = pressedMouse.filter { $0 != 0 }
+
+        if let mb = mouseNonLeft.sorted().first, !nonModKeys.isEmpty {
+            let sortedKeys = nonModKeys.sorted()
+            let partner = sortedKeys[0]
+            if sortedKeys.count > 1 { return nil }
+            return ShortcutBinding(
+                keyCode: UInt16(mb),
+                keyDisplay: mouseButtonDisplayLabel(button: mb),
+                modifiers: mods,
+                kind: .mouseButton,
+                preset: nil,
+                chordKeyCode: partner,
+                chordMouseButton: nil
+            )
+        }
+
+        if mouseNonLeft.isEmpty && nonModKeys.count >= 2 {
+            let sorted = nonModKeys.sorted()
+            let a = sorted[0], b = sorted[1]
+            if nonModKeys.count > 2 { return nil }
+            return ShortcutBinding(
+                keyCode: a,
+                keyDisplay: displayLabel(for: a),
+                modifiers: mods,
+                kind: .key,
+                preset: nil,
+                chordKeyCode: b,
+                chordMouseButton: nil
+            )
+        }
+
+        if nonModKeys.count == 1, mouseNonLeft.isEmpty {
+            let k = nonModKeys.first!
+            return ShortcutBinding(
+                keyCode: k,
+                keyDisplay: displayLabel(for: k),
+                modifiers: mods,
+                kind: .key,
+                preset: nil,
+                chordKeyCode: nil,
+                chordMouseButton: nil
+            )
+        }
+
+        if mouseNonLeft.count == 1, nonModKeys.isEmpty {
+            let mb = mouseNonLeft.first!
+            return ShortcutBinding(
+                keyCode: UInt16(mb),
+                keyDisplay: mouseButtonDisplayLabel(button: mb),
+                modifiers: mods,
+                kind: .mouseButton,
+                preset: nil,
+                chordKeyCode: nil,
+                chordMouseButton: nil
+            )
+        }
+
+        return nil
+    }
+
+    static func mouseButtonDisplayLabel(button: Int) -> String {
+        switch button {
+        case 0: return "Left Click"
+        case 1: return "Right Click"
+        case 2: return "Middle Click"
+        default: return "Mouse Button \(button + 1)"
+        }
     }
 
     static func fromModifierKeyCode(
@@ -232,7 +366,9 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
             keyDisplay: modifierDisplayLabel(for: keyCode),
             modifiers: extraModifiers,
             kind: .modifierKey,
-            preset: nil
+            preset: nil,
+            chordKeyCode: nil,
+            chordMouseButton: nil
         )
     }
 
@@ -362,4 +498,32 @@ struct ShortcutBinding: Codable, Hashable, Identifiable {
         80: "F19",
         90: "F20"
     ]
+}
+
+extension ShortcutBinding: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case keyCode, keyDisplay, modifiers, kind, preset, chordKeyCode, chordMouseButton
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        keyCode = try c.decode(UInt16.self, forKey: .keyCode)
+        keyDisplay = try c.decode(String.self, forKey: .keyDisplay)
+        modifiers = try c.decode(ShortcutModifiers.self, forKey: .modifiers)
+        kind = try c.decode(ShortcutBindingKind.self, forKey: .kind)
+        preset = try c.decodeIfPresent(ShortcutPreset.self, forKey: .preset)
+        chordKeyCode = try c.decodeIfPresent(UInt16.self, forKey: .chordKeyCode)
+        chordMouseButton = try c.decodeIfPresent(UInt16.self, forKey: .chordMouseButton)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(keyCode, forKey: .keyCode)
+        try c.encode(keyDisplay, forKey: .keyDisplay)
+        try c.encode(modifiers, forKey: .modifiers)
+        try c.encode(kind, forKey: .kind)
+        try c.encodeIfPresent(preset, forKey: .preset)
+        try c.encodeIfPresent(chordKeyCode, forKey: .chordKeyCode)
+        try c.encodeIfPresent(chordMouseButton, forKey: .chordMouseButton)
+    }
 }

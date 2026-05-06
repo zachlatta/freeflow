@@ -50,7 +50,7 @@ struct DictationShortcutEditor: View {
                 }
             )
 
-            Text("Custom shortcuts can use regular keys, modifier-only shortcuts, or modifier combinations.")
+            Text("Custom shortcuts can use modifier-only or modifier combos, extra mouse buttons, two keys together, or a mouse button plus a key (e.g. middle-click + Space). Left click is not allowed.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -149,8 +149,13 @@ private struct ShortcutCaptureRow: View {
     let onCapture: (ShortcutBinding) -> Void
 
     @State private var localKeyMonitor: Any?
+    @State private var localKeyUpMonitor: Any?
     @State private var localFlagsMonitor: Any?
+    @State private var localMouseMonitor: Any?
+    @State private var localMouseUpMonitor: Any?
     @State private var pressedModifierKeyCodes: Set<UInt16> = []
+    @State private var pressedCaptureKeys: Set<UInt16> = []
+    @State private var pressedCaptureMouse: Set<Int> = []
     @State private var currentBinding: ShortcutBinding?
 
     var body: some View {
@@ -209,7 +214,7 @@ private struct ShortcutCaptureRow: View {
             if isCapturing {
                 Label(
                     currentBinding == nil
-                        ? "Press and hold the shortcut you want."
+                        ? "Hold the combo you want (e.g. middle-click + Space), then Enter or Done."
                         : "Press Esc or Enter to save.",
                     systemImage: "keyboard"
                 )
@@ -226,6 +231,8 @@ private struct ShortcutCaptureRow: View {
         stopCapture(clearCaptureState: false)
         isCapturing = true
         pressedModifierKeyCodes.removeAll()
+        pressedCaptureKeys.removeAll()
+        pressedCaptureMouse.removeAll()
         currentBinding = nil
 
         localFlagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
@@ -236,14 +243,7 @@ private struct ShortcutCaptureRow: View {
                     pressedModifierKeyCodes.insert(event.keyCode)
                 }
             }
-
-            if let binding = ShortcutBinding.fromModifierKeyCode(
-                event.keyCode,
-                pressedModifierKeyCodes: pressedModifierKeyCodes,
-                allowBareModifier: true
-            ) {
-                currentBinding = binding
-            }
+            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: event.keyCode)
             return nil
         }
 
@@ -264,13 +264,64 @@ private struct ShortcutCaptureRow: View {
                 return nil
             }
 
-            guard let binding = ShortcutBinding.from(event: event) else {
-                return nil
-            }
-
-            currentBinding = binding
+            pressedCaptureKeys.insert(event.keyCode)
+            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: nil)
             return nil
         }
+
+        localKeyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { event in
+            pressedCaptureKeys.remove(event.keyCode)
+            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: nil)
+            return event
+        }
+
+        let mouseMask = NSEvent.EventTypeMask.leftMouseDown
+            .union(.rightMouseDown)
+            .union(.otherMouseDown)
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseMask) { event in
+            let button = event.buttonNumber
+            guard button != 0 else { return event }
+            pressedCaptureMouse.insert(button)
+            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: nil)
+            return nil
+        }
+
+        let mouseUpMask = NSEvent.EventTypeMask.leftMouseUp
+            .union(.rightMouseUp)
+            .union(.otherMouseUp)
+        localMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseUpMask) { event in
+            pressedCaptureMouse.remove(event.buttonNumber)
+            refreshCaptureBinding(modifierFlags: event.modifierFlags, flagsEventKeyCode: nil)
+            return event
+        }
+    }
+
+    private func refreshCaptureBinding(modifierFlags: NSEvent.ModifierFlags, flagsEventKeyCode: UInt16?) {
+        if let chord = ShortcutBinding.fromCaptureState(
+            pressedKeys: pressedCaptureKeys,
+            pressedMouse: pressedCaptureMouse,
+            modifierFlags: modifierFlags
+        ) {
+            currentBinding = chord
+            return
+        }
+
+        let nonMod = pressedCaptureKeys.filter { !ShortcutBinding.modifierKeyCodes.contains($0) }
+        if nonMod.isEmpty && pressedCaptureMouse.isEmpty {
+            if let kc = flagsEventKeyCode,
+               let binding = ShortcutBinding.fromModifierKeyCode(
+                   kc,
+                   pressedModifierKeyCodes: pressedModifierKeyCodes,
+                   allowBareModifier: true
+               ) {
+                currentBinding = binding
+            } else {
+                currentBinding = nil
+            }
+            return
+        }
+
+        currentBinding = nil
     }
 
     private func finishCapture() {
@@ -291,11 +342,25 @@ private struct ShortcutCaptureRow: View {
             NSEvent.removeMonitor(monitor)
             localKeyMonitor = nil
         }
+        if let monitor = localKeyUpMonitor {
+            NSEvent.removeMonitor(monitor)
+            localKeyUpMonitor = nil
+        }
         if let monitor = localFlagsMonitor {
             NSEvent.removeMonitor(monitor)
             localFlagsMonitor = nil
         }
+        if let monitor = localMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMouseMonitor = nil
+        }
+        if let monitor = localMouseUpMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMouseUpMonitor = nil
+        }
         pressedModifierKeyCodes.removeAll()
+        pressedCaptureKeys.removeAll()
+        pressedCaptureMouse.removeAll()
         currentBinding = nil
         if clearCaptureState {
             isCapturing = false
