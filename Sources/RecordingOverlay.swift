@@ -300,8 +300,13 @@ final class RecordingOverlayManager {
         }
 
         let width = overlayWidth
-        let overlap = screenHasNotch ? notchOverlap : 0
-        let height: CGFloat = 38 + overlap
+        let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
+        // Compact mode: overlay sits flush with the menu bar on every display.
+        // notchOverlap equals the menu-bar height on non-notched screens too,
+        // so zero protrusion is universal — not notch-only. The legacy
+        // 38pt drop-down pill remains available when use_compact_overlay
+        // is explicitly toggled off.
+        let height: CGFloat = useCompact ? notchOverlap : 38 + (screenHasNotch ? notchOverlap : 0)
         let x = screen.frame.midX - width / 2
         let y = screen.frame.maxY - height
         return NSRect(x: x, y: y, width: width, height: height)
@@ -396,10 +401,23 @@ struct WingedRecordingView: View {
                         InitializingDotsView()
                             .transition(.opacity)
                     } else if showsLiveRecordingContent {
-                        CompactWaveformView(
-                            audioLevel: state.audioLevel,
-                            showsActivityPulse: state.phase == .recording
-                        )
+                        // Command-mode pencil sits directly above and centered
+                        // over the compact waveform inside the same wing
+                        // rectangle. Closes the gap between pill and winged
+                        // layouts: pill users already see a pencil during
+                        // command-mode dictation; winged users now do too.
+                        VStack(spacing: 1) {
+                            if state.isCommandMode {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(.white.opacity(0.92))
+                                    .transition(.opacity)
+                            }
+                            CompactWaveformView(
+                                audioLevel: state.audioLevel,
+                                showsActivityPulse: state.phase == .recording
+                            )
+                        }
                         .transition(.opacity)
                     } else {
                         CompactProcessingIndicatorView()
