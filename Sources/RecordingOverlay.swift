@@ -9,6 +9,7 @@ final class RecordingOverlayState: ObservableObject {
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
     @Published var isCommandMode = false
     @Published var updateVersion: String = ""
+    @Published var errorMessage: String?
 }
 
 enum OverlayPhase {
@@ -145,6 +146,40 @@ final class RecordingOverlayManager {
         }
     }
 
+    /// Maximum length of an in-pill error message. Anything longer is
+    /// truncated with an ellipsis to keep the pill from stretching across
+    /// the menu bar; the full text remains available in `os_log` for
+    /// forensic review.
+    private static let maxToastMessageLength = 90
+
+    /// Surface a transient error in the menu-bar pill. The pill resizes to
+    /// fit the message (subject to the truncation cap), holds for a few
+    /// seconds, then dismisses. Intended for non-fatal user-facing errors
+    /// that previously only landed in `os_log` — rate limits, network
+    /// failures, permission gaps, etc.
+    func showError(_ message: String) {
+        let truncated: String = {
+            if message.count <= Self.maxToastMessageLength { return message }
+            let cutoff = message.index(message.startIndex, offsetBy: Self.maxToastMessageLength - 1)
+            return String(message[..<cutoff]) + "…"
+        }()
+        DispatchQueue.main.async {
+            self.overlayState.errorMessage = truncated
+            self.lockedOverlayWidth = nil
+            self.overlayState.phase = .feedback
+            self.showOverlayPanel(animatedResize: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
+                guard let self else { return }
+                guard self.overlayState.phase == .feedback,
+                      self.overlayState.errorMessage == truncated else {
+                    return
+                }
+                self.overlayState.errorMessage = nil
+                self.dismissAll()
+            }
+        }
+    }
+
     func showUpdateAvailable(version: String) {
         DispatchQueue.main.async {
             self.lockedOverlayWidth = nil
@@ -255,7 +290,19 @@ final class RecordingOverlayManager {
         }
 
         if overlayState.phase == .feedback {
-            let feedbackWidth: CGFloat = 92
+            // Error toasts size to the message length so short messages do
+            // not get the same wide pill as long ones. ~6.8pt per character
+            // plus 60pt of icon and padding chrome, clamped to 180-420pt so
+            // very short messages stay readable and very long ones do not
+            // stretch the pill across the menu bar. Bare failure-X marker
+            // (no message) keeps the original 92pt.
+            let feedbackWidth: CGFloat = {
+                guard let msg = overlayState.errorMessage, !msg.isEmpty else {
+                    return 92
+                }
+                let estimated = CGFloat(msg.count) * 6.8 + 60
+                return min(420, max(180, estimated))
+            }()
             guard screenHasNotch else { return feedbackWidth }
             return max(notchWidth, feedbackWidth)
         }
@@ -523,7 +570,9 @@ struct RecordingOverlayView: View {
 
     var body: some View {
         Group {
-            if state.phase == .feedback {
+            if state.phase == .feedback, let message = state.errorMessage {
+                ErrorOverlayView(message: message)
+            } else if state.phase == .feedback {
                 FailureIndicatorView()
             } else if state.phase == .updateAvailable {
                 UpdateAvailableOverlayView(onPress: onUpdateOverlayPressed)
@@ -602,6 +651,27 @@ struct FailureIndicatorView: View {
             .frame(width: 20, height: 20)
             .background(Circle().fill(Color.red.opacity(0.92)))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// In-pill error toast. Red exclamation icon plus the message text,
+/// rendered inside the standard menu-bar pill. Sized by the manager's
+/// `overlayWidth` based on message length.
+struct ErrorOverlayView: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Color.red.opacity(0.92))
+            Text(message)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 }
 
