@@ -1391,7 +1391,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     var usesFnShortcut: Bool {
-        holdShortcut.usesFnKey || toggleShortcut.usesFnKey
+        holdShortcut.usesFnKey || toggleShortcut.usesFnKey || copyAgainShortcut.usesFnKey
     }
 
     var hasEnabledHoldShortcut: Bool {
@@ -1488,6 +1488,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
             if binding.conflicts(with: toggleShortcut) {
                 return "Paste Again cannot share a shortcut with Tap to Toggle."
             }
+            if isCommandModeEnabled, commandModeStyle == .manual,
+               bindingCollides(binding, with: commandModeManualModifier) {
+                return "Paste Again cannot share the Edit Mode modifier."
+            }
         }
 
         switch role {
@@ -1514,10 +1518,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func commandModeManualModifierCollisionMessage(
         for modifier: CommandModeManualModifier,
         holdBinding: ShortcutBinding? = nil,
-        toggleBinding: ShortcutBinding? = nil
+        toggleBinding: ShortcutBinding? = nil,
+        copyAgainBinding: ShortcutBinding? = nil
     ) -> String? {
         let holdBinding = holdBinding ?? holdShortcut
         let toggleBinding = toggleBinding ?? toggleShortcut
+        let copyAgainBinding = copyAgainBinding ?? copyAgainShortcut
         let manualModifier = modifier.shortcutModifier
 
         if !holdBinding.isDisabled && holdBinding.modifiers.contains(manualModifier) {
@@ -1525,6 +1531,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
         if !toggleBinding.isDisabled && toggleBinding.modifiers.contains(manualModifier) {
             return "That modifier is already part of the tap shortcut."
+        }
+        if !copyAgainBinding.isDisabled && copyAgainBinding.modifiers.contains(manualModifier) {
+            return "That modifier is already part of the Paste Again shortcut."
         }
         // Modifier-only bindings carry identity in keyCode, not modifiers.
         if !holdBinding.isDisabled,
@@ -1539,8 +1548,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
            bindingModifier == manualModifier {
             return "That modifier is already the tap shortcut."
         }
+        if !copyAgainBinding.isDisabled,
+           copyAgainBinding.kind == .modifierKey,
+           let bindingModifier = ShortcutBinding.modifier(forKeyCode: copyAgainBinding.keyCode),
+           bindingModifier == manualModifier {
+            return "That modifier is already the Paste Again shortcut."
+        }
 
         return nil
+    }
+
+    private func bindingCollides(_ binding: ShortcutBinding, with modifier: CommandModeManualModifier) -> Bool {
+        guard !binding.isDisabled else { return false }
+        let manualModifier = modifier.shortcutModifier
+        if binding.modifiers.contains(manualModifier) { return true }
+        if binding.kind == .modifierKey,
+           let bindingModifier = ShortcutBinding.modifier(forKeyCode: binding.keyCode),
+           bindingModifier == manualModifier {
+            return true
+        }
+        return false
     }
 
     func startHotkeyMonitoring() {
@@ -1651,28 +1678,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return false
     }
 
-    /// Copies the last transcript to the pasteboard and posts a synthetic
-    /// Cmd+V so the focused app receives the paste — Wispr Flow style.
+    /// Copies the last transcript to the pasteboard and pastes it into the
+    /// focused app — Wispr Flow style. Reuses the dictation paste pipeline so
+    /// preserveClipboard is honored and the synthetic Cmd+V waits for the
+    /// trigger shortcut to be fully released.
     func copyLastTranscriptToPasteboard() {
         guard !lastTranscript.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(lastTranscript, forType: .string)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-            Self.simulatePasteKeystroke()
+        let pendingClipboardRestore = writeTranscriptToPasteboard(lastTranscript)
+        pasteAtCursorWhenShortcutReleased { [weak self] in
+            self?.restoreClipboardIfNeeded(pendingClipboardRestore)
         }
-    }
-
-    private static func simulatePasteKeystroke() {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let vKeyCode: CGKeyCode = 0x09 // V
-        guard let down = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
-              let up = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false) else {
-            return
-        }
-        down.flags = .maskCommand
-        up.flags = .maskCommand
-        down.post(tap: .cgAnnotatedSessionEventTap)
-        up.post(tap: .cgAnnotatedSessionEventTap)
     }
 
     func toggleRecording() {
