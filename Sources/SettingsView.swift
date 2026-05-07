@@ -516,6 +516,8 @@ struct GeneralSettingsView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
+    @AppStorage("overlay_display_id") private var overlayDisplayID = 0
+    @State private var screensVersion = 0
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
     @State private var transcriptionAPIURLInput: String = ""
@@ -705,6 +707,9 @@ struct GeneralSettingsView: View {
                 }
                 SettingsCard("Audio During Dictation", icon: "speaker.slash.fill") {
                     dictationAudioSection
+                }
+                SettingsCard("Overlay Display", icon: "rectangle.dashed") {
+                    overlayDisplaySection
                 }
                 SettingsCard("Edit Mode", icon: "pencil") {
                     commandModeSection
@@ -1104,6 +1109,44 @@ struct GeneralSettingsView: View {
             Text("\(AppName.displayName) restores the audio state it changed when dictation ends.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    /// Picks which physical display the recording overlay drops down on.
+    /// Without this, AppKit defaults to "the screen with the active key
+    /// window" (NSScreen.main), which makes the pill follow focus across
+    /// monitors — disorienting on multi-display setups.
+    private var overlayDisplaySection: some View {
+        HStack {
+            Text("Show on")
+                .font(.system(size: 13))
+            Spacer()
+            Picker("", selection: $overlayDisplayID) {
+                Text("Active window (default)").tag(0)
+                Text("Primary display").tag(-1)
+                ForEach(connectedScreenEntries, id: \.tag) { entry in
+                    Text(entry.name).tag(entry.tag)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: 240)
+        }
+        // Re-query NSScreen.screens whenever the display arrangement
+        // changes so newly-attached monitors appear in the menu without
+        // reopening Settings. screensVersion is just a cache-buster.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
+            screensVersion &+= 1
+        }
+    }
+
+    private var connectedScreenEntries: [(name: String, tag: Int)] {
+        _ = screensVersion
+        return NSScreen.screens.compactMap { screen in
+            guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else {
+                return nil
+            }
+            return (name: screen.localizedName, tag: Int(id))
         }
     }
 
