@@ -1129,6 +1129,7 @@ struct GeneralSettingsView: View {
                 }
             }
             .labelsHidden()
+            .accessibilityLabel("Show on")
             .pickerStyle(.menu)
             .frame(maxWidth: 240)
         }
