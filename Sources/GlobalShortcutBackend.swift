@@ -44,7 +44,13 @@ final class GlobalShortcutBackend {
         let eventMask = [
             CGEventType.flagsChanged,
             CGEventType.keyDown,
-            CGEventType.keyUp
+            CGEventType.keyUp,
+            CGEventType.leftMouseDown,
+            CGEventType.leftMouseUp,
+            CGEventType.rightMouseDown,
+            CGEventType.rightMouseUp,
+            CGEventType.otherMouseDown,
+            CGEventType.otherMouseUp
         ].reduce(CGEventMask(0)) { partialResult, eventType in
             partialResult | (CGEventMask(1) << eventType.rawValue)
         }
@@ -128,6 +134,20 @@ final class GlobalShortcutBackend {
 
             return shouldConsume ? nil : Unmanaged.passUnretained(event)
 
+        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+            guard let nsEvent = NSEvent(cgEvent: event) else {
+                return Unmanaged.passUnretained(event)
+            }
+            let shouldConsume = handleMouseEvent(nsEvent, isDown: true)
+            return shouldConsume ? nil : Unmanaged.passUnretained(event)
+
+        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
+            guard let nsEvent = NSEvent(cgEvent: event) else {
+                return Unmanaged.passUnretained(event)
+            }
+            let shouldConsume = handleMouseEvent(nsEvent, isDown: false)
+            return shouldConsume ? nil : Unmanaged.passUnretained(event)
+
         default:
             return Unmanaged.passUnretained(event)
         }
@@ -177,5 +197,9 @@ final class GlobalShortcutBackend {
             .keyChanged(keyCode: event.keyCode, isDown: false, isRepeat: false)
         ) ?? .passthrough
         return snapshotDecision == .consume || keyDecision == .consume
+    }
+
+    private func handleMouseEvent(_ event: NSEvent, isDown: Bool) -> Bool {
+        onInputEvent?(.mouseChanged(button: event.buttonNumber, isDown: isDown)) == .consume
     }
 }

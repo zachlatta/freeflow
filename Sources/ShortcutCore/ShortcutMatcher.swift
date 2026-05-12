@@ -4,6 +4,7 @@ enum ShortcutInputEvent: Equatable {
     case modifierChanged(keyCode: UInt16, isDown: Bool)
     case modifierSnapshot(Set<UInt16>)
     case keyChanged(keyCode: UInt16, isDown: Bool, isRepeat: Bool)
+    case mouseChanged(button: Int, isDown: Bool)
     case backendReset
 }
 
@@ -15,6 +16,7 @@ enum ShortcutConsumeDecision: Equatable {
 struct ShortcutInputState: Equatable {
     var pressedKeyCodes: Set<UInt16> = []
     var pressedModifierKeyCodes: Set<UInt16> = []
+    var pressedMouseButtons: Set<Int> = []
     var holdIsActive = false
     var toggleIsActive = false
 
@@ -27,8 +29,17 @@ struct ShortcutInputState: Equatable {
         let keyReferenceHeld = pressedKeyCodes.contains { keyCode in
             configuration.hold.kind == .key && configuration.hold.keyCode == keyCode
                 || configuration.toggle.kind == .key && configuration.toggle.keyCode == keyCode
+                || configuration.hold.chordKeyCode == keyCode
+                || configuration.toggle.chordKeyCode == keyCode
         }
-        if keyReferenceHeld {
+        let mouseReferenceHeld = pressedMouseButtons.contains { button in
+            let buttonCode = UInt16(button)
+            return configuration.hold.kind == .mouseButton && configuration.hold.keyCode == buttonCode
+                || configuration.toggle.kind == .mouseButton && configuration.toggle.keyCode == buttonCode
+                || configuration.hold.chordMouseButton == buttonCode
+                || configuration.toggle.chordMouseButton == buttonCode
+        }
+        if keyReferenceHeld || mouseReferenceHeld {
             return true
         }
 
@@ -138,6 +149,29 @@ enum ShortcutMatcher {
                 emittedEvents: emittedEvents,
                 consumeDecision: (shouldConsumeBefore || shouldConsumeAfter) ? .consume : .passthrough
             )
+        case .mouseChanged(let button, let isDown):
+            let shouldConsumeBefore = shouldConsumeMouseEvent(
+                for: button,
+                state: state,
+                configuration: configuration
+            )
+            var nextState = state
+            if isDown {
+                nextState.pressedMouseButtons.insert(button)
+            } else {
+                nextState.pressedMouseButtons.remove(button)
+            }
+            let shouldConsumeAfter = shouldConsumeMouseEvent(
+                for: button,
+                state: nextState,
+                configuration: configuration
+            )
+            let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
+            return ShortcutMatchResult(
+                state: nextState,
+                emittedEvents: emittedEvents,
+                consumeDecision: (shouldConsumeBefore || shouldConsumeAfter) ? .consume : .passthrough
+            )
         }
     }
 
@@ -148,6 +182,7 @@ enum ShortcutMatcher {
         var nextState = state
         nextState.pressedKeyCodes.removeAll()
         nextState.pressedModifierKeyCodes.removeAll()
+        nextState.pressedMouseButtons.removeAll()
         let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
         return ShortcutMatchResult(
             state: nextState,
@@ -222,9 +257,28 @@ enum ShortcutMatcher {
         case .disabled:
             return false
         case .key:
-            return state.pressedKeyCodes.contains(binding.keyCode)
+            guard state.pressedKeyCodes.contains(binding.keyCode) else { return false }
+            if let chordKeyCode = binding.chordKeyCode,
+               !state.pressedKeyCodes.contains(chordKeyCode) {
+                return false
+            }
+            if let chordMouseButton = binding.chordMouseButton,
+               !state.pressedMouseButtons.contains(Int(chordMouseButton)) {
+                return false
+            }
+            return true
         case .modifierKey:
             return state.pressedModifierKeyCodes.contains(binding.keyCode)
+        case .mouseButton:
+            guard binding.keyCode != 0,
+                  state.pressedMouseButtons.contains(Int(binding.keyCode)) else {
+                return false
+            }
+            if let chordKeyCode = binding.chordKeyCode,
+               !state.pressedKeyCodes.contains(chordKeyCode) {
+                return false
+            }
+            return true
         }
     }
 
@@ -248,12 +302,44 @@ enum ShortcutMatcher {
         }
     }
 
+    private static func shouldConsumeMouseEvent(
+        for button: Int,
+        state: ShortcutInputState,
+        configuration: ShortcutConfiguration
+    ) -> Bool {
+        relevantMouseBindings(for: button, configuration: configuration).contains {
+            bindingIsActive($0, state: state, configuration: configuration)
+        }
+    }
+
     private static func relevantKeyBindings(
         for keyCode: UInt16,
         configuration: ShortcutConfiguration
     ) -> [ShortcutBinding] {
         [configuration.hold, configuration.toggle].filter { binding in
-            binding.kind == .key && binding.keyCode == keyCode
+            if binding.kind == .key {
+                return binding.keyCode == keyCode || binding.chordKeyCode == keyCode
+            }
+            if binding.kind == .mouseButton, let chordKeyCode = binding.chordKeyCode {
+                return chordKeyCode == keyCode
+            }
+            return false
+        }
+    }
+
+    private static func relevantMouseBindings(
+        for button: Int,
+        configuration: ShortcutConfiguration
+    ) -> [ShortcutBinding] {
+        let buttonCode = UInt16(button)
+        return [configuration.hold, configuration.toggle].filter { binding in
+            if binding.kind == .mouseButton {
+                return binding.keyCode == buttonCode
+            }
+            if binding.kind == .key, let chordMouseButton = binding.chordMouseButton {
+                return chordMouseButton == buttonCode
+            }
+            return false
         }
     }
 
@@ -263,7 +349,7 @@ enum ShortcutMatcher {
     ) -> [ShortcutBinding] {
         [configuration.hold, configuration.toggle].filter { binding in
             switch binding.kind {
-            case .key, .modifierKey:
+            case .key, .modifierKey, .mouseButton:
                 return modifierEvent(for: keyCode, affects: binding)
             case .disabled:
                 return false

@@ -214,7 +214,7 @@ private struct ShortcutCaptureRow: View {
             if isCapturing {
                 Label(
                     currentBinding == nil
-                        ? "Press and hold the shortcut you want."
+                        ? "Hold the combo you want (e.g. middle-click + Space), then Enter or Done."
                         : "Press Esc or Enter to save.",
                     systemImage: "keyboard"
                 )
@@ -251,6 +251,28 @@ private struct ShortcutCaptureRow: View {
                 currentBinding = binding
             }
         }
+        backend.onMouseDownEvent = { event in
+            guard event.buttonNumber != 0 else { return }
+            currentBinding = ShortcutBinding.fromCaptureState(
+                pressedKeys: captureInputState.pressedKeyCodes,
+                pressedMouse: captureInputState.pressedMouseButtons,
+                modifierFlags: event.modifierFlags
+            )
+        }
+        backend.onMouseUpEvent = { event in
+            currentBinding = ShortcutBinding.fromCaptureState(
+                pressedKeys: captureInputState.pressedKeyCodes,
+                pressedMouse: captureInputState.pressedMouseButtons,
+                modifierFlags: event.modifierFlags
+            )
+        }
+        backend.onKeyUpEvent = { event in
+            currentBinding = ShortcutBinding.fromCaptureState(
+                pressedKeys: captureInputState.pressedKeyCodes,
+                pressedMouse: captureInputState.pressedMouseButtons,
+                modifierFlags: event.modifierFlags
+            )
+        }
         backend.onKeyDownEvent = { event in
             let isReturnKey = event.keyCode == 36 || event.keyCode == 76
             let hasPendingCapture = currentBinding != nil
@@ -265,6 +287,15 @@ private struct ShortcutCaptureRow: View {
             }
 
             guard !ShortcutBinding.modifierKeyCodes.contains(event.keyCode) else {
+                return
+            }
+
+            if let chordBinding = ShortcutBinding.fromCaptureState(
+                pressedKeys: captureInputState.pressedKeyCodes,
+                pressedMouse: captureInputState.pressedMouseButtons,
+                modifierFlags: event.modifierFlags
+            ) {
+                currentBinding = chordBinding
                 return
             }
 

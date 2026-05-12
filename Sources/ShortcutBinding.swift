@@ -104,6 +104,98 @@ extension ShortcutBinding {
         )
     }
 
+    static func from(mouseEvent: NSEvent) -> ShortcutBinding? {
+        let mouseDownTypes: Set<NSEvent.EventType> = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        guard mouseDownTypes.contains(mouseEvent.type) else { return nil }
+        let button = mouseEvent.buttonNumber
+        guard button >= 0, button <= 31 else { return nil }
+        guard button != 0 else { return nil }
+        return ShortcutBinding(
+            keyCode: UInt16(button),
+            keyDisplay: mouseButtonDisplayLabel(button: button),
+            modifiers: ShortcutModifiers(eventFlags: mouseEvent.modifierFlags),
+            kind: .mouseButton,
+            preset: nil,
+            exactModifierKeyCodes: nil,
+            chordKeyCode: nil,
+            chordMouseButton: nil
+        )
+    }
+
+    static func fromCaptureState(
+        pressedKeys: Set<UInt16>,
+        pressedMouse: Set<Int>,
+        modifierFlags: NSEvent.ModifierFlags
+    ) -> ShortcutBinding? {
+        let mods = ShortcutModifiers(eventFlags: modifierFlags)
+        let nonModKeys = pressedKeys.filter { !modifierKeyCodes.contains($0) }
+        let mouseNonLeft = pressedMouse.filter { $0 != 0 }
+
+        if let mouseButton = mouseNonLeft.sorted().first, !nonModKeys.isEmpty {
+            let sortedKeys = nonModKeys.sorted()
+            guard sortedKeys.count == 1 else { return nil }
+            return ShortcutBinding(
+                keyCode: UInt16(mouseButton),
+                keyDisplay: mouseButtonDisplayLabel(button: mouseButton),
+                modifiers: mods,
+                kind: .mouseButton,
+                preset: nil,
+                exactModifierKeyCodes: nil,
+                chordKeyCode: sortedKeys[0],
+                chordMouseButton: nil
+            )
+        }
+
+        if mouseNonLeft.isEmpty && nonModKeys.count >= 2 {
+            let sorted = nonModKeys.sorted()
+            guard sorted.count == 2 else { return nil }
+            return ShortcutBinding(
+                keyCode: sorted[0],
+                keyDisplay: displayLabel(for: sorted[0]),
+                modifiers: mods,
+                kind: .key,
+                preset: nil,
+                exactModifierKeyCodes: normalizedExactModifierKeyCodes(
+                    exactModifierKeyCodes(for: mods)
+                ),
+                chordKeyCode: sorted[1],
+                chordMouseButton: nil
+            )
+        }
+
+        if nonModKeys.count == 1, mouseNonLeft.isEmpty {
+            let key = nonModKeys.first!
+            return ShortcutBinding(
+                keyCode: key,
+                keyDisplay: displayLabel(for: key),
+                modifiers: mods,
+                kind: .key,
+                preset: nil,
+                exactModifierKeyCodes: normalizedExactModifierKeyCodes(
+                    exactModifierKeyCodes(for: mods)
+                ),
+                chordKeyCode: nil,
+                chordMouseButton: nil
+            )
+        }
+
+        if mouseNonLeft.count == 1, nonModKeys.isEmpty {
+            let mouseButton = mouseNonLeft.first!
+            return ShortcutBinding(
+                keyCode: UInt16(mouseButton),
+                keyDisplay: mouseButtonDisplayLabel(button: mouseButton),
+                modifiers: mods,
+                kind: .mouseButton,
+                preset: nil,
+                exactModifierKeyCodes: nil,
+                chordKeyCode: nil,
+                chordMouseButton: nil
+            )
+        }
+
+        return nil
+    }
+
     static func displayLabel(for keyCode: UInt16, event: NSEvent? = nil) -> String {
         if let modifierName = modifierKeyNames[keyCode] {
             return modifierName
