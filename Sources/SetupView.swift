@@ -66,6 +66,7 @@ struct SetupView: View {
         case commandMode
         case vocabulary
         case launchAtLogin
+        case overlayStyle
         case testTranscription
         case ready
     }
@@ -101,6 +102,7 @@ struct SetupView: View {
     @State private var isCapturingHoldShortcut = false
     @State private var isCapturingToggleShortcut = false
     @StateObject private var testHotkeyHarness = SetupTestHotkeyHarness()
+    @AppStorage("use_compact_overlay") private var useCompactOverlay = true
 
     private let totalSteps: [SetupStep] = SetupStep.allCases
     private var isCapturingShortcut: Bool {
@@ -244,6 +246,8 @@ struct SetupView: View {
             commandModeStep
         case .vocabulary:
             vocabularyStep
+        case .overlayStyle:
+            overlayStyleStep
         case .launchAtLogin:
             launchAtLoginStep
         case .testTranscription:
@@ -814,6 +818,39 @@ struct SetupView: View {
             .background(Color(nsColor: .controlBackgroundColor))
             .cornerRadius(8)
 
+        }
+    }
+
+    var overlayStyleStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "rectangle.dashed")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Recording overlay style")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Choose how the recording indicator looks while \(AppName.displayName) is dictating. You can change this later in Settings.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 10) {
+                OverlayStyleOptionRow(
+                    title: "Minimalist menu-bar overlay",
+                    subtitle: "Two slim wings flank the camera notch and stay inside the menu bar. Never covers app tabs or toolbars.",
+                    isMinimalist: true,
+                    selection: $useCompactOverlay
+                )
+                OverlayStyleOptionRow(
+                    title: "Drop-down pill",
+                    subtitle: "Single pill hangs below the menu bar during recording. Larger and more visible, but covers a thin strip of whatever app is active.",
+                    isMinimalist: false,
+                    selection: $useCompactOverlay
+                )
+            }
+            .padding(.top, 6)
         }
     }
 
@@ -1438,5 +1475,135 @@ struct HowToRow: View {
             Text(text)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// Mini visual preview of one overlay style for the setup-flow option cards.
+/// Stylized MacBook top edge with the recording UI drawn as wings or pill.
+struct OverlayStylePreview: View {
+    let isMinimalist: Bool
+
+    private let frameWidth: CGFloat = 110
+    private let frameHeight: CGFloat = 56
+    private let menuBarHeight: CGFloat = 8
+    private let notchWidth: CGFloat = 26
+    private let notchHeight: CGFloat = 8
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            // Screen background — represents the host app behind the bar.
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
+                )
+
+            // Menu bar strip.
+            Rectangle()
+                .fill(Color.primary.opacity(0.10))
+                .frame(height: menuBarHeight)
+
+            // Tab strip stand-in below menu bar (so collisions read).
+            HStack(spacing: 3) {
+                ForEach(0..<5, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(Color.primary.opacity(0.18))
+                        .frame(height: 5)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.top, menuBarHeight + 4)
+
+            // Notch (always visible).
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 3,
+                bottomTrailingRadius: 3,
+                topTrailingRadius: 0
+            )
+            .fill(Color.black)
+            .frame(width: notchWidth, height: notchHeight)
+
+            // Style-specific overlay rendering.
+            if isMinimalist {
+                // Two slim wings flanking the notch, inside menu bar height.
+                HStack(spacing: notchWidth) {
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 0,
+                        bottomLeadingRadius: 3,
+                        bottomTrailingRadius: 0,
+                        topTrailingRadius: 0
+                    )
+                    .fill(Color.black)
+                    .frame(width: 16, height: notchHeight)
+
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 0,
+                        bottomLeadingRadius: 0,
+                        bottomTrailingRadius: 3,
+                        topTrailingRadius: 0
+                    )
+                    .fill(Color.black)
+                    .frame(width: 16, height: notchHeight)
+                }
+            } else {
+                // Drop-down pill hanging below the menu bar from the notch.
+                UnevenRoundedRectangle(
+                    topLeadingRadius: 0,
+                    bottomLeadingRadius: 5,
+                    bottomTrailingRadius: 5,
+                    topTrailingRadius: 0
+                )
+                .fill(Color.black)
+                .frame(width: notchWidth + 10, height: notchHeight + 12)
+            }
+        }
+        .frame(width: frameWidth, height: frameHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// Shared picker row used by both Setup and Settings so the UI matches in both.
+struct OverlayStyleOptionRow: View {
+    let title: String
+    let subtitle: String
+    let isMinimalist: Bool
+    @Binding var selection: Bool
+
+    var body: some View {
+        let isSelected = (selection == isMinimalist)
+        Button(action: {
+            selection = isMinimalist
+        }) {
+            HStack(alignment: .center, spacing: 14) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(isSelected ? Color.blue : Color.secondary)
+
+                OverlayStylePreview(isMinimalist: isMinimalist)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+            .padding(14)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+                    )
+            )
+        }
+        .buttonStyle(.plain)
     }
 }
