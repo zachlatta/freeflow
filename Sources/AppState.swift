@@ -22,7 +22,9 @@ struct PrecomputedMacro {
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case general
+    case appearance
     case prompts
+    case aiModels
     case macros
     case runLog
     case debug
@@ -38,7 +40,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .general: return "General"
+        case .appearance: return "Appearance"
         case .prompts: return "Prompts"
+        case .aiModels: return "AI Models"
         case .macros: return "Voice Macros"
         case .runLog: return "Run Log"
         case .debug: return "Debug"
@@ -48,7 +52,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .general: return "gearshape"
+        case .appearance: return "paintpalette"
         case .prompts: return "text.bubble"
+        case .aiModels: return "cpu"
         case .macros: return "music.mic"
         case .runLog: return "clock.arrow.circlepath"
         case .debug: return "wrench.and.screwdriver"
@@ -124,20 +130,19 @@ private struct PreservedPasteboardSnapshot {
 private struct PendingClipboardRestore {
     let snapshot: PreservedPasteboardSnapshot
     let expectedChangeCount: Int
-    let writtenTranscript: String
 }
 
-private struct TranscriptCommandParsingResult {
+struct TranscriptCommandParsingResult {
     let transcript: String
     let shouldPressEnterAfterPaste: Bool
 }
 
-private enum CommandInvocation: String {
+enum CommandInvocation: String {
     case automatic
     case manual
 }
 
-private enum SessionIntent {
+enum SessionIntent {
     case dictation
     case command(invocation: CommandInvocation, selectedText: String)
 
@@ -199,6 +204,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private let apiKeyStorageKey = "groq_api_key"
+    private let apiKeysStorageKey = "api_keys"
+    private let activeAPIKeyIndexStorageKey = "active_api_key_index"
     private let apiBaseURLStorageKey = "api_base_url"
     private let transcriptionModelStorageKey = "transcription_model"
     private let transcriptionAPIURLStorageKey = "transcription_api_url"
@@ -208,18 +215,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let contextModelStorageKey = "context_model"
     private let holdShortcutStorageKey = "hold_shortcut"
     private let toggleShortcutStorageKey = "toggle_shortcut"
-    private let copyAgainShortcutStorageKey = "copy_again_shortcut"
     private let savedHoldCustomShortcutStorageKey = "saved_hold_custom_shortcut"
     private let savedToggleCustomShortcutStorageKey = "saved_toggle_custom_shortcut"
-    private let savedCopyAgainCustomShortcutStorageKey = "saved_copy_again_custom_shortcut"
     private let customVocabularyStorageKey = "custom_vocabulary"
+
     private let transcriptionLanguageStorageKey = "transcription_language"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
+    private let micGainMultiplierStorageKey = "mic_gain_multiplier"
     private let customSystemPromptStorageKey = "custom_system_prompt"
     private let customContextPromptStorageKey = "custom_context_prompt"
     private let customSystemPromptLastModifiedStorageKey = "custom_system_prompt_last_modified"
     private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
     private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
+    private let contextScreenshotEnabledStorageKey = "context_screenshot_enabled"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let preserveClipboardStorageKey = "preserve_clipboard"
     private let pressEnterVoiceCommandStorageKey = "press_enter_voice_command_enabled"
@@ -233,6 +241,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
+    private let overlayPositionStorageKey = "overlay_position"
+    private let overlayVisualStyleStorageKey = "overlay_visual_style"
+    private let overlaySizeStorageKey = "overlay_size"
+    private let overlayAnimationStorageKey = "overlay_animation"
+    private let overlayAnimationSpeedStorageKey = "overlay_animation_speed"
+    private let overlayBottomMarginStorageKey = "overlay_bottom_margin"
+    private let overlayWidthMultiplierStorageKey = "overlay_width_multiplier"
+    private let overlaySizeScaleStorageKey = "overlay_size_scale"
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
     private let clipboardRestoreDelay: TimeInterval = 1.0
@@ -276,7 +292,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     static let defaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     static let defaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private static let trailingPressEnterCommandPattern = try! NSRegularExpression(
-        pattern: #"(?i)(?:^|[ \t\r\n,;:\-]+)press[ \t\r\n]+enter[\s\p{P}]*$"#
+        pattern: #"(?i)(?:^|[ \t\r\n,;:\-]+)(?:(?:press(?:ion(?:ar|e|a))?)[ \t\r\n,;:\-]+)?enter[\s\p{P}]*$"#
     )
 
     @Published var hasCompletedSetup: Bool {
@@ -285,49 +301,77 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    @Published var apiKey: String {
+    private let providersStorageKey = "provider_configs"
+    private let rateLimitMemoryStorageKey = "rate_limit_memory"
+
+    @Published var providers: [ProviderConfig] {
         didSet {
-            persistAPIKey(apiKey)
+            if let data = try? JSONEncoder().encode(providers) {
+                UserDefaults.standard.set(data, forKey: providersStorageKey)
+            }
+            if !providers.indices.contains(activeProviderIndex) && !providers.isEmpty {
+                activeProviderIndex = 0
+            }
             rebuildContextService()
         }
     }
 
-    @Published var apiBaseURL: String {
+    @Published var rateLimitMemory: [String: Date] {
         didSet {
-            persistAPIBaseURL(apiBaseURL)
+            if let data = try? JSONEncoder().encode(rateLimitMemory) {
+                UserDefaults.standard.set(data, forKey: rateLimitMemoryStorageKey)
+            }
+        }
+    }
+
+    @Published var activeProviderIndex: Int {
+        didSet {
+            UserDefaults.standard.set(activeProviderIndex, forKey: activeAPIKeyIndexStorageKey)
             rebuildContextService()
         }
     }
 
-    @Published var transcriptionAPIURL: String {
-        didSet {
-            persistOptionalAPIValue(transcriptionAPIURL, account: transcriptionAPIURLStorageKey)
-        }
+    var activeProvider: ProviderConfig? {
+        providers.indices.contains(activeProviderIndex) ? providers[activeProviderIndex] : nil
     }
 
-    @Published var transcriptionAPIKey: String {
-        didSet {
-            persistOptionalAPIValue(transcriptionAPIKey, account: transcriptionAPIKeyStorageKey)
-        }
-    }
 
-    @Published var transcriptionModel: String {
-        didSet {
-            UserDefaults.standard.set(transcriptionModel, forKey: transcriptionModelStorageKey)
+    // Legacy computed properties mapping to active provider
+    var apiKey: String {
+        get { activeProvider?.apiKey ?? "" }
+        set {
+            if activeProviderIndex < providers.count {
+                providers[activeProviderIndex].apiKey = newValue
+            }
         }
     }
-
-    @Published var postProcessingModel: String {
-        didSet {
-            UserDefaults.standard.set(postProcessingModel, forKey: postProcessingModelStorageKey)
+    var apiBaseURL: String {
+        get { activeProvider?.apiBaseURL ?? Self.defaultAPIBaseURL }
+        set {
+            if activeProviderIndex < providers.count {
+                providers[activeProviderIndex].apiBaseURL = newValue
+            }
         }
     }
-
-    @Published var postProcessingFallbackModel: String {
-        didSet {
-            UserDefaults.standard.set(postProcessingFallbackModel, forKey: postProcessingFallbackModelStorageKey)
+    var transcriptionAPIURL: String {
+        get { activeProvider?.transcriptionAPIURL ?? "" }
+        set {
+            if activeProviderIndex < providers.count {
+                providers[activeProviderIndex].transcriptionAPIURL = newValue
+            }
         }
     }
+    var transcriptionAPIKey: String {
+        get { activeProvider?.transcriptionAPIKey ?? "" }
+        set {
+            if activeProviderIndex < providers.count {
+                providers[activeProviderIndex].transcriptionAPIKey = newValue
+            }
+        }
+    }
+    var transcriptionModel: String { activeProvider?.transcriptionModel ?? Self.defaultTranscriptionModel }
+    var postProcessingModel: String { activeProvider?.postProcessingModel ?? Self.defaultPostProcessingModel }
+    var postProcessingFallbackModel: String { activeProvider?.postProcessingFallbackModel ?? Self.defaultPostProcessingFallbackModel }
 
     @Published var contextModel: String {
         didSet {
@@ -350,13 +394,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    @Published var copyAgainShortcut: ShortcutBinding {
-        didSet {
-            persistShortcut(copyAgainShortcut, key: copyAgainShortcutStorageKey)
-            restartHotkeyMonitoring()
-        }
-    }
-
     @Published private(set) var savedHoldCustomShortcut: ShortcutBinding? {
         didSet {
             persistOptionalShortcut(savedHoldCustomShortcut, key: savedHoldCustomShortcutStorageKey)
@@ -366,12 +403,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published private(set) var savedToggleCustomShortcut: ShortcutBinding? {
         didSet {
             persistOptionalShortcut(savedToggleCustomShortcut, key: savedToggleCustomShortcutStorageKey)
-        }
-    }
-
-    @Published private(set) var savedCopyAgainCustomShortcut: ShortcutBinding? {
-        didSet {
-            persistOptionalShortcut(savedCopyAgainCustomShortcut, key: savedCopyAgainCustomShortcutStorageKey)
         }
     }
 
@@ -402,6 +433,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+
+
     @Published var transcriptionLanguage: String {
         didSet {
             let normalized = Self.normalizeTranscriptionLanguage(transcriptionLanguage)
@@ -422,6 +455,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var customContextPrompt: String {
         didSet {
             UserDefaults.standard.set(customContextPrompt, forKey: customContextPromptStorageKey)
+            rebuildContextService()
+        }
+    }
+
+    @Published var contextScreenshotEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(contextScreenshotEnabled, forKey: contextScreenshotEnabledStorageKey)
             rebuildContextService()
         }
     }
@@ -512,6 +552,57 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var overlayPosition: OverlayPosition {
+        didSet {
+            UserDefaults.standard.set(overlayPosition.rawValue, forKey: overlayPositionStorageKey)
+        }
+    }
+
+    @Published var overlayVisualStyle: OverlayVisualStyle {
+        didSet {
+            UserDefaults.standard.set(overlayVisualStyle.rawValue, forKey: overlayVisualStyleStorageKey)
+        }
+    }
+
+    @Published var overlaySize: OverlaySize {
+        didSet {
+            UserDefaults.standard.set(overlaySize.rawValue, forKey: overlaySizeStorageKey)
+        }
+    }
+
+    @Published var overlayAnimation: OverlayAnimation {
+        didSet {
+            UserDefaults.standard.set(overlayAnimation.rawValue, forKey: overlayAnimationStorageKey)
+        }
+    }
+
+    @Published var overlayAnimationSpeed: OverlayAnimationSpeed {
+        didSet {
+            UserDefaults.standard.set(overlayAnimationSpeed.rawValue, forKey: overlayAnimationSpeedStorageKey)
+        }
+    }
+
+    @Published var overlayBottomMargin: Double {
+        didSet {
+            UserDefaults.standard.set(overlayBottomMargin, forKey: overlayBottomMarginStorageKey)
+            syncOverlayConfig()
+        }
+    }
+
+    @Published var overlayWidthMultiplier: Double {
+        didSet {
+            UserDefaults.standard.set(overlayWidthMultiplier, forKey: overlayWidthMultiplierStorageKey)
+            syncOverlayConfig()
+        }
+    }
+
+    @Published var overlaySizeScale: Double {
+        didSet {
+            UserDefaults.standard.set(overlaySizeScale, forKey: overlaySizeScaleStorageKey)
+            syncOverlayConfig()
+        }
+    }
+
     private var precomputedMacros: [PrecomputedMacro] = []
 
     @Published var voiceMacros: [VoiceMacro] = [] {
@@ -563,6 +654,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
             UserDefaults.standard.set(selectedMicrophoneID, forKey: selectedMicrophoneStorageKey)
         }
     }
+    @Published var micGainMultiplier: Float {
+        didSet {
+            UserDefaults.standard.set(micGainMultiplier, forKey: micGainMultiplierStorageKey)
+            audioRecorder.micGainMultiplier = micGainMultiplier
+        }
+    }
     @Published var availableMicrophones: [AudioDevice] = []
 
     let audioRecorder = AudioRecorder()
@@ -574,13 +671,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var recordingInitializationTimer: DispatchSourceTimer?
     private var transcriptionTask: Task<Void, Never>?
     private var transcribingAudioFileName: String?
-    private var contextService: AppContextService
+    var contextService: AppContextService
     private var contextCaptureTask: Task<AppContext?, Never>?
     private var capturedContext: AppContext?
     private var hasShownScreenshotPermissionAlert = false
     private var audioDeviceObservers: [NSObjectProtocol] = []
     private var needsMicrophoneRefreshAfterRecording = false
-    private let pipelineHistoryStore = PipelineHistoryStore()
+    let pipelineHistoryStore = PipelineHistoryStore()
     private let shortcutSessionController = DictationShortcutSessionController()
     private var activeRecordingTriggerMode: RecordingTriggerMode?
     private var currentSessionIntent: SessionIntent = .dictation
@@ -603,18 +700,51 @@ final class AppState: ObservableObject, @unchecked Sendable {
     init() {
         UserDefaults.standard.removeObject(forKey: "force_http2_transcription")
         let hasCompletedSetup = UserDefaults.standard.bool(forKey: "hasCompletedSetup")
-        let apiKey = Self.loadStoredAPIKey(account: apiKeyStorageKey)
-        let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
-        let transcriptionModel = UserDefaults.standard.string(forKey: transcriptionModelStorageKey) ?? Self.defaultTranscriptionModel
-        let transcriptionAPIURL = Self.loadOptionalStoredAPIValue(account: transcriptionAPIURLStorageKey)
-        let transcriptionAPIKey = Self.loadStoredAPIKey(account: transcriptionAPIKeyStorageKey)
-        let postProcessingModel = UserDefaults.standard.string(forKey: postProcessingModelStorageKey) ?? Self.defaultPostProcessingModel
-        let postProcessingFallbackModel = UserDefaults.standard.string(forKey: postProcessingFallbackModelStorageKey) ?? Self.defaultPostProcessingFallbackModel
+        
+        var loadedProviders: [ProviderConfig] = []
+        if let data = UserDefaults.standard.data(forKey: "provider_configs"),
+           let decoded = try? JSONDecoder().decode([ProviderConfig].self, from: data) {
+            loadedProviders = decoded
+        }
+        
+        let activeIndex = UserDefaults.standard.integer(forKey: "active_api_key_index")
+
+        if loadedProviders.isEmpty {
+            // Migrate from old format
+            var oldKeys: [String] = []
+            if let data = UserDefaults.standard.data(forKey: "api_keys"),
+               let decoded = try? JSONDecoder().decode([String].self, from: data) {
+                oldKeys = decoded
+            }
+            if oldKeys.isEmpty {
+                let legacyKey = Self.loadStoredAPIKey(account: "groq_api_key")
+                oldKeys = [legacyKey]
+            }
+            
+            let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
+            let transcriptionModel = UserDefaults.standard.string(forKey: "transcription_model") ?? Self.defaultTranscriptionModel
+            let transcriptionAPIURL = Self.loadOptionalStoredAPIValue(account: "transcription_api_url")
+            let transcriptionAPIKey = Self.loadStoredAPIKey(account: "transcription_api_key")
+            let postProcessingModel = UserDefaults.standard.string(forKey: "post_processing_model") ?? Self.defaultPostProcessingModel
+            let postProcessingFallbackModel = UserDefaults.standard.string(forKey: "post_processing_fallback_model") ?? Self.defaultPostProcessingFallbackModel
+            
+            loadedProviders = oldKeys.map { key in
+                ProviderConfig(
+                    name: "Provider",
+                    apiKey: key,
+                    apiBaseURL: apiBaseURL,
+                    transcriptionAPIURL: transcriptionAPIURL,
+                    transcriptionAPIKey: transcriptionAPIKey,
+                    transcriptionModel: transcriptionModel,
+                    postProcessingModel: postProcessingModel,
+                    postProcessingFallbackModel: postProcessingFallbackModel
+                )
+            }
+        }
         let contextModel = UserDefaults.standard.string(forKey: contextModelStorageKey) ?? Self.defaultContextModel
         let shortcuts = Self.loadShortcutConfiguration(
             holdKey: holdShortcutStorageKey,
-            toggleKey: toggleShortcutStorageKey,
-            copyAgainKey: copyAgainShortcutStorageKey
+            toggleKey: toggleShortcutStorageKey
         )
         let savedHoldCustomShortcut = Self.loadSavedCustomShortcut(
             forKey: savedHoldCustomShortcutStorageKey,
@@ -624,11 +754,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             forKey: savedToggleCustomShortcutStorageKey,
             fallback: shortcuts.toggle.isCustom ? shortcuts.toggle : nil
         )
-        let savedCopyAgainCustomShortcut = Self.loadSavedCustomShortcut(
-            forKey: savedCopyAgainCustomShortcutStorageKey,
-            fallback: shortcuts.copyAgain.isCustom ? shortcuts.copyAgain : nil
-        )
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
+
         let transcriptionLanguage = Self.normalizeTranscriptionLanguage(
             UserDefaults.standard.string(forKey: transcriptionLanguageStorageKey) ?? ""
         )
@@ -641,6 +768,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             ? UserDefaults.standard.integer(forKey: contextScreenshotMaxDimensionStorageKey)
             : Self.defaultContextScreenshotMaxDimension
         let contextScreenshotMaxDimension = Self.normalizedContextScreenshotMaxDimension(storedContextScreenshotMaxDimension)
+        let contextScreenshotEnabled = UserDefaults.standard.bool(forKey: contextScreenshotEnabledStorageKey)
         let shortcutStartDelay = max(0, UserDefaults.standard.double(forKey: shortcutStartDelayStorageKey))
         let isCommandModeEnabled = UserDefaults.standard.object(forKey: commandModeEnabledStorageKey) == nil
             ? false
@@ -664,9 +792,33 @@ final class AppState: ObservableObject, @unchecked Sendable {
             : UserDefaults.standard.bool(forKey: pressEnterVoiceCommandStorageKey)
         let soundVolume: Float = UserDefaults.standard.object(forKey: soundVolumeStorageKey) != nil
             ? UserDefaults.standard.float(forKey: soundVolumeStorageKey) : 1.0
+        let micGainMultiplier = UserDefaults.standard.object(forKey: "mic_gain_multiplier") != nil
+            ? UserDefaults.standard.float(forKey: "mic_gain_multiplier") : 1.0
         let alertSoundsEnabled = UserDefaults.standard.object(forKey: alertSoundsEnabledStorageKey) != nil
             ? UserDefaults.standard.bool(forKey: alertSoundsEnabledStorageKey)
             : soundVolume > 0
+
+        let overlayPosition = OverlayPosition(
+            rawValue: UserDefaults.standard.string(forKey: overlayPositionStorageKey) ?? ""
+        ) ?? .top
+        let overlayVisualStyle = OverlayVisualStyle(
+            rawValue: UserDefaults.standard.string(forKey: overlayVisualStyleStorageKey) ?? ""
+        ) ?? .legacy
+        let overlaySize = OverlaySize(
+            rawValue: UserDefaults.standard.string(forKey: overlaySizeStorageKey) ?? ""
+        ) ?? .medium
+        let overlayAnimation = OverlayAnimation(
+            rawValue: UserDefaults.standard.string(forKey: overlayAnimationStorageKey) ?? ""
+        ) ?? .slide
+        let overlayAnimationSpeed = OverlayAnimationSpeed(
+            rawValue: UserDefaults.standard.string(forKey: overlayAnimationSpeedStorageKey) ?? ""
+        ) ?? .fast
+        let storedBottomMargin = UserDefaults.standard.object(forKey: overlayBottomMarginStorageKey) as? Double
+        let overlayBottomMargin = storedBottomMargin ?? 36.0
+        let storedWidthMul = UserDefaults.standard.object(forKey: overlayWidthMultiplierStorageKey) as? Double
+        let overlayWidthMultiplier = storedWidthMul ?? 1.0
+        let storedSizeScale = UserDefaults.standard.object(forKey: overlaySizeScaleStorageKey) as? Double
+        let overlaySizeScale = storedSizeScale ?? 1.0
         
         let initialMacros: [VoiceMacro]
         if let data = UserDefaults.standard.data(forKey: "voice_macros"),
@@ -692,27 +844,22 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let selectedMicrophoneID = UserDefaults.standard.string(forKey: selectedMicrophoneStorageKey) ?? "default"
 
         self.contextService = Self.makeAppContextService(
-            apiKey: apiKey,
-            baseURL: apiBaseURL,
+            apiKey: loadedProviders.indices.contains(activeIndex) ? loadedProviders[activeIndex].apiKey : "",
+            baseURL: loadedProviders.indices.contains(activeIndex) ? loadedProviders[activeIndex].apiBaseURL : "",
             customContextPrompt: customContextPrompt,
             contextModel: contextModel,
-            contextScreenshotMaxDimension: contextScreenshotMaxDimension
+            contextScreenshotMaxDimension: contextScreenshotMaxDimension,
+            contextScreenshotEnabled: contextScreenshotEnabled
         )
         self.hasCompletedSetup = hasCompletedSetup
-        self.apiKey = apiKey
-        self.apiBaseURL = apiBaseURL
-        self.transcriptionAPIURL = transcriptionAPIURL
-        self.transcriptionAPIKey = transcriptionAPIKey
-        self.transcriptionModel = transcriptionModel
-        self.postProcessingModel = postProcessingModel
-        self.postProcessingFallbackModel = postProcessingFallbackModel
+        self.providers = loadedProviders
+        self.rateLimitMemory = [:]
+        self.activeProviderIndex = activeIndex
         self.contextModel = contextModel
         self.holdShortcut = shortcuts.hold
         self.toggleShortcut = shortcuts.toggle
-        self.copyAgainShortcut = shortcuts.copyAgain
         self.savedHoldCustomShortcut = savedHoldCustomShortcut.binding
         self.savedToggleCustomShortcut = savedToggleCustomShortcut.binding
-        self.savedCopyAgainCustomShortcut = savedCopyAgainCustomShortcut.binding
         self.isCommandModeEnabled = isCommandModeEnabled
         self.commandModeStyle = commandModeStyle
         self.commandModeManualModifier = commandModeManualModifier
@@ -721,6 +868,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
         self.contextScreenshotMaxDimension = contextScreenshotMaxDimension
+        self.contextScreenshotEnabled = contextScreenshotEnabled
         self.customSystemPromptLastModified = customSystemPromptLastModified
         self.customContextPromptLastModified = customContextPromptLastModified
         self.outputLanguage = outputLanguage
@@ -732,12 +880,22 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.isPressEnterVoiceCommandEnabled = isPressEnterVoiceCommandEnabled
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
+        self.overlayPosition = overlayPosition
+        self.overlayVisualStyle = overlayVisualStyle
+        self.overlaySize = overlaySize
+        self.overlayAnimation = overlayAnimation
+        self.overlayAnimationSpeed = overlayAnimationSpeed
+        self.overlayBottomMargin = overlayBottomMargin
+        self.overlayWidthMultiplier = overlayWidthMultiplier
+        self.overlaySizeScale = overlaySizeScale
         self.voiceMacros = initialMacros
         self.pipelineHistory = savedHistory
         self.hasAccessibility = initialAccessibility
         self.hasScreenRecordingPermission = initialScreenCapturePermission
         self.launchAtLogin = SMAppService.mainApp.status == .enabled
         self.selectedMicrophoneID = selectedMicrophoneID
+        self.micGainMultiplier = micGainMultiplier
+        self.audioRecorder.micGainMultiplier = micGainMultiplier
         self.precomputeMacros()
 
         refreshAvailableMicrophones()
@@ -749,17 +907,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if shortcuts.didUpdateToggleStoredValue {
             persistShortcut(shortcuts.toggle, key: toggleShortcutStorageKey)
         }
-        if shortcuts.didUpdateCopyAgainStoredValue {
-            persistShortcut(shortcuts.copyAgain, key: copyAgainShortcutStorageKey)
-        }
         if savedHoldCustomShortcut.didUpdateStoredValue {
             persistOptionalShortcut(savedHoldCustomShortcut.binding, key: savedHoldCustomShortcutStorageKey)
         }
         if savedToggleCustomShortcut.didUpdateStoredValue {
             persistOptionalShortcut(savedToggleCustomShortcut.binding, key: savedToggleCustomShortcutStorageKey)
-        }
-        if savedCopyAgainCustomShortcut.didUpdateStoredValue {
-            persistOptionalShortcut(savedCopyAgainCustomShortcut.binding, key: savedCopyAgainCustomShortcutStorageKey)
         }
 
         overlayManager.onStopButtonPressed = { [weak self] in
@@ -780,6 +932,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
     deinit {
         removeAudioDeviceObservers()
         AppState.writeRecordingStateFlag(false)
+    }
+
+    /// Syncs overlay appearance preferences to the overlay manager.
+    private func syncOverlayConfig() {
+        overlayManager.position = overlayPosition
+        overlayManager.visualStyle = overlayVisualStyle
+        overlayManager.size = overlaySize
+        overlayManager.animation = overlayAnimation
+        overlayManager.animationSpeed = overlayAnimationSpeed
+        overlayManager.bottomMarginOverride = CGFloat(overlayBottomMargin)
+        overlayManager.widthMultiplier = CGFloat(overlayWidthMultiplier)
+        overlayManager.sizeScale = CGFloat(overlaySizeScale)
     }
 
     private func removeAudioDeviceObservers() {
@@ -811,10 +975,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private struct StoredShortcutConfiguration {
         let hold: ShortcutBinding
         let toggle: ShortcutBinding
-        let copyAgain: ShortcutBinding
         let didUpdateHoldStoredValue: Bool
         let didUpdateToggleStoredValue: Bool
-        let didUpdateCopyAgainStoredValue: Bool
     }
 
     private struct StoredOptionalShortcut {
@@ -835,11 +997,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return defaultAPIBaseURL
     }
 
-    private static func loadShortcutConfiguration(
-        holdKey: String,
-        toggleKey: String,
-        copyAgainKey: String
-    ) -> StoredShortcutConfiguration {
+    private static func loadShortcutConfiguration(holdKey: String, toggleKey: String) -> StoredShortcutConfiguration {
         let legacyPreset = ShortcutPreset(
             rawValue: UserDefaults.standard.string(forKey: "hotkey_option") ?? ShortcutPreset.fnKey.rawValue
         ) ?? .fnKey
@@ -847,14 +1005,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let toggle = hold.withAddedModifiers(.command)
         let storedHold = loadShortcut(forKey: holdKey)
         let storedToggle = loadShortcut(forKey: toggleKey)
-        let storedCopyAgain = loadShortcut(forKey: copyAgainKey)
         return StoredShortcutConfiguration(
             hold: storedHold.binding ?? hold,
             toggle: storedToggle.binding ?? toggle,
-            copyAgain: storedCopyAgain.binding ?? .disabled,
             didUpdateHoldStoredValue: storedHold.binding == nil || storedHold.didNormalize,
-            didUpdateToggleStoredValue: storedToggle.binding == nil || storedToggle.didNormalize,
-            didUpdateCopyAgainStoredValue: storedCopyAgain.didNormalize
+            didUpdateToggleStoredValue: storedToggle.binding == nil || storedToggle.didNormalize
         )
     }
 
@@ -899,14 +1054,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         baseURL: String,
         customContextPrompt: String,
         contextModel: String,
-        contextScreenshotMaxDimension: Int
+        contextScreenshotMaxDimension: Int,
+        contextScreenshotEnabled: Bool
     ) -> AppContextService {
         AppContextService(
             apiKey: apiKey,
             baseURL: baseURL,
             customContextPrompt: customContextPrompt,
             contextModel: contextModel,
-            screenshotMaxDimension: CGFloat(normalizedContextScreenshotMaxDimension(contextScreenshotMaxDimension))
+            screenshotMaxDimension: CGFloat(normalizedContextScreenshotMaxDimension(contextScreenshotMaxDimension)),
+            screenshotEnabled: contextScreenshotEnabled
         )
     }
 
@@ -916,7 +1073,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             baseURL: apiBaseURL,
             customContextPrompt: customContextPrompt,
             contextModel: contextModel,
-            contextScreenshotMaxDimension: contextScreenshotMaxDimension
+            contextScreenshotMaxDimension: contextScreenshotMaxDimension,
+            contextScreenshotEnabled: contextScreenshotEnabled
         )
     }
 
@@ -1099,6 +1257,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     func retryTranscription(item: PipelineHistoryItem) {
+        reTranscribe(item: item, copyToClipboard: false)
+    }
+
+    func old_retryTranscription(item: PipelineHistoryItem) {
         guard let audioFileName = item.audioFileName else { return }
         guard !retryingItemIDs.contains(item.id) else { return }
 
@@ -1127,47 +1289,106 @@ final class AppState: ObservableObject, @unchecked Sendable {
             screenshotError: nil
         )
 
-        let postProcessingService = PostProcessingService(
-            apiKey: apiKey,
-            baseURL: apiBaseURL,
-            preferredModel: postProcessingModel,
-            preferredFallbackModel: postProcessingFallbackModel
-        )
-        let capturedCustomVocabulary = customVocabulary
-        let capturedCustomSystemPrompt = customSystemPrompt
-
         Task {
+            var lastError: Error?
+            var cachedRawTranscript: String?
+            var cachedParsedTranscript: TranscriptCommandParsingResult?
+            
+            let restoredIntent = SessionIntent.fromPersisted(
+                intent: item.intent,
+                selectedText: item.selectedText
+            )
+            
+            let transcriptionSeq = self.providerRotationSequence(forPostProcessing: false)
+            for (idx, model) in transcriptionSeq {
+                do {
+                    let provider = self.providers[idx]
+                    let transcriptionService = try TranscriptionService(
+                        apiKey: provider.resolvedTranscriptionAPIKey,
+                        baseURL: provider.transcriptionAPIURL.isEmpty ? provider.apiBaseURL : provider.transcriptionAPIURL,
+                        transcriptionModel: model,
+                        language: self.transcriptionLanguage
+                    )
+                    cachedRawTranscript = try await transcriptionService.transcribe(fileURL: audioURL)
+                    break
+                } catch let error as TranscriptionError {
+                    lastError = error
+                    if case .rateLimitReached(_, let resetDate) = error {
+                        await MainActor.run { self.markRateLimit(providerId: self.providers[idx].id, model: model, resetsAt: resetDate) }
+                        continue
+                    }
+                    break
+                } catch {
+                    lastError = error
+                    break
+                }
+            }
+            
+            guard let rawTranscript = cachedRawTranscript else {
+                let err = lastError
+                await MainActor.run {
+                    self.retryingItemIDs.remove(item.id)
+                    self.errorMessage = err?.localizedDescription ?? "Transcription failed"
+                }
+                return
+            }
+            
+            let parsedTranscript = Self.parseTranscriptCommands(
+                from: rawTranscript,
+                pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
+            )
+            cachedParsedTranscript = parsedTranscript
+            
+            var finalResult: (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String)?
+            let postProcessingSeq = self.providerRotationSequence(forPostProcessing: true)
+            for (idx, model) in postProcessingSeq {
+                do {
+                    let provider = self.providers[idx]
+                    let postProcessingService = PostProcessingService(
+                        apiKey: provider.apiKey,
+                        baseURL: provider.apiBaseURL,
+                        preferredModel: "",
+                        preferredFallbackModel: ""
+                    )
+                    
+                    let result = try await self.processTranscript(
+                        parsedTranscript.transcript,
+                        intent: restoredIntent,
+                        context: restoredContext,
+                        postProcessingService: postProcessingService,
+                        model: model,
+                        customVocabulary: self.customVocabulary,
+                        customSystemPrompt: PromptManager.shared.activePromptText,
+                        outputLanguage: self.outputLanguage
+                    )
+                    finalResult = result
+                    break
+                } catch let error as PostProcessingError {
+                    lastError = error
+                    if case .rateLimitReached(_, let resetDate) = error {
+                        await MainActor.run { self.markRateLimit(providerId: self.providers[idx].id, model: model, resetsAt: resetDate) }
+                        continue
+                    }
+                    break
+                } catch {
+                    lastError = error
+                    break
+                }
+            }
+            
             do {
-                let transcriptionService = try makeTranscriptionService()
-                let rawTranscript = try await transcriptionService.transcribe(fileURL: audioURL)
-                let parsedTranscript = Self.parseTranscriptCommands(
-                    from: rawTranscript,
-                    pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
-                )
+                guard let result = finalResult,
+                      let parsedTranscript = cachedParsedTranscript else {
+                    throw lastError ?? TranscriptionError.transcriptionFailed("Unknown error")
+                }
 
-                let finalTranscript: String
-                let processingStatus: String
-                let postProcessingPrompt: String
-                let restoredIntent = SessionIntent.fromPersisted(
-                    intent: item.intent,
-                    selectedText: item.selectedText
-                )
-                let result = await self.processTranscript(
-                    parsedTranscript.transcript,
-                    intent: restoredIntent,
-                    context: restoredContext,
-                    postProcessingService: postProcessingService,
-                    customVocabulary: capturedCustomVocabulary,
-                    customSystemPrompt: capturedCustomSystemPrompt,
-                    outputLanguage: self.outputLanguage
-                )
-                finalTranscript = result.finalTranscript
-                processingStatus = Self.statusMessage(
+                let finalTranscript = result.finalTranscript
+                let processingStatus = Self.statusMessage(
                     for: result.outcome,
                     parsedTranscript: parsedTranscript,
                     isRetry: true
                 )
-                postProcessingPrompt = result.prompt
+                let postProcessingPrompt = result.prompt
 
                 await MainActor.run {
                     let updatedItem = PipelineHistoryItem(
@@ -1395,7 +1616,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     var usesFnShortcut: Bool {
-        holdShortcut.usesFnKey || toggleShortcut.usesFnKey || copyAgainShortcut.usesFnKey
+        holdShortcut.usesFnKey || toggleShortcut.usesFnKey
     }
 
     var hasEnabledHoldShortcut: Bool {
@@ -1433,8 +1654,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return savedHoldCustomShortcut
         case .toggle:
             return savedToggleCustomShortcut
-        case .copyAgain:
-            return savedCopyAgainCustomShortcut
         }
     }
 
@@ -1474,28 +1693,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let binding = binding.normalizedForStorageMigration()
-
-        if role == .hold || role == .toggle {
-            let otherDictationBinding = role == .hold ? toggleShortcut : holdShortcut
-            guard !binding.conflicts(with: otherDictationBinding) else {
-                return "Hold and tap shortcuts must be distinct."
-            }
-        }
-
-        if role != .copyAgain, binding.conflicts(with: copyAgainShortcut) {
-            return "This shortcut is already used by Paste Again."
-        }
-        if role == .copyAgain {
-            if binding.conflicts(with: holdShortcut) {
-                return "Paste Again cannot share a shortcut with Hold to Talk."
-            }
-            if binding.conflicts(with: toggleShortcut) {
-                return "Paste Again cannot share a shortcut with Tap to Toggle."
-            }
-            if isCommandModeEnabled, commandModeStyle == .manual,
-               bindingCollides(binding, with: commandModeManualModifier) {
-                return "Paste Again cannot share the Edit Mode modifier."
-            }
+        let otherBinding = role == .hold ? toggleShortcut : holdShortcut
+        guard !binding.conflicts(with: otherBinding) else {
+            return "Hold and tap shortcuts must be distinct."
         }
 
         switch role {
@@ -1509,11 +1709,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 savedToggleCustomShortcut = binding
             }
             toggleShortcut = binding
-        case .copyAgain:
-            if binding.isCustom {
-                savedCopyAgainCustomShortcut = binding
-            }
-            copyAgainShortcut = binding
         }
 
         return nil
@@ -1522,12 +1717,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func commandModeManualModifierCollisionMessage(
         for modifier: CommandModeManualModifier,
         holdBinding: ShortcutBinding? = nil,
-        toggleBinding: ShortcutBinding? = nil,
-        copyAgainBinding: ShortcutBinding? = nil
+        toggleBinding: ShortcutBinding? = nil
     ) -> String? {
         let holdBinding = holdBinding ?? holdShortcut
         let toggleBinding = toggleBinding ?? toggleShortcut
-        let copyAgainBinding = copyAgainBinding ?? copyAgainShortcut
         let manualModifier = modifier.shortcutModifier
 
         if !holdBinding.isDisabled && holdBinding.modifiers.contains(manualModifier) {
@@ -1535,9 +1728,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
         if !toggleBinding.isDisabled && toggleBinding.modifiers.contains(manualModifier) {
             return "That modifier is already part of the tap shortcut."
-        }
-        if !copyAgainBinding.isDisabled && copyAgainBinding.modifiers.contains(manualModifier) {
-            return "That modifier is already part of the Paste Again shortcut."
         }
         // Modifier-only bindings carry identity in keyCode, not modifiers.
         if !holdBinding.isDisabled,
@@ -1552,26 +1742,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
            bindingModifier == manualModifier {
             return "That modifier is already the tap shortcut."
         }
-        if !copyAgainBinding.isDisabled,
-           copyAgainBinding.kind == .modifierKey,
-           let bindingModifier = ShortcutBinding.modifier(forKeyCode: copyAgainBinding.keyCode),
-           bindingModifier == manualModifier {
-            return "That modifier is already the Paste Again shortcut."
-        }
 
         return nil
-    }
-
-    private func bindingCollides(_ binding: ShortcutBinding, with modifier: CommandModeManualModifier) -> Bool {
-        guard !binding.isDisabled else { return false }
-        let manualModifier = modifier.shortcutModifier
-        if binding.modifiers.contains(manualModifier) { return true }
-        if binding.kind == .modifierKey,
-           let bindingModifier = ShortcutBinding.modifier(forKeyCode: binding.keyCode),
-           bindingModifier == manualModifier {
-            return true
-        }
-        return false
     }
 
     func startHotkeyMonitoring() {
@@ -1584,6 +1756,23 @@ final class AppState: ObservableObject, @unchecked Sendable {
         hotkeyManager.onEscapeKeyPressed = { [weak self] in
             self?.handleEscapeKeyPress() ?? false
         }
+        hotkeyManager.onAnyKeyDown = { [weak self] keyCode in
+            guard let self else { return false }
+            // keyCode 49 = Space bar
+            // Stop toggle recording when Space is pressed and recording is armed for stop
+            if keyCode == 49,
+               self.shortcutSessionController.activeMode == .toggle,
+               self.shortcutSessionController.toggleStopArmed {
+                DispatchQueue.main.async {
+                    self.shortcutSessionController.reset()
+                    if self.isRecording {
+                        self.stopAndTranscribe()
+                    }
+                }
+                return true  // consume the space key
+            }
+            return false
+        }
         restartHotkeyMonitoring()
     }
 
@@ -1592,6 +1781,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         hotkeyMonitoringErrorMessage = nil
         hotkeyManager.onShortcutEvent = nil
         hotkeyManager.onEscapeKeyPressed = nil
+        hotkeyManager.onAnyKeyDown = nil
         hotkeyManager.stop()
     }
 
@@ -1616,7 +1806,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return ShortcutConfiguration(
             hold: holdShortcut,
             toggle: toggleShortcut,
-            copyAgain: copyAgainShortcut,
             permittedAdditionalExactMatchModifiers: permittedAdditionalExactMatchModifiers
         )
     }
@@ -1637,11 +1826,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func handleShortcutEvent(_ event: ShortcutEvent) {
-        if event == .copyAgainTriggered {
-            copyLastTranscriptToPasteboard()
-            return
-        }
-
         guard let action = shortcutSessionController.handle(event: event, isTranscribing: isTranscribing) else {
             return
         }
@@ -1680,18 +1864,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         return false
-    }
-
-    /// Copies the last transcript to the pasteboard and pastes it into the
-    /// focused app — Wispr Flow style. Reuses the dictation paste pipeline so
-    /// preserveClipboard is honored and the synthetic Cmd+V waits for the
-    /// trigger shortcut to be fully released.
-    func copyLastTranscriptToPasteboard() {
-        guard !lastTranscript.isEmpty else { return }
-        let pendingClipboardRestore = writeTranscriptToPasteboard(lastTranscript)
-        pasteAtCursorWhenShortcutReleased { [weak self] in
-            self?.restoreClipboardIfNeeded(pendingClipboardRestore)
-        }
     }
 
     func toggleRecording() {
@@ -2093,6 +2265,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func beginRecording(triggerMode: RecordingTriggerMode) {
         os_log(.info, log: recordingLog, "beginRecording() entered")
+        syncOverlayConfig()
         beginCriticalDictationActivity()
         clearPendingOverlayDismissToken()
         errorMessage = nil
@@ -2272,7 +2445,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return strippedPunctuation.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func parseTranscriptCommands(
+    static func parseTranscriptCommands(
         from transcript: String,
         pressEnterCommandEnabled: Bool
     ) -> TranscriptCommandParsingResult {
@@ -2303,7 +2476,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
     }
 
-    private static func statusMessage(
+    static func statusMessage(
         for outcome: TranscriptProcessingOutcome,
         parsedTranscript: TranscriptCommandParsingResult,
         isRetry: Bool = false
@@ -2330,7 +2503,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }?.original
     }
 
-    private enum TranscriptProcessingOutcome {
+    enum TranscriptProcessingOutcome {
         case skippedEmptyRawTranscript
         case voiceMacro(command: String)
         case postProcessingSucceeded
@@ -2358,15 +2531,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func processTranscript(
+    func processTranscript(
         _ rawTranscript: String,
         intent: SessionIntent,
         context: AppContext,
         postProcessingService: PostProcessingService,
+        model: String,
         customVocabulary: String,
         customSystemPrompt: String,
-        outputLanguage: String = ""
-    ) async -> (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String) {
+        outputLanguage: String
+    ) async throws -> (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String) {
         let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !trimmedRawTranscript.isEmpty else {
@@ -2379,10 +2553,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     selectedText: selectedText,
                     voiceCommand: rawTranscript,
                     context: context,
+                    model: model,
                     customVocabulary: customVocabulary,
                     outputLanguage: outputLanguage
                 )
                 return (result.transcript, .commandModeSucceeded(invocation: invocation), result.prompt)
+            } catch let error as PostProcessingError {
+                if case .rateLimitReached = error { throw error }
+                os_log(.error, log: recordingLog, "Edit mode failed: %{public}@", error.localizedDescription)
+                return (selectedText, .commandModeFailedFallback(invocation: invocation), "")
             } catch {
                 os_log(.error, log: recordingLog, "Edit mode failed: %{public}@", error.localizedDescription)
                 return (selectedText, .commandModeFailedFallback(invocation: invocation), "")
@@ -2398,11 +2577,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
             let result = try await postProcessingService.postProcess(
                 transcript: trimmedRawTranscript,
                 context: context,
+                model: model,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt,
                 outputLanguage: outputLanguage
             )
             return (result.transcript, .postProcessingSucceeded, result.prompt)
+        } catch let error as PostProcessingError {
+            if case .rateLimitReached = error { throw error }
+            os_log(.error, log: recordingLog, "Post-processing failed: %{public}@", error.localizedDescription)
+            return (trimmedRawTranscript, .postProcessingFailedFallback, "")
         } catch {
             os_log(.error, log: recordingLog, "Post-processing failed: %{public}@", error.localizedDescription)
             return (trimmedRawTranscript, .postProcessingFailedFallback, "")
@@ -2492,13 +2676,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.statusText = "Transcribing..."
             self.debugStatusMessage = "Transcribing audio"
 
-        let postProcessingService = PostProcessingService(
-            apiKey: apiKey,
-            baseURL: apiBaseURL,
-            preferredModel: postProcessingModel,
-            preferredFallbackModel: postProcessingFallbackModel
-        )
-
             let activeRealtime = self.realtimeService
             self.realtimeService = nil
             self.audioRecorder.onPCM16Samples = nil
@@ -2518,44 +2695,117 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 defer {
                     activeRealtime?.cancel()
                 }
+                
                 do {
-                    let transcriptionService = try self.makeTranscriptionService()
-                    async let transcript = Self.resolveRawTranscript(
-                        realtimeService: activeRealtime,
-                        fileService: transcriptionService,
-                        fileURL: transcriptionFileURL
-                    )
-                    let rawTranscript = try await transcript
-                    let parsedTranscript = Self.parseTranscriptCommands(
-                        from: rawTranscript,
-                        pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
-                    )
-                    try Task.checkCancellation()
-                    let appContext: AppContext
-                    if let sessionContext {
-                        appContext = sessionContext
-                    } else if let inFlightContext = await inFlightContextTask?.value {
-                        appContext = inFlightContext
-                    } else {
-                        appContext = self.fallbackContextAtStop()
+                var lastError: Error?
+                var cachedRawTranscript: String?
+                var cachedParsedTranscript: TranscriptCommandParsingResult?
+                var cachedAppContext: AppContext?
+                
+                let transcriptionSeq = self.providerRotationSequence(forPostProcessing: false)
+                for (idx, model) in transcriptionSeq {
+                    do {
+                        let provider = self.providers[idx]
+                        let transcriptionService = try TranscriptionService(
+                            apiKey: provider.resolvedTranscriptionAPIKey,
+                            baseURL: provider.transcriptionAPIURL.isEmpty ? provider.apiBaseURL : provider.transcriptionAPIURL,
+                            transcriptionModel: model,
+                            language: self.transcriptionLanguage
+                        )
+                        let isFirst = idx == transcriptionSeq.first?.providerIndex
+                        cachedRawTranscript = try await Self.resolveRawTranscript(
+                            realtimeService: isFirst ? activeRealtime : nil,
+                            fileService: transcriptionService,
+                            fileURL: transcriptionFileURL
+                        )
+                        break // Success!
+                    } catch let error as TranscriptionError {
+                        lastError = error
+                        if case .rateLimitReached(_, let resetDate) = error {
+                            await MainActor.run { self.markRateLimit(providerId: self.providers[idx].id, model: model, resetsAt: resetDate) }
+                            continue
+                        }
+                        break
+                    } catch {
+                        lastError = error
+                        break
                     }
-                    try Task.checkCancellation()
-                    await MainActor.run { [weak self] in
-                        self?.debugStatusMessage = "Running post-processing"
+                }
+                
+                guard let rawTranscript = cachedRawTranscript else {
+                    throw lastError ?? TranscriptionError.transcriptionFailed("Unknown error")
+                }
+                
+                let parsedTranscript = Self.parseTranscriptCommands(
+                    from: rawTranscript,
+                    pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
+                )
+                cachedParsedTranscript = parsedTranscript
+                
+                try Task.checkCancellation()
+                
+                let appContext: AppContext
+                if let sessionContext {
+                    appContext = sessionContext
+                } else if let inFlightContext = await inFlightContextTask?.value {
+                    appContext = inFlightContext
+                } else {
+                    appContext = self.fallbackContextAtStop()
+                }
+                cachedAppContext = appContext
+                
+                try Task.checkCancellation()
+                await MainActor.run { [weak self] in
+                    self?.debugStatusMessage = "Running post-processing"
+                }
+                
+                var finalResult: (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String)?
+                let postProcessingSeq = self.providerRotationSequence(forPostProcessing: true)
+                for (idx, model) in postProcessingSeq {
+                    do {
+                        let provider = self.providers[idx]
+                        let postProcessingService = PostProcessingService(
+                            apiKey: provider.apiKey,
+                            baseURL: provider.apiBaseURL,
+                            preferredModel: "",
+                            preferredFallbackModel: ""
+                        )
+                        
+                        let result = try await self.processTranscript(
+                            parsedTranscript.transcript,
+                            intent: sessionIntent,
+                            context: appContext,
+                            postProcessingService: postProcessingService,
+                            model: model,
+                            customVocabulary: self.customVocabulary,
+                            customSystemPrompt: PromptManager.shared.activePromptText,
+                            outputLanguage: self.outputLanguage
+                        )
+                        try Task.checkCancellation()
+                        finalResult = result
+                        break // Success!
+                    } catch let error as PostProcessingError {
+                        lastError = error
+                        if case .rateLimitReached(_, let resetDate) = error {
+                            await MainActor.run { self.markRateLimit(providerId: self.providers[idx].id, model: model, resetsAt: resetDate) }
+                            continue
+                        }
+                        break
+                    } catch {
+                        lastError = error
+                        break
                     }
-                    let result = await self.processTranscript(
-                        parsedTranscript.transcript,
-                        intent: sessionIntent,
-                        context: appContext,
-                        postProcessingService: postProcessingService,
-                        customVocabulary: self.customVocabulary,
-                        customSystemPrompt: self.customSystemPrompt,
-                        outputLanguage: self.outputLanguage
-                    )
-                    try Task.checkCancellation()
+                }
+                
+                guard let result = finalResult,
+                      let parsedTranscript = cachedParsedTranscript,
+                      let appContext = cachedAppContext else {
+                    // Fall through to error handling at the bottom of the method
+                    throw lastError ?? TranscriptionError.transcriptionFailed("Unknown error")
+                }
 
-                    await MainActor.run {
-                        guard self.isTranscribing else { return }
+                await MainActor.run {
+                    guard self.isTranscribing else { return }
                         self.lastContextSummary = appContext.contextSummary
                         self.lastContextScreenshotDataURL = appContext.screenshotDataURL
                         self.lastContextScreenshotStatus = appContext.screenshotError
@@ -2595,14 +2845,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         let enterOnlyStatusText = "Pressed Enter"
                         let shouldPressEnterAfterPaste = parsedTranscript.shouldPressEnterAfterPaste
 
-                        let shouldPersistRawDictationFallback: Bool
-                        switch result.outcome {
-                        case .postProcessingFailedFallback:
-                            shouldPersistRawDictationFallback = !trimmedFinalTranscript.isEmpty
-                        default:
-                            shouldPersistRawDictationFallback = false
-                        }
-
                         if trimmedFinalTranscript.isEmpty {
                             self.statusText = shouldPressEnterAfterPaste ? enterOnlyStatusText : "Nothing to transcribe"
                             self.clearPendingOverlayDismissToken()
@@ -2614,13 +2856,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             }
                         } else {
                             self.statusText = completionStatusText
-                            if shouldPersistRawDictationFallback {
-                                self.scheduleOverlayDismissAfterFailureIndicator(after: 2.5)
-                            } else {
-                                self.clearPendingOverlayDismissToken()
-                                if !self.showPostTranscriptionUpdateReminderIfNeeded() {
-                                    self.overlayManager.dismiss()
-                                }
+                            self.clearPendingOverlayDismissToken()
+                            if !self.showPostTranscriptionUpdateReminderIfNeeded() {
+                                self.overlayManager.dismiss()
                             }
 
                             let formattedTranscript = self.applyContextualFormatting(
@@ -2629,7 +2867,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                                 followingText: appContext.followingText,
                                 cursorPosition: appContext.cursorPosition
                             )
-                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(formattedTranscript, precedingText: appContext.precedingText, followingText: appContext.followingText)
+                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(formattedTranscript, precedingText: appContext.precedingText, followingText: appContext.followingText, cursorPosition: appContext.cursorPosition)
                             self.pasteAtCursorWhenShortcutReleased {
                                 if shouldPressEnterAfterPaste {
                                     self.pressEnterAfterPaste {
@@ -2638,6 +2876,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                                 } else {
                                     self.restoreClipboardIfNeeded(pendingClipboardRestore)
                                 }
+
                             }
                         }
 
@@ -2696,9 +2935,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     static func resolvedSystemPrompt(_ customSystemPrompt: String) -> String {
-        customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? PostProcessingService.defaultSystemPrompt
-            : customSystemPrompt
+        PromptManager.shared.activePromptText
     }
 
     private func recordPipelineHistoryEntry(
@@ -2743,6 +2980,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         } catch {
             errorMessage = "Unable to save run history entry: \(error.localizedDescription)"
         }
+    }
+
+    func addWordToVocabulary(_ word: String) {
+        let trimmed = word.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let existing = customVocabulary
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard !existing.contains(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) else { return }
+        customVocabulary = customVocabulary.isEmpty ? trimmed : customVocabulary + "\n" + trimmed
     }
 
     private func startRealtimeStreamingIfEnabled() {
@@ -2992,6 +3239,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let dismissToken = UUID()
         pendingOverlayDismissToken = dismissToken
         updateManager.markPostTranscriptionReminderShown()
+        syncOverlayConfig()
         overlayManager.showUpdateAvailable(version: updateManager.latestReleaseVersion)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + postTranscriptionUpdateReminderDuration) { [weak self] in
@@ -3012,6 +3260,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             stopDebugOverlay()
         }
         pendingOverlayDismissToken = dismissToken
+        syncOverlayConfig()
         overlayManager.showUpdateAvailable(version: version)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + postTranscriptionUpdateReminderDuration) { [weak self] in
@@ -3051,7 +3300,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .showSettings, object: nil)
     }
 
-    private func pasteAtCursor() {
+    func pasteAtCursor() {
         let source = CGEventSource(stateID: .hidSystemState)
         let vKeyCode = keyCodeForCharacter("v") ?? 9
 
@@ -3105,23 +3354,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
     /// Writes the given transcript to the system pasteboard with smart leading/trailing spacing,
     /// transient clipboard markers (so clipboard managers ignore it), and optional preservation
     /// of the previous clipboard contents for later restoration.
-    private func writeTranscriptToPasteboard(_ transcript: String, precedingText: String? = nil, followingText: String? = nil) -> PendingClipboardRestore? {
+    private func writeTranscriptToPasteboard(_ transcript: String, precedingText: String? = nil, followingText: String? = nil, cursorPosition: String? = nil) -> PendingClipboardRestore? {
         let pasteboard = NSPasteboard.general
         let snapshot = preserveClipboard ? PreservedPasteboardSnapshot(pasteboard: pasteboard) : nil
 
-        // Apply context-aware spacing using the modular helpers
-        var textToWrite = Self.applySmartLeadingSpace(transcript, precedingText: precedingText)
+        // Apply context-aware spacing using the modular helpers.
+        // cursorPosition is forwarded so applySmartLeadingSpace can detect
+        // new-paragraph insertions and avoid adding an unwanted leading space.
+        var textToWrite = Self.applySmartLeadingSpace(transcript, precedingText: precedingText, cursorPosition: cursorPosition)
         textToWrite = Self.applySmartTrailingSpace(textToWrite, followingText: followingText)
 
         // Write to pasteboard with transient markers (clipboard managers ignore it)
         Self.writeTransientString(textToWrite, to: pasteboard)
 
         guard let snapshot else { return nil }
-        return PendingClipboardRestore(
-            snapshot: snapshot,
-            expectedChangeCount: pasteboard.changeCount,
-            writtenTranscript: textToWrite
-        )
+        return PendingClipboardRestore(snapshot: snapshot, expectedChangeCount: pasteboard.changeCount)
     }
 
     private func restoreClipboardIfNeeded(_ pendingRestore: PendingClipboardRestore?) {
@@ -3131,16 +3378,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         // the pre-dictation clipboard instead of the transcript.
         DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
             let pasteboard = NSPasteboard.general
-            // A bare changeCount check is too strict: browsers, iCloud Universal
-            // Clipboard sync, and other background apps bump the change count
-            // without the user copying anything, which left the transcript
-            // stranded on the clipboard. Restore when nothing changed, or when the
-            // clipboard still holds exactly the transcript we wrote (so the user
-            // has not deliberately copied something new that we would clobber).
-            let clipboardStillHoldsTranscript =
-                pasteboard.string(forType: .string) == pendingRestore.writtenTranscript
-            guard pasteboard.changeCount == pendingRestore.expectedChangeCount
-                || clipboardStillHoldsTranscript else { return }
+            guard pasteboard.changeCount == pendingRestore.expectedChangeCount else { return }
             pendingRestore.snapshot.restore(to: pasteboard)
         }
     }
