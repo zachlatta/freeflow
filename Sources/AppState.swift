@@ -124,6 +124,7 @@ private struct PreservedPasteboardSnapshot {
 private struct PendingClipboardRestore {
     let snapshot: PreservedPasteboardSnapshot
     let expectedChangeCount: Int
+    let writtenTranscript: String
 }
 
 private struct TranscriptCommandParsingResult {
@@ -3136,7 +3137,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         pasteboard.setString("", forType: legacyTransientType)
 
         guard let snapshot else { return nil }
-        return PendingClipboardRestore(snapshot: snapshot, expectedChangeCount: pasteboard.changeCount)
+        return PendingClipboardRestore(
+            snapshot: snapshot,
+            expectedChangeCount: pasteboard.changeCount,
+            writtenTranscript: textToWrite
+        )
     }
 
     private func restoreClipboardIfNeeded(_ pendingRestore: PendingClipboardRestore?) {
@@ -3146,7 +3151,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         // the pre-dictation clipboard instead of the transcript.
         DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
             let pasteboard = NSPasteboard.general
-            guard pasteboard.changeCount == pendingRestore.expectedChangeCount else { return }
+            // A bare changeCount check is too strict: browsers, iCloud Universal
+            // Clipboard sync, and other background apps bump the change count
+            // without the user copying anything, which left the transcript
+            // stranded on the clipboard. Restore when nothing changed, or when the
+            // clipboard still holds exactly the transcript we wrote (so the user
+            // has not deliberately copied something new that we would clobber).
+            let clipboardStillHoldsTranscript =
+                pasteboard.string(forType: .string) == pendingRestore.writtenTranscript
+            guard pasteboard.changeCount == pendingRestore.expectedChangeCount
+                || clipboardStillHoldsTranscript else { return }
             pendingRestore.snapshot.restore(to: pasteboard)
         }
     }
