@@ -530,7 +530,7 @@ Selected text: \(selectedText ?? "None")
             kCGNullWindowID,
             [.bestResolution]
         ) else {
-            return (nil, nil, "Could not capture screenshot (screen recording permission or window access issue)")
+            return (nil, nil, "Could not capture screenshot from the active window")
         }
 
         if let croppedImage = croppedWhitespaceImage(from: fullScreenImage),
