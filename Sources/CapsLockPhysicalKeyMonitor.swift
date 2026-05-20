@@ -16,9 +16,11 @@ enum CapsLockPhysicalKeyMonitorError: LocalizedError {
 }
 
 final class CapsLockPhysicalKeyMonitor {
+    private typealias ElementIdentifier = UInt
+
     private var manager: IOHIDManager?
     private let runLoopMode = CFRunLoopMode.commonModes.rawValue
-    private var capsLockIsDown = false
+    private var capsLockStatesByElement: [ElementIdentifier: Bool] = [:]
 
     var onStateChanged: ((Bool) -> Void)?
 
@@ -50,7 +52,7 @@ final class CapsLockPhysicalKeyMonitor {
         guard openResult == kIOReturnSuccess else {
             IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), runLoopMode)
             IOHIDManagerRegisterInputValueCallback(manager, nil, nil)
-            capsLockIsDown = false
+            capsLockStatesByElement.removeAll()
             os_log(.error, log: capsLockPhysicalKeyLog, "Caps Lock HID monitor failed to open: %{public}d", openResult)
             throw CapsLockPhysicalKeyMonitorError.openFailed(openResult)
         }
@@ -65,7 +67,7 @@ final class CapsLockPhysicalKeyMonitor {
         IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), runLoopMode)
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.manager = nil
-        capsLockIsDown = false
+        capsLockStatesByElement.removeAll()
     }
 
     deinit {
@@ -81,9 +83,18 @@ final class CapsLockPhysicalKeyMonitor {
         }
 
         let isDown = IOHIDValueGetIntegerValue(value) != 0
-        guard isDown != capsLockIsDown else { return }
+        let elementID = Self.elementIdentifier(for: element)
+        guard capsLockStatesByElement[elementID] != isDown else { return }
 
-        capsLockIsDown = isDown
-        onStateChanged?(isDown)
+        let wasAnyCapsLockDown = capsLockStatesByElement.values.contains(true)
+        capsLockStatesByElement[elementID] = isDown
+        let isAnyCapsLockDown = capsLockStatesByElement.values.contains(true)
+        guard wasAnyCapsLockDown != isAnyCapsLockDown else { return }
+
+        onStateChanged?(isAnyCapsLockDown)
+    }
+
+    private static func elementIdentifier(for element: IOHIDElement) -> ElementIdentifier {
+        UInt(bitPattern: Unmanaged.passUnretained(element).toOpaque())
     }
 }
