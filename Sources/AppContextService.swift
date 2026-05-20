@@ -7,6 +7,9 @@ struct AppSelectionSnapshot {
     let bundleIdentifier: String?
     let windowTitle: String?
     let selectedText: String?
+    let precedingText: String?
+    let followingText: String?
+    let cursorPosition: String?
 }
 
 struct AppContext {
@@ -14,6 +17,9 @@ struct AppContext {
     let bundleIdentifier: String?
     let windowTitle: String?
     let selectedText: String?
+    let precedingText: String?
+    let followingText: String?
+    let cursorPosition: String?
     let currentActivity: String
     let contextSystemPrompt: String?
     let contextPrompt: String?
@@ -68,25 +74,34 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         return trimmedPrompt.isEmpty ? Self.defaultContextPrompt : trimmedPrompt
     }
 
+    /// Collects a lightweight snapshot of the frontmost app's selection state.
     func collectSelectionSnapshot() -> AppSelectionSnapshot {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             return AppSelectionSnapshot(
                 appName: nil,
                 bundleIdentifier: nil,
                 windowTitle: nil,
-                selectedText: nil
+                selectedText: nil,
+                precedingText: nil,
+                followingText: nil,
+                cursorPosition: nil
             )
         }
 
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        let surrounding = surroundingText(from: appElement)
         return AppSelectionSnapshot(
             appName: frontmostApp.localizedName,
             bundleIdentifier: frontmostApp.bundleIdentifier,
             windowTitle: focusedWindowTitle(from: appElement) ?? frontmostApp.localizedName,
-            selectedText: rawSelectedText(from: appElement)
+            selectedText: rawSelectedText(from: appElement),
+            precedingText: surrounding.before,
+            followingText: surrounding.after,
+            cursorPosition: surrounding.position
         )
     }
 
+    /// Collects full app context including surrounding text, screenshot, and LLM-inferred activity.
     func collectContext() async -> AppContext {
         let contextSystemPrompt = resolveContextPrompt()
 
@@ -96,6 +111,9 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 bundleIdentifier: nil,
                 windowTitle: nil,
                 selectedText: nil,
+                precedingText: nil,
+                followingText: nil,
+                cursorPosition: nil,
                 currentActivity: "You are dictating in an unrecognized context.",
                 contextSystemPrompt: contextSystemPrompt,
                 contextPrompt: nil,
@@ -110,15 +128,78 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
 
         let windowTitle = focusedWindowTitle(from: appElement) ?? appName
+        var surrounding = surroundingText(from: appElement)
+
+        // Force AX tree sync for Electron/Web apps via a zero-net-movement keypress.
+        // Chromium-based apps often have stale AX trees until a cursor movement occurs.
+        if let focusedElement = accessibilityElement(from: appElement, attribute: kAXFocusedUIElementAttribute as CFString) {
+            var namesRef: CFArray?
+            var isWebApp = false
+            if AXUIElementCopyAttributeNames(focusedElement, &namesRef) == .success,
+               let names = namesRef as? [String],
+               names.contains(where: { $0.contains("DOM") || $0.contains("Web") }) {
+                isWebApp = true
+            }
+
+            if isWebApp {
+                var hasSelection = false
+                var rangeRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(focusedElement, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+                   let rangeVal = rangeRef, CFGetTypeID(rangeVal) == AXValueGetTypeID() {
+                    var cfRange = CFRange(location: 0, length: 0)
+                    if AXValueGetValue(unsafeBitCast(rangeVal, to: AXValue.self), .cfRange, &cfRange) {
+                        hasSelection = cfRange.length > 0
+                    }
+                }
+
+                // Only perform the sync tap if there's no active text selection
+                if !hasSelection {
+                    let source = CGEventSource(stateID: .hidSystemState)
+                    let isAtStart = (surrounding.before == nil)
+
+                    let moveForward = CGEvent(keyboardEventSource: source, virtualKey: 124, keyDown: true)
+                    let moveForwardUp = CGEvent(keyboardEventSource: source, virtualKey: 124, keyDown: false)
+                    let moveBack = CGEvent(keyboardEventSource: source, virtualKey: 123, keyDown: true)
+                    let moveBackUp = CGEvent(keyboardEventSource: source, virtualKey: 123, keyDown: false)
+
+                    if isAtStart {
+                        moveForward?.post(tap: .cgSessionEventTap)
+                        moveForwardUp?.post(tap: .cgSessionEventTap)
+                        moveBack?.post(tap: .cgSessionEventTap)
+                        moveBackUp?.post(tap: .cgSessionEventTap)
+                    } else {
+                        moveBack?.post(tap: .cgSessionEventTap)
+                        moveBackUp?.post(tap: .cgSessionEventTap)
+                        moveForward?.post(tap: .cgSessionEventTap)
+                        moveForwardUp?.post(tap: .cgSessionEventTap)
+                    }
+
+                    // Wait for the web view to process the keystrokes
+                    try? await Task.sleep(nanoseconds: 50_000_000)
+                    surrounding = surroundingText(from: appElement)
+                }
+            }
+        }
+
         let selectedText = selectedText(from: appElement)
-        let screenshot = captureActiveWindowScreenshot(
-            processIdentifier: frontmostApp.processIdentifier,
-            appElement: appElement,
-            focusedWindowTitle: windowTitle
-        )
+        // Skip screenshot when we have text context from accessibility (saves ~200ms)
+        let screenshot: (dataURL: String?, mimeType: String?, error: String?)
+        if surrounding.before != nil {
+            screenshot = (nil, nil, "Skipped: text context available from accessibility")
+        } else {
+            screenshot = captureActiveWindowScreenshot(
+                processIdentifier: frontmostApp.processIdentifier,
+                appElement: appElement,
+                focusedWindowTitle: windowTitle
+            )
+        }
         let currentActivity: String
         let contextPrompt: String?
-        if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if surrounding.before != nil {
+            // Text context available from accessibility — deterministic summary, skip LLM call
+            currentActivity = deterministicActivitySummary(appName: appName, windowTitle: windowTitle)
+            contextPrompt = nil
+        } else if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if let result = await inferActivityWithLLM(
                 appName: appName,
                 bundleIdentifier: bundleIdentifier,
@@ -155,6 +236,9 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             bundleIdentifier: bundleIdentifier,
             windowTitle: windowTitle,
             selectedText: selectedText,
+            precedingText: surrounding.before,
+            followingText: surrounding.after,
+            cursorPosition: surrounding.position,
             currentActivity: currentActivity,
             contextSystemPrompt: contextSystemPrompt,
             contextPrompt: contextPrompt,
@@ -296,6 +380,14 @@ Selected text: \(selectedText ?? "None")
         let firstTwo = sentences.prefix(2)
         return firstTwo.joined(separator: ". ") + "."
     }
+    /// Returns a deterministic activity summary when text context is available from accessibility.
+    private func deterministicActivitySummary(appName: String?, windowTitle: String?) -> String {
+        let app = appName ?? "the active application"
+        if let windowTitle, !windowTitle.isEmpty, windowTitle != appName {
+            return "Dictating in \(app) (\(windowTitle))."
+        }
+        return "Dictating in \(app)."
+    }
 
     private func fallbackCurrentActivity(
         appName: String?,
@@ -347,6 +439,95 @@ Selected text: \(selectedText ?? "None")
         }
 
         return nil
+    }
+
+    /// Reads the text before and after the cursor from the focused text field using Accessibility API.
+    ///
+    /// Returns up to `maxBefore` characters before and `maxAfter` characters after the cursor.
+    /// When text is selected, `after` starts from the end of the selection to avoid
+    /// including selected text as "following" context.
+    func surroundingText(
+        from appElement: AXUIElement,
+        maxBefore: Int = 300,
+        maxAfter: Int = 400
+    ) -> (before: String?, after: String?, position: String) {
+        guard let focusedElement = accessibilityElement(
+            from: appElement,
+            attribute: kAXFocusedUIElementAttribute as CFString
+        ) else {
+            return (nil, nil, "unknown")
+        }
+
+        var valueRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            focusedElement,
+            kAXValueAttribute as CFString,
+            &valueRef
+        ) == .success,
+              let fullText = valueRef as? String else {
+            return (nil, nil, "empty")
+        }
+
+        if fullText.isEmpty {
+            return (nil, nil, "empty")
+        }
+
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            focusedElement,
+            kAXSelectedTextRangeAttribute as CFString,
+            &rangeRef
+        ) == .success,
+              let rangeVal = rangeRef,
+              CFGetTypeID(rangeVal) == AXValueGetTypeID() else {
+            let suffix = String((fullText as NSString).substring(
+                from: max(0, (fullText as NSString).length - maxBefore)
+            ))
+            return (suffix.isEmpty ? nil : suffix, nil, "end")
+        }
+
+        var cfRange = CFRange(location: 0, length: 0)
+        guard AXValueGetValue(
+            unsafeBitCast(rangeVal, to: AXValue.self),
+            .cfRange,
+            &cfRange
+        ) else {
+            let suffix = String((fullText as NSString).substring(
+                from: max(0, (fullText as NSString).length - maxBefore)
+            ))
+            return (suffix.isEmpty ? nil : suffix, nil, "end")
+        }
+
+        let nsText = fullText as NSString
+        let selectionStart = min(cfRange.location, nsText.length)
+        // When text is selected, textAfter starts from the END of the selection
+        let selectionEnd = min(selectionStart + cfRange.length, nsText.length)
+
+        let beforeStart = max(0, selectionStart - maxBefore)
+        let beforeLength = selectionStart - beforeStart
+        let textBefore = nsText.substring(
+            with: NSRange(location: beforeStart, length: beforeLength)
+        )
+
+        let afterLength = min(maxAfter, nsText.length - selectionEnd)
+        let textAfter = nsText.substring(
+            with: NSRange(location: selectionEnd, length: afterLength)
+        )
+
+        let position: String
+        if selectionStart == 0 {
+            position = "start"
+        } else if selectionStart >= nsText.length {
+            position = "end"
+        } else {
+            position = "middle"
+        }
+
+        return (
+            textBefore.isEmpty ? nil : textBefore,
+            textAfter.isEmpty ? nil : textAfter,
+            position
+        )
     }
 
     private func accessibilityElement(from element: AXUIElement, attribute: CFString) -> AXUIElement? {

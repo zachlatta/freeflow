@@ -45,7 +45,8 @@ Core behavior:
 - Preserve the speaker's final intended meaning, tone, and language.
 - Make the minimum edits needed for clean output.
 - Remove filler, hesitations, duplicate starts, and abandoned fragments.
-- Fix punctuation, capitalization, spacing, and obvious ASR mistakes.
+- Fix punctuation, spacing, and obvious ASR mistakes.
+- Capitalize the first word only when the text stands alone as a complete utterance with no surrounding context provided.
 - Restore standard accents or diacritics when the intended word is clear.
 - Preserve mixed-language text exactly as mixed.
 - Preserve commands, file paths, flags, identifiers, acronyms, and vocabulary terms exactly.
@@ -146,6 +147,7 @@ Behavior:
         self.preferredFallbackModel = preferredFallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Post-processes a transcript with optional surrounding text context.
     func postProcess(
         transcript: String,
         context: AppContext,
@@ -154,6 +156,8 @@ Behavior:
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
         let vocabularyTerms = mergedVocabularyTerms(rawVocabulary: customVocabulary)
+        let precedingText = context.precedingText ?? ""
+        let followingText = context.followingText ?? ""
 
         let timeoutSeconds = postProcessingTimeoutSeconds
         return try await withThrowingTaskGroup(of: PostProcessingResult.self) { group in
@@ -164,6 +168,8 @@ Behavior:
                 return try await self.processWithFallback(
                     transcript: transcript,
                     contextSummary: context.contextSummary,
+                    precedingText: precedingText,
+                    followingText: followingText,
                     customVocabulary: vocabularyTerms,
                     customSystemPrompt: customSystemPrompt,
                     outputLanguage: outputLanguage
@@ -241,6 +247,8 @@ Behavior:
     private func processWithFallback(
         transcript: String,
         contextSummary: String,
+        precedingText: String = "",
+        followingText: String = "",
         customVocabulary: [String],
         customSystemPrompt: String = "",
         outputLanguage: String = ""
@@ -251,6 +259,8 @@ Behavior:
             return try await process(
                 transcript: transcript,
                 contextSummary: contextSummary,
+                precedingText: precedingText,
+                followingText: followingText,
                 model: primaryModel,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt,
@@ -278,6 +288,8 @@ Behavior:
             return try await process(
                 transcript: transcript,
                 contextSummary: contextSummary,
+                precedingText: precedingText,
+                followingText: followingText,
                 model: retryModel,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt,
@@ -354,6 +366,8 @@ Behavior:
     private func process(
         transcript: String,
         contextSummary: String,
+        precedingText: String = "",
+        followingText: String = "",
         model: String,
         customVocabulary: [String],
         customSystemPrompt: String = "",
@@ -387,13 +401,24 @@ Use these spellings exactly in the output when relevant:
             systemPrompt += "\n\n" + vocabularyPrompt
         }
 
-        let userMessage = """
-Instructions: Clean up RAW_TRANSCRIPTION and return only the cleaned transcript text without surrounding quotes. Return EMPTY if there should be no result.
+        // Trim preceding/following text for LLM context
+        let effectivePrecedingText = precedingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveFollowingText = followingText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-CONTEXT: "\(contextSummary)"
+        // Build user message with optional surrounding context
+        var instructions = "Instructions: Clean up RAW_TRANSCRIPTION and return ONLY the cleaned transcript text, without surrounding quotes. Return EMPTY if there should be no result."
+        if !effectivePrecedingText.isEmpty || !effectiveFollowingText.isEmpty {
+            instructions += " IMPORTANT: The cleaned text will be inserted between PRECEDING_TEXT and FOLLOWING_TEXT. Return ONLY the cleaned RAW_TRANSCRIPTION. Do NOT repeat, complete, continue, or include any part of PRECEDING_TEXT or FOLLOWING_TEXT — they are provided only as grammatical and spelling context."
+        }
 
-RAW_TRANSCRIPTION: "\(transcript)"
-"""
+        var userMessage = instructions + "\n\nCONTEXT: \"\(contextSummary)\""
+        if !effectivePrecedingText.isEmpty {
+            userMessage += "\n\nPRECEDING_TEXT: \"\(effectivePrecedingText)\""
+        }
+        userMessage += "\n\nRAW_TRANSCRIPTION: \"\(transcript)\""
+        if !effectiveFollowingText.isEmpty {
+            userMessage += "\n\nFOLLOWING_TEXT: \"\(effectiveFollowingText)\""
+        }
 
         let promptForDisplay = """
 Model: \(model)
