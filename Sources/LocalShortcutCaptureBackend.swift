@@ -12,9 +12,7 @@ final class LocalShortcutCaptureBackend {
 
     var onInputEvent: ((ShortcutInputEvent) -> Void)?
     var onKeyDownEvent: ((NSEvent) -> Void)?
-    var onKeyUpEvent: ((NSEvent) -> Void)?
     var onMouseDownEvent: ((NSEvent) -> Void)?
-    var onMouseUpEvent: ((NSEvent) -> Void)?
 
     func start() {
         stop()
@@ -122,7 +120,6 @@ final class LocalShortcutCaptureBackend {
             trustedFunctionKeyIsDown: trustedFn
         )))
         onInputEvent?(.keyChanged(keyCode: event.keyCode, isDown: false, isRepeat: false))
-        onKeyUpEvent?(event)
     }
 
     private func handleMouseDown(_ event: NSEvent) {
@@ -134,6 +131,5 @@ final class LocalShortcutCaptureBackend {
     private func handleMouseUp(_ event: NSEvent) {
         pressedMouseButtons.remove(event.buttonNumber)
         onInputEvent?(.mouseChanged(button: event.buttonNumber, isDown: false))
-        onMouseUpEvent?(event)
     }
 }
