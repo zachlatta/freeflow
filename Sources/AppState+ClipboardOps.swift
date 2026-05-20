@@ -20,8 +20,8 @@ extension AppState {
     /// See: https://github.com/nicke5012/TransientPasteboardType
     ///
     /// These types are declared alongside `.string` when writing to the
-    /// pasteboard. No app behavior changes — the text still pastes normally
-    /// via Cmd-V — but clipboard managers that respect these conventions
+    /// pasteboard. No app behavior changes \u2014 the text still pastes normally
+    /// via Cmd-V \u2014 but clipboard managers that respect these conventions
     /// will not pollute the user's clipboard history with dictated text.
     static let transientClipboardTypes: [NSPasteboard.PasteboardType] = [
         NSPasteboard.PasteboardType("org.nspasteboard.TransientType"),
@@ -51,11 +51,11 @@ extension AppState {
     private static let openingDelimiters: Set<Character> = [
         "(", "[", "{",
         "\"",          // ASCII straight double-quote
-        "\u{201C}",    // " LEFT DOUBLE QUOTATION MARK (curly open)
+        "\u{201C}",    // \u201c LEFT DOUBLE QUOTATION MARK (curly open)
         "'",           // ASCII straight single-quote / apostrophe
-        "\u{2018}",    // ' LEFT SINGLE QUOTATION MARK (curly open)
-        "`", "<", "«",
-        "\u{2039}",    // ‹ SINGLE LEFT-POINTING ANGLE QUOTATION MARK
+        "\u{2018}",    // \u2018 LEFT SINGLE QUOTATION MARK (curly open)
+        "`", "<", "\u{00AB}",
+        "\u{2039}",    // \u2039 SINGLE LEFT-POINTING ANGLE QUOTATION MARK
     ]
 
     // Characters that, when appearing at the START of a transcript, mean we
@@ -63,34 +63,47 @@ extension AppState {
     private static let leadingPunctuation: Set<Character> = [
         ".", ",", ";", ":", "!", "?",
         ")", "]", "}",
-        "\"", "\u{201D}",  // " RIGHT DOUBLE QUOTATION MARK (curly close)
-        "'", "\u{2019}",   // ' RIGHT SINGLE QUOTATION MARK / apostrophe
-        ">", "»", "\u{203A}",  // › SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
-        "…",
+        "\"", "\u{201D}",  // \u201d RIGHT DOUBLE QUOTATION MARK (curly close)
+        "'", "\u{2019}",   // \u2019 RIGHT SINGLE QUOTATION MARK / apostrophe
+        ">", "\u{00BB}", "\u{203A}",  // \u203a SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
+        "\u{2026}",
     ]
 
     // Terminal punctuation that closes a sentence. After these, we do NOT
-    // append a trailing space — the sentence is finished.
-    private static let terminalPunctuation: Set<Character> = [".", "!", "?", "…"]
+    // append a trailing space \u2014 the sentence is finished.
+    private static let terminalPunctuation: Set<Character> = [".", "!", "?", "\u{2026}"]
 
     /// Computes the leading space needed before the transcript based on the
     /// text preceding the cursor. Returns the transcript with a prepended
     /// space if word separation is needed.
     ///
     /// Skips adding space when:
-    ///   - precedingText ends with whitespace, newline, or an opening delimiter
+    ///   - `cursorPosition` is `"start"` (cursor at start of field or new paragraph)
+    ///   - `precedingText` ends with whitespace, newline, or an opening delimiter
     ///   - transcript starts with whitespace, newline, or punctuation
+    ///   - the last non-space character of `precedingText` is a newline, which
+    ///     signals the cursor is at the beginning of a new paragraph even when
+    ///     the Accessibility API omits the trailing `\n`
     static func applySmartLeadingSpace(
         _ transcript: String,
-        precedingText: String?
+        precedingText: String?,
+        cursorPosition: String? = nil
     ) -> String {
-        // Treat nil and empty string identically — AX API may return "" for
-        // empty fields instead of nil.
-        guard let preceding = precedingText, !preceding.isEmpty,
-              let lastChar = preceding.last,
+        // Cursor is explicitly at the start of a field \u2014 never add a leading space.
+        if cursorPosition == "start" { return transcript }
+
+        guard let preceding = precedingText,
               let firstChar = transcript.first else {
             return transcript
         }
+
+        // Detect new paragraph: find the last non-space character in preceding text.
+        // If it is a newline, the cursor is at the beginning of a new line \u2014 no space needed.
+        let lastNonSpace = preceding.reversed().first(where: { !($0 == " " || $0 == "\t") })
+        if let c = lastNonSpace, c.isNewline { return transcript }
+
+        guard let lastChar = preceding.last else { return transcript }
+
         let needsLeadingSpace = !lastChar.isWhitespace
             && !lastChar.isNewline
             && !openingDelimiters.contains(lastChar)
@@ -110,17 +123,24 @@ extension AppState {
     /// - When followingText exists: adds a space ONLY if the following text
     ///   is a letter/number (not punctuation or existing whitespace).
     static func applySmartTrailingSpace(
-        _ transcript: String,
+        _ rawTranscript: String,
         followingText: String?
     ) -> String {
+        // Strip any trailing whitespace from the transcript before computing
+        // spacing. This acts as a catch-all safety net: regardless of whether
+        // the LLM, the formatting rules, or the Accessibility API introduced
+        // a trailing space, the pasted text will never end with stray whitespace.
+        var transcript = rawTranscript
+        while let lastChar = transcript.last, lastChar.isWhitespace {
+            transcript.removeLast()
+        }
+
         guard let lastChar = transcript.last else {
             return transcript
         }
 
         // --- Case 1: No following text (cursor at end of field) ---
         // Never append a trailing space at the end of a field.
-        // The AX API may return "" (empty string) instead of nil when the
-        // cursor is at the very end — treat both identically.
         // If the user dictates again, `applySmartLeadingSpace` will prepend
         // the necessary space based on the preceding character.
         guard let following = followingText, !following.isEmpty else {
@@ -136,17 +156,15 @@ extension AppState {
             return transcript
         }
 
-        // Only add trailing space when the next meaningful character is a
-        // letter or digit. This prevents inserting spaces before closing
-        // delimiters like ), ], }, quotes, or any punctuation/symbol.
         let firstFollowingNonWS = following.first(where: { !$0.isWhitespace && !$0.isNewline })
-        let followingIsWordChar = firstFollowingNonWS.map { $0.isLetter || $0.isNumber } ?? false
+        let followingHasPunctNext = firstFollowingNonWS.map { leadingPunctuation.contains($0) } ?? false
 
-        guard followingIsWordChar else {
+        // If following text starts with punctuation, no space needed
+        guard !followingHasPunctNext else {
             return transcript
         }
 
-        // Following text starts with a letter/digit — we need separation.
+        // Following text starts with a letter/digit \u2014 we need separation.
         // E.g. inserting "word" before "another" -> "word another"
         let needsTrailingSpace = !lastChar.isWhitespace
             && !lastChar.isNewline

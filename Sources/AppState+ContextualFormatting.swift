@@ -11,22 +11,12 @@ extension AppState {
     // MARK: - List Marker Detection
 
     /// Characters used as unordered list bullets in plain text and Markdown.
-    private static let listBullets: Set<Character> = ["-", "*", "•", "‣", "◦", "▸", "▹"]
-
-    /// Characters that act as closing delimiters. If transcript ends with punctuation
-    /// immediately preceding these, the punctuation is stripped to avoid formatting
-    /// errors like ".)" or ".]".
-    private static let closingDelimiters: Set<Character> = [
-        ")", "]", "}",
-        "\"", "\u{201D}",  // ASCII and Unicode right double-quote
-        "'", "\u{2019}",   // ASCII and Unicode right single-quote / apostrophe
-        ">", "»", "\u{203A}"
-    ]
+    private static let listBullets: Set<Character> = ["-", "*", "\u{2022}", "\u{2023}", "\u{25E6}", "\u{25B8}", "\u{25B9}"]
 
     /// Returns true if the trimmed preceding text ends with a list marker pattern.
     ///
     /// Recognized patterns (case-insensitive):
-    /// - Unordered: `- `, `* `, `• `, etc.
+    /// - Unordered: `- `, `* `, `\u{2022} `, etc.
     /// - Ordered: `1. `, `2) `, `a. `, `A) `, etc.
     /// - Nested: `  - `, `    * ` (indentation + bullet)
     private static func endsWithListMarker(_ trimmed: String) -> Bool {
@@ -37,12 +27,12 @@ extension AppState {
         // Since we receive the trimmed version (no trailing whitespace), the
         // cursor sits right after the trailing space that was stripped. So we
         // check the last non-whitespace character of the *untrimmed* preceding
-        // — but here we already have trimmed. The raw preceding ends with
+        // \u2014 but here we already have trimmed. The raw preceding ends with
         // "<marker> " so trimmed ends with the marker character itself.
 
         let last = trimmed.last!
 
-        // Unordered bullet: trimmed ends with - * • etc.
+        // Unordered bullet: trimmed ends with - * \u{2022} etc.
         if listBullets.contains(last) {
             // Make sure it's actually a bullet (line-start or after whitespace),
             // not a hyphenated word like "well-"
@@ -88,27 +78,39 @@ extension AppState {
         followingText: String?,
         cursorPosition: String?
     ) -> String {
-        guard !text.isEmpty else { return text }
-        var result = text
+        // Strip any leading/trailing whitespace the LLM may have added before
+        // applying any formatting rules. This prevents phantom spaces from
+        // leaking into the pasted output regardless of their source.
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return text }
+        var result = trimmedText
 
         // --- Rule 1: Capitalization of the first character ---
+        //
+        // Capitalize when: after terminal punctuation, after newline (new paragraph),
+        // after list marker, at start of field, or when field is empty.
+        // Otherwise, force lowercase (mid-sentence continuation).
+        //
+        // Newline detection is robust: we check the last NON-SPACE character of
+        // precedingText, not just preceding.last, because some accessibility APIs
+        // return trailing spaces after the \n (e.g. "Previous text.\n  ").
         let shouldCapitalize: Bool
-        if let preceding = precedingText, !preceding.isEmpty {
-            // Check the raw text (before trimming) for trailing newlines.
-            // The AX API may return "text\n" or "text\n  " (newline + indentation).
-            // We look for the last non-space char to detect newlines even with
-            // trailing spaces/tabs from indentation.
-            let lastNonSpace = preceding.last(where: { $0 != " " && $0 != "\t" })
-            let rawEndsWithNewline = lastNonSpace == "\n" || lastNonSpace == "\r"
+        if let preceding = precedingText {
+            let rawEndsWithNewline = preceding.last == "\n" || preceding.last == "\r"
+            // Also detect newline when spaces follow it (e.g. "text.\n  ")
+            let lastNonSpace = preceding.reversed().first(where: { !($0 == " " || $0 == "\t") })
+            let lastNonSpaceIsNewline = lastNonSpace.map { $0.isNewline } ?? false
+
             let trimmed = preceding.trimmingCharacters(in: .whitespacesAndNewlines)
             let endsWithTerminalPunct = trimmed.last.map { ".!?:".contains($0) } ?? false
             let endsWithListItem = Self.endsWithListMarker(trimmed)
             // Capitalize when: sentence boundary, start of field, after newline, or list item
-            shouldCapitalize = rawEndsWithNewline || endsWithTerminalPunct
+            shouldCapitalize = rawEndsWithNewline || lastNonSpaceIsNewline
+                || endsWithTerminalPunct
                 || endsWithListItem
                 || cursorPosition == "start" || trimmed.isEmpty
         } else {
-            // No preceding context or empty string: field is empty or inaccessible
+            // No preceding context: field is empty or inaccessible
             shouldCapitalize = true
         }
 
@@ -121,20 +123,26 @@ extension AppState {
             }
         }
 
-        // --- Rule 2: Remove trailing punctuation for mechanical conflicts ---
+        // --- Rule 2: Remove terminal punctuation when it would conflict with followingText ---
         //
-        // We rely on the LLM post-processing service (which sees PRECEDING_TEXT and FOLLOWING_TEXT)
-        // to make smart grammatical decisions about whether the transcript needs terminal
-        // punctuation (. ! ?). We trust its decisions for complete sentences, interjections, etc.
+        // The LLM does not know what text follows the cursor, so it often adds
+        // terminal punctuation (. ! ?) assuming the transcript ends the sentence.
+        // When inserting mid-text, this creates duplicates or conflicts with the
+        // existing punctuation flow. We remove the transcript's trailing punct
+        // in any of these scenarios:
         //
-        // However, we apply deterministic overrides for mechanical formatting conflicts:
+        //   A) Transcript ends with .!? and followingText continues with a
+        //      letter/digit \u2192 we are mid-sentence, punct is unwanted.
+        //   B) Transcript ends with ANY punctuation and followingText starts
+        //      with the SAME punctuation \u2192 duplicate.
+        //   C) Transcript ends with ANY punctuation and followingText starts
+        //      with DIFFERENT punctuation \u2192 conflicting; the existing text's
+        //      punctuation takes precedence over the LLM-generated one.
         //
-        //   A) Duplicate/Conflicting punctuation: Transcript ends with punctuation AND
-        //      followingText starts with punctuation -> remove transcript's punctuation
-        //      so the existing punctuation on screen takes precedence (avoiding ".." or ".?").
-        //   B) Inside parentheses/quotes: Transcript ends with punctuation AND the immediate
-        //      following non-whitespace character is a closing delimiter (like ")", "]", "}",
-        //      or quotes) -> remove transcript's punctuation to avoid formatting errors like ".)".
+        // We examine the first *non-whitespace* character of followingText to
+        // handle cases where the Accessibility API returns " ." (space before
+        // punctuation) depending on cursor position.
+
         let allPunctuation: Set<Character> = [".", "!", "?", ",", ";", ":"]
 
         if let following = followingText, !following.isEmpty {
@@ -151,44 +159,34 @@ extension AppState {
                 let isAbbreviation = lastWord.hasSuffix(".") && lastWord.count <= 4
 
                 if !isAbbreviation {
-                    // Case A: Transcript ends with punctuation AND following starts with punctuation
-                    //         -> avoid duplicate/conflicting punctuation (e.g. "..", ".,", ".?")
-                    if allPunctuation.contains(lastChar) && allPunctuation.contains(firstFollowingNonSpace) {
-                        result.removeLast()
+                    // Case A: transcript ends with .!? and following starts with letter/digit
+                    //         \u2192 mid-sentence insertion, remove LLM's terminal punct
+                    if allPunctuation.contains(lastChar)
+                        && (firstFollowingNonSpace.isLetter || firstFollowingNonSpace.isNumber) {
+                        // Only remove terminal punct (.!?), not commas/semicolons which are structural
+                        if ".!?".contains(lastChar) {
+                            result.removeLast()
+                        }
                     }
-                    // Case B: Transcript ends with punctuation AND following starts with a closing delimiter
-                    //         -> avoid punctuation inside brackets/quotes (e.g. ".)", ".]", ".\"")
-                    else if allPunctuation.contains(lastChar) && Self.closingDelimiters.contains(firstFollowingNonSpace) {
+                    // Case B+C unified: transcript ends with punct AND following starts with punct
+                    //                   \u2192 the existing text's punctuation takes precedence
+                    else if allPunctuation.contains(lastChar)
+                                && allPunctuation.contains(firstFollowingNonSpace) {
                         result.removeLast()
                     }
                 }
             }
         }
 
-        // --- Rule 3: Strip trailing whitespace and zero-width characters ---
+        // --- Rule 3: Strip trailing whitespace ---
         // Always strip ALL trailing whitespace (including Unicode variants like
-        // non-breaking space \u{00A0} and zero-width formatting characters) from
-        // the formatted result. The downstream applySmartTrailingSpace will re-add
-        // a space ONLY when followingText exists and requires word separation.
-        while let last = result.last,
-              last.isWhitespace || Self.zeroWidthChars.contains(last) {
+        // non-breaking space \u{00A0} and zero-width spaces) from the formatted result.
+        // The downstream applySmartTrailingSpace will re-add a space ONLY when
+        // followingText exists and requires word separation.
+        while let last = result.last, last.isWhitespace || last == "\u{00A0}" {
             result.removeLast()
         }
 
         return result
     }
-
-    // MARK: - Zero-Width Characters
-
-    /// Unicode characters that are invisible but can break spacing logic if left
-    /// at the end of the formatted text. These are stripped alongside whitespace
-    /// in Rule 3.
-    private static let zeroWidthChars: Set<Character> = [
-        "\u{00A0}",  // NBSP (non-breaking space)
-        "\u{200B}",  // zero-width space
-        "\u{200C}",  // zero-width non-joiner
-        "\u{200D}",  // zero-width joiner
-        "\u{2060}",  // word joiner
-        "\u{FEFF}",  // zero-width no-break space / BOM
-    ]
 }
