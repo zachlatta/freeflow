@@ -84,7 +84,9 @@ extension AppState {
         _ transcript: String,
         precedingText: String?
     ) -> String {
-        guard let preceding = precedingText,
+        // Treat nil and empty string identically — AX API may return "" for
+        // empty fields instead of nil.
+        guard let preceding = precedingText, !preceding.isEmpty,
               let lastChar = preceding.last,
               let firstChar = transcript.first else {
             return transcript
@@ -117,6 +119,8 @@ extension AppState {
 
         // --- Case 1: No following text (cursor at end of field) ---
         // Never append a trailing space at the end of a field.
+        // The AX API may return "" (empty string) instead of nil when the
+        // cursor is at the very end — treat both identically.
         // If the user dictates again, `applySmartLeadingSpace` will prepend
         // the necessary space based on the preceding character.
         guard let following = followingText, !following.isEmpty else {
@@ -132,11 +136,13 @@ extension AppState {
             return transcript
         }
 
+        // Only add trailing space when the next meaningful character is a
+        // letter or digit. This prevents inserting spaces before closing
+        // delimiters like ), ], }, quotes, or any punctuation/symbol.
         let firstFollowingNonWS = following.first(where: { !$0.isWhitespace && !$0.isNewline })
-        let followingHasPunctNext = firstFollowingNonWS.map { leadingPunctuation.contains($0) } ?? false
+        let followingIsWordChar = firstFollowingNonWS.map { $0.isLetter || $0.isNumber } ?? false
 
-        // If following text starts with punctuation, no space needed
-        guard !followingHasPunctNext else {
+        guard followingIsWordChar else {
             return transcript
         }
 
