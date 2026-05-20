@@ -63,6 +63,7 @@ struct SetupView: View {
         case screenRecording
         case holdShortcut
         case toggleShortcut
+        case copyAgainShortcut
         case commandMode
         case vocabulary
         case launchAtLogin
@@ -99,14 +100,16 @@ struct SetupView: View {
     @State private var testMicPulsing = false
     @State private var holdShortcutValidationMessage: String?
     @State private var toggleShortcutValidationMessage: String?
+    @State private var copyAgainShortcutValidationMessage: String?
     @State private var isCapturingHoldShortcut = false
     @State private var isCapturingToggleShortcut = false
+    @State private var isCapturingCopyAgainShortcut = false
     @StateObject private var testHotkeyHarness = SetupTestHotkeyHarness()
     @AppStorage("use_compact_overlay") private var useCompactOverlay = true
 
     private let totalSteps: [SetupStep] = SetupStep.allCases
     private var isCapturingShortcut: Bool {
-        isCapturingHoldShortcut || isCapturingToggleShortcut
+        isCapturingHoldShortcut || isCapturingToggleShortcut || isCapturingCopyAgainShortcut
     }
 
     var body: some View {
@@ -242,6 +245,8 @@ struct SetupView: View {
             holdShortcutStep
         case .toggleShortcut:
             toggleShortcutStep
+        case .copyAgainShortcut:
+            copyAgainShortcutStep
         case .commandMode:
             commandModeStep
         case .vocabulary:
@@ -676,6 +681,41 @@ struct SetupView: View {
                     .multilineTextAlignment(.center)
             }
 
+        }
+    }
+
+    var copyAgainShortcutStep: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "doc.on.clipboard")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Paste Again Shortcut")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Optional. Choose a shortcut to paste your last transcript again into the active text field, without opening the menu bar. Leave disabled if you do not want one.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ShortcutRoleSection(
+                role: .copyAgain,
+                selection: appState.copyAgainShortcut,
+                validationMessage: copyAgainShortcutValidationMessage,
+                isCapturing: $isCapturingCopyAgainShortcut,
+                onSelect: { binding in
+                    copyAgainShortcutValidationMessage = appState.setShortcut(binding, for: .copyAgain)
+                }
+            )
+                .padding(.top, 10)
+
+            if appState.copyAgainShortcut.usesFnKey {
+                Text("Tip: If Fn opens Emoji picker, go to System Settings > Keyboard and change \"Press fn key to\" to \"Do Nothing\".")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
 
