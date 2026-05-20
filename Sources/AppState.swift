@@ -1257,10 +1257,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     func retryTranscription(item: PipelineHistoryItem) {
-        reTranscribe(item: item, copyToClipboard: false)
-    }
-
-    func old_retryTranscription(item: PipelineHistoryItem) {
         guard let audioFileName = item.audioFileName else { return }
         guard !retryingItemIDs.contains(item.id) else { return }
 
