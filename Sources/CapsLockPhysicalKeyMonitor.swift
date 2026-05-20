@@ -16,7 +16,12 @@ enum CapsLockPhysicalKeyMonitorError: LocalizedError {
 }
 
 final class CapsLockPhysicalKeyMonitor {
-    private typealias ElementIdentifier = UInt
+    private typealias DeviceIdentifier = UInt
+
+    private struct ElementIdentifier: Hashable {
+        let deviceID: DeviceIdentifier
+        let cookie: IOHIDElementCookie
+    }
 
     private var manager: IOHIDManager?
     private let runLoopMode = CFRunLoopMode.commonModes.rawValue
@@ -46,11 +51,23 @@ final class CapsLockPhysicalKeyMonitor {
             },
             Unmanaged.passUnretained(self).toOpaque()
         )
+        IOHIDManagerRegisterDeviceRemovalCallback(
+            manager,
+            { context, _, _, device in
+                guard let context else { return }
+                let monitor = Unmanaged<CapsLockPhysicalKeyMonitor>
+                    .fromOpaque(context)
+                    .takeUnretainedValue()
+                monitor.handleDeviceRemoval(device)
+            },
+            Unmanaged.passUnretained(self).toOpaque()
+        )
         IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), runLoopMode)
 
         let openResult = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         guard openResult == kIOReturnSuccess else {
             IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), runLoopMode)
+            IOHIDManagerRegisterDeviceRemovalCallback(manager, nil, nil)
             IOHIDManagerRegisterInputValueCallback(manager, nil, nil)
             capsLockStatesByElement.removeAll()
             os_log(.error, log: capsLockPhysicalKeyLog, "Caps Lock HID monitor failed to open: %{public}d", openResult)
@@ -63,6 +80,7 @@ final class CapsLockPhysicalKeyMonitor {
     func stop() {
         guard let manager else { return }
 
+        IOHIDManagerRegisterDeviceRemovalCallback(manager, nil, nil)
         IOHIDManagerRegisterInputValueCallback(manager, nil, nil)
         IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), runLoopMode)
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -94,7 +112,26 @@ final class CapsLockPhysicalKeyMonitor {
         onStateChanged?(isAnyCapsLockDown)
     }
 
+    private func handleDeviceRemoval(_ device: IOHIDDevice) {
+        let deviceID = Self.deviceIdentifier(for: device)
+        let wasAnyCapsLockDown = capsLockStatesByElement.values.contains(true)
+        capsLockStatesByElement = capsLockStatesByElement.filter { elementID, _ in
+            elementID.deviceID != deviceID
+        }
+        let isAnyCapsLockDown = capsLockStatesByElement.values.contains(true)
+        guard wasAnyCapsLockDown != isAnyCapsLockDown else { return }
+
+        onStateChanged?(isAnyCapsLockDown)
+    }
+
     private static func elementIdentifier(for element: IOHIDElement) -> ElementIdentifier {
-        UInt(bitPattern: Unmanaged.passUnretained(element).toOpaque())
+        ElementIdentifier(
+            deviceID: deviceIdentifier(for: IOHIDElementGetDevice(element)),
+            cookie: IOHIDElementGetCookie(element)
+        )
+    }
+
+    private static func deviceIdentifier(for device: IOHIDDevice) -> DeviceIdentifier {
+        UInt(bitPattern: Unmanaged.passUnretained(device).toOpaque())
     }
 }
