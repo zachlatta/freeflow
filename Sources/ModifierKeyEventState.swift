@@ -23,6 +23,9 @@ enum ModifierKeyEventState {
             if keyCode == fnKeyCode, let trustedFunctionKeyIsDown {
                 return trustedFunctionKeyIsDown
             }
+            // Unlike fnKeyCode/trustedFunctionKeyIsDown, Caps Lock cannot
+            // fall back to event flags: they report the latched lock state.
+            // Without trustedCapsLockKeyIsDown, treat capsLockKeyCode as up.
             if keyCode == capsLockKeyCode {
                 return trustedCapsLockKeyIsDown ?? false
             }

@@ -18,6 +18,7 @@ enum CapsLockPhysicalKeyMonitorError: LocalizedError {
 final class CapsLockPhysicalKeyMonitor {
     private var manager: IOHIDManager?
     private let runLoopMode = CFRunLoopMode.commonModes.rawValue
+    private var capsLockIsDown = false
 
     var onStateChanged: ((Bool) -> Void)?
 
@@ -26,8 +27,9 @@ final class CapsLockPhysicalKeyMonitor {
 
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let matching: CFDictionary = [
-            kIOHIDElementUsagePageKey: kHIDPage_KeyboardOrKeypad,
-            kIOHIDElementUsageKey: kHIDUsage_KeyboardCapsLock
+            kIOHIDElementTypeKey: NSNumber(value: kIOHIDElementTypeInput_Button.rawValue),
+            kIOHIDElementUsagePageKey: NSNumber(value: kHIDPage_KeyboardOrKeypad),
+            kIOHIDElementUsageKey: NSNumber(value: kHIDUsage_KeyboardCapsLock)
         ] as CFDictionary
 
         IOHIDManagerSetInputValueMatching(manager, matching)
@@ -48,6 +50,7 @@ final class CapsLockPhysicalKeyMonitor {
         guard openResult == kIOReturnSuccess else {
             IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), runLoopMode)
             IOHIDManagerRegisterInputValueCallback(manager, nil, nil)
+            capsLockIsDown = false
             os_log(.error, log: capsLockPhysicalKeyLog, "Caps Lock HID monitor failed to open: %{public}d", openResult)
             throw CapsLockPhysicalKeyMonitorError.openFailed(openResult)
         }
@@ -62,6 +65,7 @@ final class CapsLockPhysicalKeyMonitor {
         IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), runLoopMode)
         IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         self.manager = nil
+        capsLockIsDown = false
     }
 
     deinit {
@@ -70,11 +74,16 @@ final class CapsLockPhysicalKeyMonitor {
 
     private func handleInputValue(_ value: IOHIDValue) {
         let element = IOHIDValueGetElement(value)
-        guard IOHIDElementGetUsagePage(element) == kHIDPage_KeyboardOrKeypad,
+        guard IOHIDElementGetType(element) == kIOHIDElementTypeInput_Button,
+              IOHIDElementGetUsagePage(element) == kHIDPage_KeyboardOrKeypad,
               IOHIDElementGetUsage(element) == kHIDUsage_KeyboardCapsLock else {
             return
         }
 
-        onStateChanged?(IOHIDValueGetIntegerValue(value) != 0)
+        let isDown = IOHIDValueGetIntegerValue(value) != 0
+        guard isDown != capsLockIsDown else { return }
+
+        capsLockIsDown = isDown
+        onStateChanged?(isDown)
     }
 }

@@ -25,6 +25,7 @@ final class GlobalShortcutBackend {
     private var eventTapRunLoopSource: CFRunLoopSource?
     private var fnKeyIsDown = false
     private var capsLockKeyIsDown = false
+    private var capsLockConsumeDecision: ShortcutConsumeDecision = .passthrough
     private var capsLockPhysicalKeyMonitor: CapsLockPhysicalKeyMonitor?
 
     var onInputEvent: ((ShortcutInputEvent) -> ShortcutConsumeDecision)?
@@ -111,6 +112,7 @@ final class GlobalShortcutBackend {
     private func notifyBackendReset() {
         fnKeyIsDown = false
         capsLockKeyIsDown = false
+        capsLockConsumeDecision = .passthrough
         _ = onInputEvent?(.backendReset)
     }
 
@@ -121,6 +123,10 @@ final class GlobalShortcutBackend {
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
                 fnKeyIsDown = ModifierKeyEventState.currentFunctionKeyIsDown()
+                // The eventTap can reseed fnKeyIsDown from NSEvent state, but
+                // capsLockKeyIsDown cannot use modifier flags because they
+                // report the latched Caps Lock state, not the physical key.
+                // The HID monitor will restore it on the next physical edge.
             }
             return Unmanaged.passUnretained(event)
 
@@ -154,14 +160,12 @@ final class GlobalShortcutBackend {
             return false
         }
 
-        if event.keyCode == ModifierKeyEventState.capsLockKeyCode,
-           capsLockPhysicalKeyMonitor != nil {
-            return false
-        }
-
         if event.keyCode == ModifierKeyEventState.fnKeyCode {
             fnKeyIsDown = isDown
         } else if event.keyCode == ModifierKeyEventState.capsLockKeyCode {
+            guard capsLockPhysicalKeyMonitor == nil else {
+                return capsLockConsumeDecision == .consume
+            }
             capsLockKeyIsDown = isDown
         }
 
@@ -208,10 +212,10 @@ final class GlobalShortcutBackend {
         monitor.onStateChanged = { [weak self] isDown in
             guard let self else { return }
             capsLockKeyIsDown = isDown
-            _ = onInputEvent?(.modifierChanged(
+            capsLockConsumeDecision = onInputEvent?(.modifierChanged(
                 keyCode: ModifierKeyEventState.capsLockKeyCode,
                 isDown: isDown
-            ))
+            )) ?? .passthrough
         }
 
         do {
