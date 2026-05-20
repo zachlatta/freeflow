@@ -29,7 +29,7 @@ final class HotkeyManager {
             self?.onEscapeKeyPressed?() ?? false
         }
         do {
-            try backend.start()
+            try backend.start(tracksCapsLock: configuration.hold.usesCapsLockKey || configuration.toggle.usesCapsLockKey)
         } catch {
             backend.onInputEvent = nil
             backend.onEscapeKeyPressed = nil

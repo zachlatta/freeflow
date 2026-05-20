@@ -6,6 +6,7 @@ private let shortcutLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "
 enum GlobalShortcutBackendError: LocalizedError {
     case eventTapUnavailable
     case eventTapRunLoopSourceUnavailable
+    case capsLockPhysicalMonitorUnavailable(String)
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +14,8 @@ enum GlobalShortcutBackendError: LocalizedError {
             return "Global shortcut monitoring could not start. \(AppName.displayName) requires keyboard monitoring permission for global shortcuts."
         case .eventTapRunLoopSourceUnavailable:
             return "Global shortcut monitoring could not start because the event tap run loop source could not be created."
+        case .capsLockPhysicalMonitorUnavailable(let reason):
+            return "Global shortcut monitoring could not start for Caps Lock. \(reason)"
         }
     }
 }
@@ -22,14 +25,23 @@ final class GlobalShortcutBackend {
     private var eventTapRunLoopSource: CFRunLoopSource?
     private var fnKeyIsDown = false
     private var capsLockKeyIsDown = false
+    private var capsLockPhysicalKeyMonitor: CapsLockPhysicalKeyMonitor?
 
     var onInputEvent: ((ShortcutInputEvent) -> ShortcutConsumeDecision)?
     var onEscapeKeyPressed: (() -> Bool)?
 
-    func start() throws {
+    func start(tracksCapsLock: Bool = false) throws {
         stop()
         try installEventTap()
         fnKeyIsDown = ModifierKeyEventState.currentFunctionKeyIsDown()
+        if tracksCapsLock {
+            do {
+                try installCapsLockPhysicalKeyMonitor()
+            } catch {
+                tearDownEventTap()
+                throw error
+            }
+        }
     }
 
     func stop() {
@@ -93,6 +105,7 @@ final class GlobalShortcutBackend {
             CFMachPortInvalidate(tap)
         }
         eventTap = nil
+        tearDownCapsLockPhysicalKeyMonitor()
     }
 
     private func notifyBackendReset() {
@@ -141,6 +154,11 @@ final class GlobalShortcutBackend {
             return false
         }
 
+        if event.keyCode == ModifierKeyEventState.capsLockKeyCode,
+           capsLockPhysicalKeyMonitor != nil {
+            return false
+        }
+
         if event.keyCode == ModifierKeyEventState.fnKeyCode {
             fnKeyIsDown = isDown
         } else if event.keyCode == ModifierKeyEventState.capsLockKeyCode {
@@ -183,5 +201,29 @@ final class GlobalShortcutBackend {
             .keyChanged(keyCode: event.keyCode, isDown: false, isRepeat: false)
         ) ?? .passthrough
         return snapshotDecision == .consume || keyDecision == .consume
+    }
+
+    private func installCapsLockPhysicalKeyMonitor() throws {
+        let monitor = CapsLockPhysicalKeyMonitor()
+        monitor.onStateChanged = { [weak self] isDown in
+            guard let self else { return }
+            capsLockKeyIsDown = isDown
+            _ = onInputEvent?(.modifierChanged(
+                keyCode: ModifierKeyEventState.capsLockKeyCode,
+                isDown: isDown
+            ))
+        }
+
+        do {
+            try monitor.start()
+            capsLockPhysicalKeyMonitor = monitor
+        } catch {
+            throw GlobalShortcutBackendError.capsLockPhysicalMonitorUnavailable(error.localizedDescription)
+        }
+    }
+
+    private func tearDownCapsLockPhysicalKeyMonitor() {
+        capsLockPhysicalKeyMonitor?.stop()
+        capsLockPhysicalKeyMonitor = nil
     }
 }

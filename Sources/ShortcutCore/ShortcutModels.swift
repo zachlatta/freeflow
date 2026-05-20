@@ -204,6 +204,11 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         return keyCode == 63 || modifiers.contains(.function)
     }
 
+    var usesCapsLockKey: Bool {
+        guard !isDisabled else { return false }
+        return keyCode == Self.capsLockKeyCode || modifiers.contains(.capsLock)
+    }
+
     var requiresExactModifierMatch: Bool {
         kind == .modifierKey || exactModifierKeyCodes != nil
     }
