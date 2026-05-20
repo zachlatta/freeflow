@@ -1438,9 +1438,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if binding.kind == .mouseButton && binding.keyCode == 0 {
             return "The left mouse button can't be used as a shortcut — use a side, middle, or right button instead."
         }
-        if binding.kind == .key, let cm = binding.chordMouseButton, cm == 0 {
-            return "The left mouse button can't be used as a chord partner — use another button."
-        }
 
         switch role {
         case .hold:

@@ -35,7 +35,7 @@ final class LocalShortcutCaptureBackend {
 
         localKeyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { [weak self] event in
             self?.handleKeyUp(event)
-            return event
+            return nil
         }
 
         let mouseDownMask = NSEvent.EventTypeMask.leftMouseDown
@@ -51,7 +51,7 @@ final class LocalShortcutCaptureBackend {
             .union(.otherMouseUp)
         localMouseUpMonitor = NSEvent.addLocalMonitorForEvents(matching: mouseUpMask) { [weak self] event in
             self?.handleMouseUp(event)
-            return event
+            return event.buttonNumber == 0 ? event : nil
         }
     }
 

@@ -117,8 +117,7 @@ extension ShortcutBinding {
             kind: .mouseButton,
             preset: nil,
             exactModifierKeyCodes: nil,
-            chordKeyCode: nil,
-            chordMouseButton: nil
+            chordKeyCode: nil
         )
     }
 
@@ -141,8 +140,7 @@ extension ShortcutBinding {
                 kind: .mouseButton,
                 preset: nil,
                 exactModifierKeyCodes: nil,
-                chordKeyCode: sortedKeys[0],
-                chordMouseButton: nil
+                chordKeyCode: sortedKeys[0]
             )
         }
 
@@ -158,8 +156,7 @@ extension ShortcutBinding {
                 exactModifierKeyCodes: normalizedExactModifierKeyCodes(
                     exactModifierKeyCodes(for: mods)
                 ),
-                chordKeyCode: sorted[1],
-                chordMouseButton: nil
+                chordKeyCode: sorted[1]
             )
         }
 
@@ -174,8 +171,7 @@ extension ShortcutBinding {
                 exactModifierKeyCodes: normalizedExactModifierKeyCodes(
                     exactModifierKeyCodes(for: mods)
                 ),
-                chordKeyCode: nil,
-                chordMouseButton: nil
+                chordKeyCode: nil
             )
         }
 
@@ -188,8 +184,7 @@ extension ShortcutBinding {
                 kind: .mouseButton,
                 preset: nil,
                 exactModifierKeyCodes: nil,
-                chordKeyCode: nil,
-                chordMouseButton: nil
+                chordKeyCode: nil
             )
         }
 

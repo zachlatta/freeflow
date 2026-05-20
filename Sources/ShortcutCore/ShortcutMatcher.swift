@@ -36,8 +36,6 @@ struct ShortcutInputState: Equatable {
             let buttonCode = UInt16(button)
             return configuration.hold.kind == .mouseButton && configuration.hold.keyCode == buttonCode
                 || configuration.toggle.kind == .mouseButton && configuration.toggle.keyCode == buttonCode
-                || configuration.hold.chordMouseButton == buttonCode
-                || configuration.toggle.chordMouseButton == buttonCode
         }
         if keyReferenceHeld || mouseReferenceHeld {
             return true
@@ -262,10 +260,6 @@ enum ShortcutMatcher {
                !state.pressedKeyCodes.contains(chordKeyCode) {
                 return false
             }
-            if let chordMouseButton = binding.chordMouseButton,
-               !state.pressedMouseButtons.contains(Int(chordMouseButton)) {
-                return false
-            }
             return true
         case .modifierKey:
             return state.pressedModifierKeyCodes.contains(binding.keyCode)
@@ -333,13 +327,7 @@ enum ShortcutMatcher {
     ) -> [ShortcutBinding] {
         let buttonCode = UInt16(button)
         return [configuration.hold, configuration.toggle].filter { binding in
-            if binding.kind == .mouseButton {
-                return binding.keyCode == buttonCode
-            }
-            if binding.kind == .key, let chordMouseButton = binding.chordMouseButton {
-                return chordMouseButton == buttonCode
-            }
-            return false
+            binding.kind == .mouseButton && binding.keyCode == buttonCode
         }
     }
 

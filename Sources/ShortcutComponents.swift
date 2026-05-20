@@ -259,20 +259,6 @@ private struct ShortcutCaptureRow: View {
                 modifierFlags: event.modifierFlags
             )
         }
-        backend.onMouseUpEvent = { event in
-            currentBinding = ShortcutBinding.fromCaptureState(
-                pressedKeys: captureInputState.pressedKeyCodes,
-                pressedMouse: captureInputState.pressedMouseButtons,
-                modifierFlags: event.modifierFlags
-            )
-        }
-        backend.onKeyUpEvent = { event in
-            currentBinding = ShortcutBinding.fromCaptureState(
-                pressedKeys: captureInputState.pressedKeyCodes,
-                pressedMouse: captureInputState.pressedMouseButtons,
-                modifierFlags: event.modifierFlags
-            )
-        }
         backend.onKeyDownEvent = { event in
             let isReturnKey = event.keyCode == 36 || event.keyCode == 76
             let hasPendingCapture = currentBinding != nil

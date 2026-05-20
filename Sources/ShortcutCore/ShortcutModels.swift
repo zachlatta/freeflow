@@ -143,7 +143,6 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     let preset: ShortcutPreset?
     let exactModifierKeyCodes: Set<UInt16>?
     let chordKeyCode: UInt16?
-    let chordMouseButton: UInt16?
 
     init(
         keyCode: UInt16,
@@ -152,8 +151,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         kind: ShortcutBindingKind,
         preset: ShortcutPreset?,
         exactModifierKeyCodes: Set<UInt16>? = nil,
-        chordKeyCode: UInt16? = nil,
-        chordMouseButton: UInt16? = nil
+        chordKeyCode: UInt16? = nil
     ) {
         self.keyCode = keyCode
         self.keyDisplay = keyDisplay
@@ -162,14 +160,13 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         self.preset = preset
         self.exactModifierKeyCodes = exactModifierKeyCodes
         self.chordKeyCode = chordKeyCode
-        self.chordMouseButton = chordMouseButton
     }
 
     var id: String {
         let exactModifierID = Self.orderedExactModifierKeyCodes(
             exactModifierKeyCodes ?? []
         ).map(String.init).joined(separator: ",")
-        return "\(kind.rawValue):\(keyCode):\(modifiers.rawValue):\(preset?.rawValue ?? "custom"):\(exactModifierID):\(chordKeyCode.map(String.init) ?? ""):\(chordMouseButton.map(String.init) ?? "")"
+        return "\(kind.rawValue):\(keyCode):\(modifiers.rawValue):\(preset?.rawValue ?? "custom"):\(exactModifierID):\(chordKeyCode.map(String.init) ?? "")"
     }
 
     var displayName: String {
@@ -177,9 +174,6 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         var parts = modifierDisplayNames + [primaryDisplayName]
         if let chordKeyCode {
             parts.append(Self.displayLabel(for: chordKeyCode))
-        }
-        if let chordMouseButton {
-            parts.append(Self.mouseButtonDisplayLabel(button: Int(chordMouseButton)))
         }
         return parts.joined(separator: " + ")
     }
@@ -199,7 +193,6 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     var specificityScore: Int {
         var score = modifierDisplayNames.count
         if chordKeyCode != nil { score += 1 }
-        if chordMouseButton != nil { score += 1 }
         return score
     }
 
@@ -231,8 +224,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             kind: kind,
             preset: preset,
             exactModifierKeyCodes: updatedExactModifierKeyCodes,
-            chordKeyCode: chordKeyCode,
-            chordMouseButton: chordMouseButton
+            chordKeyCode: chordKeyCode
         )
     }
 
@@ -257,8 +249,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             kind: kind,
             preset: preset,
             exactModifierKeyCodes: normalizedExactModifierKeyCodes,
-            chordKeyCode: chordKeyCode,
-            chordMouseButton: chordMouseButton
+            chordKeyCode: chordKeyCode
         )
     }
 
@@ -359,8 +350,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         kind: .disabled,
         preset: nil,
         exactModifierKeyCodes: nil,
-        chordKeyCode: nil,
-        chordMouseButton: nil
+        chordKeyCode: nil
     )
     static let defaultHold = ShortcutPreset.fnKey.binding
     static let defaultToggle = ShortcutPreset.fnKey.binding.withAddedModifiers(.command)
