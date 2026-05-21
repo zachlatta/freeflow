@@ -1196,8 +1196,27 @@ struct GeneralSettingsView: View {
 
     // MARK: Clipboard
 
+    @State private var pasteboardNameInput: String = ""
+
     private var clipboardSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Text("Pasteboard name")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField("com.zachlatta.freeflow", text: $pasteboardNameInput)
+                .textFieldStyle(.roundedBorder)
+                .onChange(of: pasteboardNameInput) { newValue in
+                    appState.pasteboardName = newValue.isEmpty ? AppState.defaultPasteboardName : newValue
+                }
+
+            Text("Use this pasteboard name for clipboard managers like Maccy and Raycast. They can ignore \(AppName.displayName) by this name, preventing dictation from cluttering clipboard history. Restart \(AppName.displayName) after changing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+                .padding(.vertical, 2)
+
             Toggle("Preserve clipboard after paste", isOn: $appState.preserveClipboard)
 
             Text("\(AppName.displayName) will temporarily place the transcript on your clipboard to paste it, then restore whatever was there before. If you copy something else before the restore happens, \(AppName.displayName) leaves it alone.")
@@ -1212,6 +1231,9 @@ struct GeneralSettingsView: View {
             Text("When the transcription ends with \"press enter\", \(AppName.displayName) removes those words before cleanup, pastes the remaining transcript, then presses Return.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+        .onAppear {
+            pasteboardNameInput = appState.pasteboardName
         }
     }
 

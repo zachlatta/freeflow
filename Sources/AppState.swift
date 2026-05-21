@@ -221,7 +221,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
     private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
+    private let pasteboardNameStorageKey = "pasteboard_name"
     private let preserveClipboardStorageKey = "preserve_clipboard"
+    private let clipboardRestoreDelay: TimeInterval = 1.0
+    static let defaultPasteboardName = "com.zachlatta.freeflow"
     private let pressEnterVoiceCommandStorageKey = "press_enter_voice_command_enabled"
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
     private let soundVolumeStorageKey = "sound_volume"
@@ -235,7 +238,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
-    private let clipboardRestoreDelay: TimeInterval = 1.0
+
     let maxPipelineHistoryCount = 20
     static let defaultContextScreenshotMaxDimension = Int(AppContextService.defaultScreenshotMaxDimension)
     static let contextScreenshotDimensionOptions = [1024, 768, 640, 512]
@@ -488,6 +491,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var pasteboardName: String {
+        didSet {
+            UserDefaults.standard.set(pasteboardName, forKey: pasteboardNameStorageKey)
+        }
+    }
+
     @Published var preserveClipboard: Bool {
         didSet {
             UserDefaults.standard.set(preserveClipboard, forKey: preserveClipboardStorageKey)
@@ -651,6 +660,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let commandModeManualModifier = CommandModeManualModifier(
             rawValue: UserDefaults.standard.string(forKey: commandModeManualModifierStorageKey) ?? ""
         ) ?? .option
+        let pasteboardName = UserDefaults.standard.string(forKey: pasteboardNameStorageKey) ?? Self.defaultPasteboardName
         let preserveClipboard = UserDefaults.standard.object(forKey: preserveClipboardStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
@@ -725,6 +735,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.customContextPromptLastModified = customContextPromptLastModified
         self.outputLanguage = outputLanguage
         self.shortcutStartDelay = shortcutStartDelay
+        self.pasteboardName = pasteboardName
         self.preserveClipboard = preserveClipboard
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
@@ -1679,15 +1690,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return false
     }
 
-    /// Copies the last transcript to the pasteboard and pastes it into the
-    /// focused app — Wispr Flow style. Reuses the dictation paste pipeline so
-    /// preserveClipboard is honored and the synthetic Cmd+V waits for the
-    /// trigger shortcut to be fully released.
+    /// Writes the last transcript to the named pasteboard and inserts it into the
+    /// focused app. Writes to the named pasteboard so clipboard managers can
+    /// ignore it by name, and inserts directly via AXUIElement so the user's
+    /// general clipboard is unaffected.
     func copyLastTranscriptToPasteboard() {
         guard !lastTranscript.isEmpty else { return }
-        let pendingClipboardRestore = writeTranscriptToPasteboard(lastTranscript)
-        pasteAtCursorWhenShortcutReleased { [weak self] in
-            self?.restoreClipboardIfNeeded(pendingClipboardRestore)
+        let snapshot = writeTranscriptToPasteboard(lastTranscript)
+        pasteAtCursorWhenShortcutReleased {
+            self.insertTextAtCursor()
+            self.restoreClipboardIfNeeded(snapshot)
         }
     }
 
@@ -2588,7 +2600,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.isTranscribing = false
                         self.endCriticalDictationActivity()
                         self.debugStatusMessage = "Done"
-                        let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
+                        let completionStatusText = "Inserted at cursor!"
                         let enterOnlyStatusText = "Pressed Enter"
                         let shouldPressEnterAfterPaste = parsedTranscript.shouldPressEnterAfterPaste
 
@@ -2620,14 +2632,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
                                 }
                             }
 
-                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
+                            let snapshot = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
                             self.pasteAtCursorWhenShortcutReleased {
+                                self.insertTextAtCursor()
+                                self.restoreClipboardIfNeeded(snapshot)
                                 if shouldPressEnterAfterPaste {
-                                    self.pressEnterAfterPaste {
-                                        self.restoreClipboardIfNeeded(pendingClipboardRestore)
-                                    }
-                                } else {
-                                    self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                                    self.pressEnterAfterPaste {}
                                 }
                             }
                         }
@@ -3090,23 +3100,27 @@ final class AppState: ObservableObject, @unchecked Sendable {
         keyUp?.post(tap: .cgSessionEventTap)
     }
 
-    /// Writes the final transcript to the system pasteboard.
-    /// Also handles appending necessary trailing spaces, declaring transient
-    /// types for clipboard managers, and saving the clipboard state for later restoration.
-    /// - Parameter transcript: The text to be pasted.
-    /// - Returns: A `PendingClipboardRestore` object if clipboard preservation is enabled, otherwise nil.
+    /// Appends a space when the transcript ends with sentence-ending punctuation so
+    /// the next dictation does not jam against the prior period.
+    private func transcriptWithTrailingSpace(_ transcript: String) -> String {
+        if let last = transcript.last, ".!?".contains(last) {
+            return transcript + " "
+        }
+        return transcript
+    }
+
+    /// Writes the transcript to both the named pasteboard and NSPasteboard.general.
+    /// Returns a PendingClipboardRestore for later restoration if clipboard preservation is enabled.
     private func writeTranscriptToPasteboard(_ transcript: String) -> PendingClipboardRestore? {
+        let textToWrite = transcriptWithTrailingSpace(transcript)
+
         let pasteboard = NSPasteboard.general
         let snapshot = preserveClipboard ? PreservedPasteboardSnapshot(pasteboard: pasteboard) : nil
 
-        // Append a space when ending with sentence-ending punctuation so the
-        // next dictation does not jam against the prior period.
-        let textToWrite: String
-        if let last = transcript.last, ".!?".contains(last) {
-            textToWrite = transcript + " "
-        } else {
-            textToWrite = transcript
-        }
+        // Write to named pasteboard so clipboard managers can ignore by name.
+        let namedPasteboard = NSPasteboard(name: NSPasteboard.Name(pasteboardName))
+        namedPasteboard.clearContents()
+        namedPasteboard.setString(textToWrite, forType: .string)
 
         // Declare standard transient types alongside .string so well-behaved
         // clipboard managers (Maccy, Raycast, Paste, Clipy, Flycut, etc.) skip
@@ -3144,25 +3158,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
     }
 
+    /// Restores the general pasteboard to a previously snapshot state if the clipboard
+    /// still holds the transcript we wrote (meaning the user hasn't copied anything new).
     private func restoreClipboardIfNeeded(_ pendingRestore: PendingClipboardRestore?) {
         guard let pendingRestore else { return }
 
-        // Some apps consume Cmd-V asynchronously, so restoring too quickly can paste
-        // the pre-dictation clipboard instead of the transcript.
         DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
             let pasteboard = NSPasteboard.general
-            // A bare changeCount check is too strict: browsers, iCloud Universal
-            // Clipboard sync, and other background apps bump the change count
-            // without the user copying anything, which left the transcript
-            // stranded on the clipboard. Restore when nothing changed, or when the
-            // clipboard still holds exactly the transcript we wrote (so the user
-            // has not deliberately copied something new that we would clobber).
             let clipboardStillHoldsTranscript =
                 pasteboard.string(forType: .string) == pendingRestore.writtenTranscript
             guard pasteboard.changeCount == pendingRestore.expectedChangeCount
                 || clipboardStillHoldsTranscript else { return }
             pendingRestore.snapshot.restore(to: pasteboard)
         }
+    }
+
+    /// Inserts text at the current cursor position in the focused app using CGEvent Cmd+V.
+    private func insertTextAtCursor() {
+        pasteAtCursor()
     }
 
     private func performAfterShortcutReleased(attempt: Int = 0, action: @escaping () -> Void) {
@@ -3180,8 +3193,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func pasteAtCursorWhenShortcutReleased(completion: (() -> Void)? = nil) {
-        performAfterShortcutReleased { [weak self] in
-            self?.pasteAtCursor()
+        performAfterShortcutReleased {
             completion?()
         }
     }
