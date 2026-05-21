@@ -3168,10 +3168,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         guard let snapshot else { return nil }
 
         // Write a unique marker to the pasteboard so we can verify it is still
-        // the same write when deciding whether to restore.
+        // the same write when deciding whether to restore. Use addTypes to append the
+        // marker type without clearing the previously declared types and data.
         let marker = UUID().uuidString
         let markerType = NSPasteboard.PasteboardType("com.freeflow.transcript-marker")
-        pasteboard.declareTypes([markerType], owner: nil)
+        pasteboard.addTypes([markerType], owner: nil)
         pasteboard.setString(marker, forType: markerType)
 
         return PendingClipboardRestore(
