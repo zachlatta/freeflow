@@ -62,6 +62,8 @@ enum AppBuild {
     }
 }
 
+/// A single pasteboard entry captured during a clipboard snapshot.
+/// Tracks the UTI type and the corresponding string, property list, or data value.
 private struct PreservedPasteboardEntry {
     let type: NSPasteboard.PasteboardType
     let value: Value
@@ -73,6 +75,7 @@ private struct PreservedPasteboardEntry {
     }
 }
 
+/// A snapshot of a single pasteboard item, preserving all UTI types and values.
 private struct PreservedPasteboardItem {
     let entries: [PreservedPasteboardEntry]
 
@@ -91,6 +94,7 @@ private struct PreservedPasteboardItem {
         }
     }
 
+    /// Reconstructs a NSPasteboardItem from the preserved entries.
     func makePasteboardItem() -> NSPasteboardItem {
         let item = NSPasteboardItem()
         for entry in entries {
@@ -107,6 +111,7 @@ private struct PreservedPasteboardItem {
     }
 }
 
+/// A full snapshot of the general pasteboard's contents.
 private struct PreservedPasteboardSnapshot {
     let items: [PreservedPasteboardItem]
 
@@ -114,6 +119,7 @@ private struct PreservedPasteboardSnapshot {
         self.items = (pasteboard.pasteboardItems ?? []).map(PreservedPasteboardItem.init)
     }
 
+    /// Restores all preserved pasteboard items back to the given pasteboard.
     func restore(to pasteboard: NSPasteboard) {
         pasteboard.clearContents()
         guard !items.isEmpty else { return }
@@ -121,6 +127,7 @@ private struct PreservedPasteboardSnapshot {
     }
 }
 
+/// Holds the state needed to restore the clipboard after a dictation paste.
 private struct PendingClipboardRestore {
     let snapshot: PreservedPasteboardSnapshot
     let expectedChangeCount: Int
@@ -491,6 +498,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// The name of the named pasteboard used for clipboard manager integration.
+    /// Written to both the named pasteboard and NSPasteboard.general during dictation.
     @Published var pasteboardName: String {
         didSet {
             let normalized = pasteboardName.trimmingCharacters(in: .whitespacesAndNewlines)
