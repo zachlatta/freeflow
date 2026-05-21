@@ -493,7 +493,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     @Published var pasteboardName: String {
         didSet {
-            UserDefaults.standard.set(pasteboardName, forKey: pasteboardNameStorageKey)
+            let normalized = pasteboardName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = normalized.isEmpty ? Self.defaultPasteboardName : normalized
+            UserDefaults.standard.set(value, forKey: pasteboardNameStorageKey)
         }
     }
 
@@ -660,7 +662,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let commandModeManualModifier = CommandModeManualModifier(
             rawValue: UserDefaults.standard.string(forKey: commandModeManualModifierStorageKey) ?? ""
         ) ?? .option
-        let pasteboardName = UserDefaults.standard.string(forKey: pasteboardNameStorageKey) ?? Self.defaultPasteboardName
+        let rawPasteboardName = UserDefaults.standard.string(forKey: pasteboardNameStorageKey) ?? Self.defaultPasteboardName
+        let pasteboardName = rawPasteboardName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? Self.defaultPasteboardName
+            : rawPasteboardName.trimmingCharacters(in: .whitespacesAndNewlines)
         let preserveClipboard = UserDefaults.standard.object(forKey: preserveClipboardStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
