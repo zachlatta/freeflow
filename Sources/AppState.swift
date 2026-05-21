@@ -132,6 +132,7 @@ private struct PendingClipboardRestore {
     let snapshot: PreservedPasteboardSnapshot
     let expectedChangeCount: Int
     let writtenTranscript: String
+    let marker: String
 }
 
 private struct TranscriptCommandParsingResult {
@@ -3165,24 +3166,32 @@ final class AppState: ObservableObject, @unchecked Sendable {
         pasteboard.setString("", forType: legacyTransientType)
 
         guard let snapshot else { return nil }
+
+        // Write a unique marker to the pasteboard so we can verify it is still
+        // the same write when deciding whether to restore.
+        let marker = UUID().uuidString
+        let markerType = NSPasteboard.PasteboardType("com.freeflow.transcript-marker")
+        pasteboard.declareTypes([markerType], owner: nil)
+        pasteboard.setString(marker, forType: markerType)
+
         return PendingClipboardRestore(
             snapshot: snapshot,
             expectedChangeCount: pasteboard.changeCount,
-            writtenTranscript: textToWrite
+            writtenTranscript: textToWrite,
+            marker: marker
         )
     }
 
-    /// Restores the general pasteboard to a previously snapshot state if the clipboard
-    /// still holds the transcript we wrote (meaning the user hasn't copied anything new).
+    /// Restores the general pasteboard to a previously snapshot state if the
+    /// marker written alongside the transcript is still present.
     private func restoreClipboardIfNeeded(_ pendingRestore: PendingClipboardRestore?) {
         guard let pendingRestore else { return }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + clipboardRestoreDelay) {
             let pasteboard = NSPasteboard.general
-            let clipboardStillHoldsTranscript =
-                pasteboard.string(forType: .string) == pendingRestore.writtenTranscript
-            guard pasteboard.changeCount == pendingRestore.expectedChangeCount
-                || clipboardStillHoldsTranscript else { return }
+            let markerType = NSPasteboard.PasteboardType("com.freeflow.transcript-marker")
+            let storedMarker = pasteboard.string(forType: markerType)
+            guard storedMarker == pendingRestore.marker else { return }
             pendingRestore.snapshot.restore(to: pasteboard)
         }
     }
