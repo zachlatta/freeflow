@@ -152,6 +152,25 @@ struct SetupView: View {
                                     saveCustomVocabularyAndContinue()
                                 }
                                 .keyboardShortcut(.defaultAction)
+                            } else if currentStep == .screenRecording {
+                                HStack(spacing: 10) {
+                                    Button("Skip") {
+                                        appState.useScreenshotContext = false
+                                        withAnimation {
+                                            currentStep = nextStep(currentStep)
+                                        }
+                                    }
+                                    .buttonStyle(.plain)
+                                    .foregroundStyle(.secondary)
+
+                                    Button("Continue") {
+                                        withAnimation {
+                                            currentStep = nextStep(currentStep)
+                                        }
+                                    }
+                                    .keyboardShortcut(.defaultAction)
+                                    .disabled(!canContinueFromCurrentStep)
+                                }
                             } else if currentStep == .testTranscription {
                                 HStack(spacing: 10) {
                                     Button("Skip") {

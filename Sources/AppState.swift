@@ -222,6 +222,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let preserveClipboardStorageKey = "preserve_clipboard"
+    private let useScreenshotContextStorageKey = "use_screenshot_context"
     private let pressEnterVoiceCommandStorageKey = "press_enter_voice_command_enabled"
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
     private let soundVolumeStorageKey = "sound_volume"
@@ -494,6 +495,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var useScreenshotContext: Bool {
+        didSet {
+            UserDefaults.standard.set(useScreenshotContext, forKey: useScreenshotContextStorageKey)
+        }
+    }
+
     @Published var isPressEnterVoiceCommandEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isPressEnterVoiceCommandEnabled, forKey: pressEnterVoiceCommandStorageKey)
@@ -654,6 +661,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let preserveClipboard = UserDefaults.standard.object(forKey: preserveClipboardStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
+        let useScreenshotContext = UserDefaults.standard.object(forKey: useScreenshotContextStorageKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: useScreenshotContextStorageKey)
         let realtimeStreamingEnabled = UserDefaults.standard.bool(forKey: realtimeStreamingEnabledStorageKey)
         let realtimeStreamingModel = UserDefaults.standard.string(forKey: realtimeStreamingModelStorageKey) ?? ""
         let dictationAudioInterruptionEnabled = UserDefaults.standard.bool(
@@ -726,6 +736,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.outputLanguage = outputLanguage
         self.shortcutStartDelay = shortcutStartDelay
         self.preserveClipboard = preserveClipboard
+        self.useScreenshotContext = useScreenshotContext
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
         self.dictationAudioInterruptionEnabled = dictationAudioInterruptionEnabled

@@ -1693,6 +1693,16 @@ struct PromptsSettingsView: View {
             && appState.customContextPromptLastModified < AppContextService.defaultContextPromptDate
 
         return VStack(alignment: .leading, spacing: 10) {
+            SettingsSubcard {
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Use screen context for smarter dictation", isOn: $appState.useScreenshotContext)
+
+                    Text("When on, \(AppName.displayName) captures a screenshot of the active window with each dictation so the model can read what you are looking at. Off keeps dictation working with just the app name, window title, and selected text — better privacy, slightly less context-aware in browsers and Electron apps.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Text("Controls how \(AppName.displayName) infers your current activity from app metadata and screenshots.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1896,6 +1906,12 @@ struct PromptsSettingsView: View {
         contextTestOutput = nil
         contextTestError = nil
         contextTestPrompt = nil
+
+        if !appState.useScreenshotContext {
+            contextTestError = "Screen context is disabled. Toggle \"Use screen context for smarter dictation\" on above to run this test."
+            contextTestRunning = false
+            return
+        }
 
         let service = appState.makeAppContextService()
 
@@ -2163,6 +2179,20 @@ struct RunLogEntryView: View {
                                             .aspectRatio(contentMode: .fit)
                                             .frame(maxHeight: 120)
                                             .cornerRadius(4)
+                                    } else if !item.contextScreenshotStatus.isEmpty {
+                                        HStack(alignment: .top, spacing: 6) {
+                                            Image(systemName: "camera.viewfinder")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                            Text(item.contextScreenshotStatus)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                        }
+                                        .padding(8)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(Color(nsColor: .controlBackgroundColor))
+                                        .cornerRadius(4)
                                     }
 
                                     if let prompt = item.contextPrompt, !prompt.isEmpty {

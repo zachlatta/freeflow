@@ -1,6 +1,7 @@
 import Foundation
 import ApplicationServices
 import AppKit
+import os.log
 
 struct AppSelectionSnapshot {
     let appName: String?
@@ -36,6 +37,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
 """
     static let defaultContextPromptDate = "2026-02-24"
     static let defaultScreenshotMaxDimension: CGFloat = 1024
+    fileprivate static let contextLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Context")
 
     private let apiKey: String
     private let baseURL: String
@@ -409,7 +411,19 @@ Selected text: \(selectedText ?? "None")
         appElement: AXUIElement,
         focusedWindowTitle: String?
     ) -> (dataURL: String?, mimeType: String?, error: String?) {
+        let useScreenshotContext = UserDefaults.standard.object(forKey: "use_screenshot_context") == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: "use_screenshot_context")
+        if !useScreenshotContext {
+            os_log(.info, log: Self.contextLog, "screenshot skipped — disabled in settings (Use screen context for smarter dictation = off)")
+            return (
+                nil,
+                nil,
+                "Screen context disabled in settings. Toggle it on in Settings → Prompts → Context Prompt to use screenshots."
+            )
+        }
         if !CGPreflightScreenCaptureAccess() {
+            os_log(.info, log: Self.contextLog, "screenshot blocked — Screen Recording permission not granted")
             return (
                 nil,
                 nil,
@@ -485,6 +499,7 @@ Selected text: \(selectedText ?? "None")
                     compression: screenshotCompressionPrimary,
                     maxDimension: screenshotMaxDimension
                 ) {
+                    os_log(.info, log: Self.contextLog, "screenshot captured via active-window match (%{public}d bytes)", dataURL.count)
                     return (dataURL, "image/jpeg", nil)
                 }
             }
@@ -519,6 +534,7 @@ Selected text: \(selectedText ?? "None")
                     compression: screenshotCompressionPrimary,
                     maxDimension: screenshotMaxDimension
                 ) {
+                    os_log(.info, log: Self.contextLog, "screenshot captured via focused-title match (%{public}d bytes)", dataURL.count)
                     return (dataURL, "image/jpeg", nil)
                 }
             }
@@ -530,6 +546,7 @@ Selected text: \(selectedText ?? "None")
             kCGNullWindowID,
             [.bestResolution]
         ) else {
+            os_log(.error, log: Self.contextLog, "screenshot failed — CGWindowListCreateImage returned nil")
             return (nil, nil, "Could not capture screenshot (screen recording permission or window access issue)")
         }
 
@@ -541,9 +558,11 @@ Selected text: \(selectedText ?? "None")
             compression: screenshotCompressionPrimary,
             maxDimension: screenshotMaxDimension
         ) {
+            os_log(.info, log: Self.contextLog, "screenshot captured via full-screen fallback (%{public}d bytes)", dataURL.count)
             return (dataURL, "image/jpeg", nil)
         }
 
+        os_log(.error, log: Self.contextLog, "screenshot failed — image could not be encoded within size limits")
         return (nil, nil, "Could not capture screenshot within size limits")
     }
 
