@@ -2528,6 +2528,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
                     )
                     try Task.checkCancellation()
+                    // Capture the parsed raw transcript as lastTranscript before
+                    // post-processing runs. If anything after this throws or focus
+                    // shifts mid-paste, the Paste Again shortcut still has the raw
+                    // text instead of the previous dictation's stale value.
+                    let bootstrapTranscript = parsedTranscript.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !bootstrapTranscript.isEmpty {
+                        await MainActor.run { [weak self] in
+                            self?.lastTranscript = bootstrapTranscript
+                        }
+                    }
                     let appContext: AppContext
                     if let sessionContext {
                         appContext = sessionContext
