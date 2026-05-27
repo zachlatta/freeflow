@@ -1196,6 +1196,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     } catch {
                         errorMessage = "Failed to save retry result: \(error.localizedDescription)"
                     }
+                    let trimmedRetryTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmedRetryTranscript.isEmpty {
+                        lastTranscript = trimmedRetryTranscript
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(trimmedRetryTranscript, forType: .string)
+                    }
                     retryingItemIDs.remove(item.id)
                 }
             } catch {
