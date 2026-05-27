@@ -19,6 +19,18 @@ enum OverlayPhase {
     case updateAvailable
 }
 
+// MARK: - NSScreen Helpers
+
+extension NSScreen {
+    /// CoreGraphics display identifier for this screen, or nil if the
+    /// device description is missing the key (vanishingly rare). Stable
+    /// across screen-arrangement changes for as long as the display is
+    /// connected, which is what the overlay picker stores in UserDefaults.
+    var displayID: CGDirectDisplayID? {
+        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    }
+}
+
 // MARK: - Panel Helpers
 
 private func makeOverlayPanel(width: CGFloat, height: CGFloat) -> NSPanel {
@@ -66,20 +78,46 @@ final class RecordingOverlayManager {
     var onStopButtonPressed: (() -> Void)?
     var onUpdateOverlayPressed: (() -> Void)?
 
+    /// The screen the overlay should drop down on. The user picks one of
+    /// three modes in Settings, stored in UserDefaults under
+    /// `overlay_display_id`:
+    ///
+    /// - `0` (default) — Active window: follows focus across monitors via
+    ///   NSScreen.main. Default for backward compatibility — the original
+    ///   behavior on a single-display setup is unchanged.
+    /// - `-1` — Primary display: always NSScreen.screens.first (the display
+    ///   designated as primary in System Settings → Displays).
+    /// - any positive integer — specific NSScreen displayID. Falls back to
+    ///   primary if that display is unplugged.
+    private var targetScreen: NSScreen? {
+        let savedID = UserDefaults.standard.integer(forKey: "overlay_display_id")
+        switch savedID {
+        case 0:
+            return NSScreen.main ?? NSScreen.screens.first
+        case -1:
+            return NSScreen.screens.first ?? NSScreen.main
+        default:
+            if let match = NSScreen.screens.first(where: { Int($0.displayID ?? 0) == savedID }) {
+                return match
+            }
+            return NSScreen.screens.first ?? NSScreen.main
+        }
+    }
+
     private var screenHasNotch: Bool {
-        guard let screen = NSScreen.main else { return false }
+        guard let screen = targetScreen else { return false }
         return screen.safeAreaInsets.top > 0
     }
 
     private var notchWidth: CGFloat {
-        guard let screen = NSScreen.main, screenHasNotch else { return 0 }
+        guard let screen = targetScreen, screenHasNotch else { return 0 }
         guard let leftArea = screen.auxiliaryTopLeftArea,
               let rightArea = screen.auxiliaryTopRightArea else { return 0 }
         return screen.frame.width - leftArea.width - rightArea.width
     }
 
     private var notchOverlap: CGFloat {
-        guard let screen = NSScreen.main else { return 0 }
+        guard let screen = targetScreen else { return 0 }
         return screen.frame.maxY - screen.visibleFrame.maxY
     }
 
@@ -178,7 +216,7 @@ final class RecordingOverlayManager {
         panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
         panel.contentView = makeOverlayContent(frame: frame)
 
-        guard let screen = NSScreen.main else { return }
+        guard let screen = targetScreen else { return }
 
         let hiddenFrame = NSRect(x: frame.origin.x, y: screen.frame.maxY, width: frame.width, height: frame.height)
         panel.setFrame(hiddenFrame, display: true)
@@ -282,7 +320,7 @@ final class RecordingOverlayManager {
     static let rightWingWidth: CGFloat = wingWidth
 
     private var overlayFrame: NSRect {
-        guard let screen = NSScreen.main else { return .zero }
+        guard let screen = targetScreen else { return .zero }
 
         if useWingedLayout {
             // Anchor to the screen's auxiliary-area boundaries of the notch;
