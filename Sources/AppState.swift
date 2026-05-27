@@ -2901,7 +2901,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func isScreenCapturePermissionError(_ message: String) -> Bool {
         let lowered = message.lowercased()
-        return lowered.contains("permission") || lowered.contains("screen recording")
+        return lowered.contains("screen recording permission not granted")
+            || lowered.contains("requires screen recording permission")
     }
 
     private func showScreenshotPermissionAlert(message: String) {
