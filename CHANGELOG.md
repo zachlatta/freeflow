@@ -8,6 +8,37 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [1.0.0] - 2026-05-20
+
+FreeFlow is now considered feature-complete and stable enough for a 1.0 release.
+
+### Added
+
+- Paste Again shortcut for re-pasting the most recent dictation.
+- Recent transcript history in the menu bar, with copy actions for quickly reusing previous dictations.
+- Run Log copy controls for both literal and cleaned transcript output.
+- Menu bar actions for opening the Run Log and checking for updates.
+- Debug settings for troubleshooting overlays and update prompts.
+- A polished drag-to-Applications DMG background for installer builds.
+
+### Improved
+
+- Recording feedback now uses a cleaner minimalist menu-bar overlay, with clearer command-mode state.
+- Transcribing and processing feedback appears sooner and more consistently after recording stops.
+- Shortcut labels now use friendlier modifier names alongside symbols.
+- Setup and recovery flows are more resilient when restoring app state.
+- Sentence-ending dictations now paste with trailing spacing that better matches normal writing.
+- Development builds and main-branch release automation are easier to identify and validate.
+
+### Fixed
+
+- Fixed shortcut collision checks for edit mode and manual modifier bindings.
+- Fixed cases where dictation could terminate automatically while still in progress.
+- Fixed clipboard restoration after dictation when the original clipboard content is unchanged.
+- Marked transient dictation clipboard contents so clipboard managers can avoid saving them.
+- Preserved spoken instructions verbatim during post-processing.
+- Simplified transcription submission errors into clearer one-line messages.
+
 ## [0.3.3] - 2026-04-25
 
 ### Added

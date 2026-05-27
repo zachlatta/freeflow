@@ -1,6 +1,8 @@
 name: labeler
 
-on: [pull_request]
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
 
 jobs:
   labeler:
@@ -11,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Label the PR size
     steps:
-      - uses: codelytv/pr-size-labeler@v1
+      - uses: codelytv/pr-size-labeler@095a41fca88b8764fd9e008ad269bcdb82bb38b9
         with:
           xs_label: "size/xs"
           xs_max_size: "10"

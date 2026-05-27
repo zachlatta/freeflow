@@ -517,6 +517,7 @@ struct GeneralSettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
+    @AppStorage("use_compact_overlay") private var useCompactOverlay = true
     @State private var screensVersion = 0
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
@@ -708,8 +709,8 @@ struct GeneralSettingsView: View {
                 SettingsCard("Audio During Dictation", icon: "speaker.slash.fill") {
                     dictationAudioSection
                 }
-                SettingsCard("Overlay Display", icon: "rectangle.dashed") {
-                    overlayDisplaySection
+                SettingsCard("Recording Overlay", icon: "rectangle.dashed") {
+                    overlaySection
                 }
                 SettingsCard("Edit Mode", icon: "pencil") {
                     commandModeSection
@@ -1098,6 +1099,31 @@ struct GeneralSettingsView: View {
             }
         }
     }
+
+    // MARK: Recording Overlay
+
+    private var overlaySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            OverlayStyleOptionRow(
+                title: "Minimalist menu-bar overlay",
+                subtitle: "Two slim wings flank the camera notch and stay inside the menu bar. Never covers app tabs or toolbars.",
+                isMinimalist: true,
+                selection: $useCompactOverlay
+            )
+            OverlayStyleOptionRow(
+                title: "Drop-down pill",
+                subtitle: "Single pill hangs below the menu bar during recording. Larger and more visible, but covers a thin strip of whatever app is active.",
+                isMinimalist: false,
+                selection: $useCompactOverlay
+            )
+
+            Divider()
+
+            overlayDisplaySection
+        }
+    }
+
+    // MARK: Audio During Dictation
 
     private var dictationAudioSection: some View {
         VStack(alignment: .leading, spacing: 10) {

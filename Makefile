@@ -98,6 +98,7 @@ dmg: all
 	@create-dmg \
 		--volname "$(APP_NAME)" \
 		--volicon "$(ICON_ICNS)" \
+		--background "Resources/dmg-background.tiff" \
 		--window-pos 200 120 \
 		--window-size 660 400 \
 		--icon-size 128 \

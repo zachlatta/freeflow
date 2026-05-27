@@ -139,19 +139,21 @@ struct MenuBarView: View {
             Divider()
 
             if !appState.lastTranscript.isEmpty && !appState.isRecording && !appState.isTranscribing {
-                Text(appState.lastTranscript.count > 35
+                Button(appState.copyAgainShortcut.isDisabled
+                    ? "Paste Again"
+                    : "Paste Again  (\(appState.copyAgainShortcut.displayName))") {
+                    appState.copyLastTranscriptToPasteboard()
+                }
+
+                let truncatedTranscript = appState.lastTranscript.count > 35
                     ? String(appState.lastTranscript.prefix(35)) + "…"
-                    : appState.lastTranscript)
+                    : appState.lastTranscript
+                Text("\u{201C}\(truncatedTranscript)\u{201D}")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 16)
                     .lineLimit(4)
                     .frame(maxWidth: 280, alignment: .leading)
-
-                Button("Copy Again") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(appState.lastTranscript, forType: .string)
-                }
             }
 
             Menu("History") {
@@ -252,6 +254,50 @@ struct MenuBarView: View {
                         _ = appState.setShortcut(savedCustomShortcut, for: .toggle)
                     } label: {
                         if appState.toggleShortcut == savedCustomShortcut {
+                            Text("✓ Custom: \(savedCustomShortcut.displayName)")
+                        } else {
+                            Text("  Custom: \(savedCustomShortcut.displayName)")
+                        }
+                    }
+                }
+
+                Divider()
+                Button("Customize…") {
+                    appState.selectedSettingsTab = .general
+                    NotificationCenter.default.post(name: .showSettings, object: nil)
+                }
+            }
+
+            Menu("Paste Again Shortcut") {
+                Button {
+                    _ = appState.setShortcut(.disabled, for: .copyAgain)
+                } label: {
+                    if appState.copyAgainShortcut.isDisabled {
+                        Text("✓ Disabled")
+                    } else {
+                        Text("  Disabled")
+                    }
+                }
+
+                ForEach(ShortcutPreset.allCases) { preset in
+                    Button {
+                        _ = appState.setShortcut(preset.binding, for: .copyAgain)
+                    } label: {
+                        if appState.copyAgainShortcut == preset.binding {
+                            Text("✓ \(preset.title)")
+                        } else {
+                            Text("  \(preset.title)")
+                        }
+                    }
+                    .disabled(preset.binding == appState.holdShortcut || preset.binding == appState.toggleShortcut)
+                }
+
+                if let savedCustomShortcut = appState.savedCustomShortcut(for: .copyAgain) {
+                    Divider()
+                    Button {
+                        _ = appState.setShortcut(savedCustomShortcut, for: .copyAgain)
+                    } label: {
+                        if appState.copyAgainShortcut == savedCustomShortcut {
                             Text("✓ Custom: \(savedCustomShortcut.displayName)")
                         } else {
                             Text("  Custom: \(savedCustomShortcut.displayName)")
