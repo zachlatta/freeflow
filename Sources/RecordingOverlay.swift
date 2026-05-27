@@ -9,6 +9,9 @@ final class RecordingOverlayState: ObservableObject {
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
     @Published var isCommandMode = false
     @Published var updateVersion: String = ""
+    @Published var errorMessage: String?
+    @Published var silenceWarningMessage: String?
+    @Published var isToggleReminderSheening = false
 }
 
 enum OverlayPhase {
@@ -74,6 +77,12 @@ final class RecordingOverlayManager {
     private var overlayWindow: NSPanel?
     private let overlayState = RecordingOverlayState()
     private var lockedOverlayWidth: CGFloat?
+    private var isToggleReminderExpanded = false
+    private var toggleReminderCollapseWorkItem: DispatchWorkItem?
+
+    private static let toggleReminderExpandedDuration: TimeInterval = 0.9
+    private static let toggleReminderPillExpansion: CGFloat = 52
+    private static let toggleReminderWingExpansion: CGFloat = 24
 
     var onStopButtonPressed: (() -> Void)?
     var onUpdateOverlayPressed: (() -> Void)?
@@ -128,6 +137,7 @@ final class RecordingOverlayManager {
 
     func showInitializing(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
         DispatchQueue.main.async {
+            self.resetToggleRecordingReminder()
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
@@ -139,6 +149,7 @@ final class RecordingOverlayManager {
 
     func showRecording(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
         DispatchQueue.main.async {
+            self.resetToggleRecordingReminder()
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
@@ -150,6 +161,7 @@ final class RecordingOverlayManager {
 
     func transitionToRecording(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
         DispatchQueue.main.async {
+            self.resetToggleRecordingReminder()
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
@@ -160,6 +172,9 @@ final class RecordingOverlayManager {
 
     func setRecordingTriggerMode(_ mode: RecordingTriggerMode, animated: Bool) {
         DispatchQueue.main.async {
+            if mode != .toggle {
+                self.resetToggleRecordingReminder()
+            }
             self.overlayState.recordingTriggerMode = mode
             self.updateOverlayLayout(animated: animated)
         }
@@ -168,6 +183,41 @@ final class RecordingOverlayManager {
     func updateAudioLevel(_ level: Float) {
         DispatchQueue.main.async {
             self.overlayState.audioLevel = level
+        }
+    }
+
+    func pulseToggleRecordingReminder() {
+        DispatchQueue.main.async {
+            guard self.overlayWindow != nil,
+                  self.overlayState.phase == .recording,
+                  self.overlayState.recordingTriggerMode == .toggle else {
+                return
+            }
+
+            self.toggleReminderCollapseWorkItem?.cancel()
+            self.isToggleReminderExpanded = true
+            self.overlayState.isToggleReminderSheening = true
+            self.updateOverlayLayout(animated: true)
+
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.toggleReminderCollapseWorkItem = nil
+                self.isToggleReminderExpanded = false
+                self.overlayState.isToggleReminderSheening = false
+                self.updateOverlayLayout(animated: true)
+            }
+            self.toggleReminderCollapseWorkItem = workItem
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + Self.toggleReminderExpandedDuration,
+                execute: workItem
+            )
+        }
+    }
+
+    func clearToggleRecordingReminder() {
+        DispatchQueue.main.async {
+            self.resetToggleRecordingReminder()
+            self.updateOverlayLayout(animated: false)
         }
     }
 
@@ -183,8 +233,72 @@ final class RecordingOverlayManager {
         }
     }
 
+    /// Drop the overlay down with an inline error message (red banner).
+    /// Auto-dismisses after 3 seconds. Used for non-fatal user errors that
+    /// previously only flashed in the menu bar dropdown — now visible at
+    /// the menu bar without the user having to click anything.
+    /// Maximum message length shown in the error toast. Keeps the pill from
+    /// stretching across the whole menu bar when something throws a verbose
+    /// stack trace into showError(_:). Longer messages truncate with an
+    /// ellipsis; the full text remains in os_log for forensic review.
+    private static let maxToastMessageLength = 90
+
+    func showError(_ message: String, dismissAfter: TimeInterval = 6.0) {
+        let truncated: String = {
+            if message.count <= Self.maxToastMessageLength { return message }
+            let cutoff = message.index(message.startIndex, offsetBy: Self.maxToastMessageLength - 1)
+            return String(message[..<cutoff]) + "…"
+        }()
+        DispatchQueue.main.async {
+            self.resetToggleRecordingReminder()
+            self.overlayState.errorMessage = truncated
+            self.lockedOverlayWidth = nil
+            self.overlayState.phase = .feedback
+            self.showOverlayPanel(animatedResize: true)
+            // Default 6s — 3s was too brief for rotation toasts to be read
+            // before they auto-dismissed. Callers that surface lower-stakes
+            // info (e.g. "Audio too short") may pass a shorter duration.
+            DispatchQueue.main.asyncAfter(deadline: .now() + dismissAfter) { [weak self] in
+                guard let self = self else { return }
+                guard self.overlayState.phase == .feedback,
+                      self.overlayState.errorMessage == truncated else {
+                    return
+                }
+                self.overlayState.errorMessage = nil
+                self.dismissAll()
+            }
+        }
+    }
+
+    /// Drop the pill with a transient warning while keeping the recording
+    /// session alive. After 3 seconds, return to the recording overlay
+    /// instead of dismissing — the user is still recording, we are just
+    /// nudging them in case the start was a false positive. Uses its own
+    /// state slot so the rendering layer can style it differently from a
+    /// real error (amber + mic-slash, not red + exclamation).
+    func showSilenceWarning(_ message: String) {
+        DispatchQueue.main.async {
+            self.resetToggleRecordingReminder()
+            self.overlayState.silenceWarningMessage = message
+            self.lockedOverlayWidth = nil
+            self.overlayState.phase = .feedback
+            self.showOverlayPanel(animatedResize: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                guard let self = self else { return }
+                guard self.overlayState.phase == .feedback,
+                      self.overlayState.silenceWarningMessage == message else {
+                    return
+                }
+                self.overlayState.silenceWarningMessage = nil
+                self.overlayState.phase = .recording
+                self.updateOverlayLayout(animated: true)
+            }
+        }
+    }
+
     func showUpdateAvailable(version: String) {
         DispatchQueue.main.async {
+            self.resetToggleRecordingReminder()
             self.lockedOverlayWidth = nil
             self.overlayState.isCommandMode = false
             self.overlayState.updateVersion = version
@@ -241,6 +355,7 @@ final class RecordingOverlayManager {
     }
 
     private func setTranscribingPhase() {
+        resetToggleRecordingReminder()
         lockedOverlayWidth = overlayWindow?.frame.width ?? overlayWidth
         overlayState.phase = .transcribing
         showOverlayPanel(animatedResize: true)
@@ -251,9 +366,9 @@ final class RecordingOverlayManager {
             // Winged layout: notch x-range stays solid black so the cutout masks it.
             let rootView = WingedRecordingView(
                 state: overlayState,
-                leftWingWidth: Self.leftWingWidth,
+                leftWingWidth: visibleWingWidth,
                 notchWidth: notchWidth,
-                rightWingWidth: Self.rightWingWidth,
+                rightWingWidth: visibleWingWidth,
                 height: frame.height,
                 onStopButtonPressed: { [weak self] in
                     self?.onStopButtonPressed?()
@@ -293,7 +408,7 @@ final class RecordingOverlayManager {
         }
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.22
+            context.duration = 0.42
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             panel.animator().setFrame(frame, display: true)
         }
@@ -316,8 +431,10 @@ final class RecordingOverlayManager {
     /// Wing width — tight to the compact waveform / stop button so the
     /// panel stays clear of right-side menu-bar items.
     static let wingWidth: CGFloat = 36
-    static let leftWingWidth: CGFloat = wingWidth
-    static let rightWingWidth: CGFloat = wingWidth
+
+    private var visibleWingWidth: CGFloat {
+        Self.wingWidth + (isShowingToggleReminder ? Self.toggleReminderWingExpansion : 0)
+    }
 
     private var overlayFrame: NSRect {
         guard let screen = targetScreen else { return .zero }
@@ -328,8 +445,8 @@ final class RecordingOverlayManager {
             let nWidth = notchWidth
             let nLeftX = screen.auxiliaryTopLeftArea?.maxX
                 ?? (screen.frame.midX - nWidth / 2)
-            let leftWing = Self.leftWingWidth
-            let rightWing = Self.rightWingWidth
+            let leftWing = visibleWingWidth
+            let rightWing = visibleWingWidth
             let panelHeight = notchOverlap
             let panelWidth = leftWing + nWidth + rightWing
             let panelX = nLeftX - leftWing
@@ -380,17 +497,21 @@ final class RecordingOverlayManager {
             baseWidth = defaultWidth
         }
 
-        guard screenHasNotch else { return baseWidth }
-        return max(notchWidth, baseWidth)
+        let reminderExpansion = isShowingToggleReminder ? Self.toggleReminderPillExpansion : 0
+        let visibleWidth = baseWidth + reminderExpansion
+        guard screenHasNotch else { return visibleWidth }
+        return max(notchWidth, visibleWidth)
     }
 
     private func showFeedbackPanel() {
+        resetToggleRecordingReminder()
         lockedOverlayWidth = nil
         overlayState.phase = .feedback
         showOverlayPanel(animatedResize: true)
     }
 
     private func dismissAll() {
+        resetToggleRecordingReminder()
         lockedOverlayWidth = nil
         overlayState.isCommandMode = false
         overlayState.updateVersion = ""
@@ -398,6 +519,19 @@ final class RecordingOverlayManager {
             panel.orderOut(nil)
             overlayWindow = nil
         }
+    }
+
+    private var isShowingToggleReminder: Bool {
+        isToggleReminderExpanded
+            && overlayState.phase == .recording
+            && overlayState.recordingTriggerMode == .toggle
+    }
+
+    private func resetToggleRecordingReminder() {
+        toggleReminderCollapseWorkItem?.cancel()
+        toggleReminderCollapseWorkItem = nil
+        isToggleReminderExpanded = false
+        overlayState.isToggleReminderSheening = false
     }
 }
 
@@ -465,6 +599,12 @@ struct WingedRecordingView: View {
                 Spacer(minLength: 0)
             }
             .frame(width: leftWingWidth, height: height)
+            .overlay {
+                if showsStopButton && state.isToggleReminderSheening {
+                    ToggleReminderSheenView()
+                }
+            }
+            .clipped()
 
             // Notch spacer — solid black; camera cutout hides it.
             Color.black
@@ -497,9 +637,45 @@ struct WingedRecordingView: View {
                 Spacer(minLength: 0)
             }
             .frame(width: rightWingWidth, height: height)
+            .overlay {
+                if showsStopButton && state.isToggleReminderSheening {
+                    ToggleReminderSheenView(startDelay: 0.34)
+                }
+            }
+            .clipped()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
+    }
+}
+
+private struct ToggleReminderSheenView: View {
+    var startDelay: TimeInterval = 0
+    @State private var travel: CGFloat = -1
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [.clear, .white.opacity(0.48), .white.opacity(0.16), .clear],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .frame(width: max(22, width * 0.42))
+                .rotationEffect(.degrees(-16))
+                .offset(x: travel * (width + 28))
+        }
+        .allowsHitTesting(false)
+        .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + startDelay) {
+                withAnimation(.easeInOut(duration: 0.78)) {
+                    travel = 1
+                }
+            }
+        }
     }
 }
 
@@ -940,6 +1116,11 @@ struct RecordingOverlayView: View {
         }
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            if showsStopButton && state.isToggleReminderSheening {
+                ToggleReminderSheenView()
+            }
+        }
         .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
         .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.recordingTriggerMode)
         .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.isCommandMode)

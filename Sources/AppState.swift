@@ -527,6 +527,23 @@ final class AppState: ObservableObject, @unchecked Sendable {
         didSet {
             guard oldValue != isRecording else { return }
             AppState.writeRecordingStateFlag(isRecording)
+            // Build 119: capture per-session dictation duration so the WPM
+            // stat in MainWindow's right rail has real numerator/denominator
+            // material. Counts only the recording window; transcription and
+            // post-processing happen after isRecording flips back to false.
+            if isRecording {
+                recordingSessionStartTime = Date()
+            } else {
+                stopToggleRecordingReminder()
+                if let start = recordingSessionStartTime {
+                    let elapsed = Date().timeIntervalSince(start)
+                    if elapsed > 0 {
+                        wpmTrackedSeconds += elapsed
+                        WordCountTracker.saveWPMTrackedSeconds(wpmTrackedSeconds)
+                    }
+                    recordingSessionStartTime = nil
+                }
+            }
         }
     }
     @Published var isTranscribing = false
@@ -572,6 +589,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var audioLevelCancellable: AnyCancellable?
     private var debugOverlayTimer: Timer?
     private var recordingInitializationTimer: DispatchSourceTimer?
+    private var toggleRecordingReminderTimer: DispatchSourceTimer?
+    private static let toggleRecordingReminderInterval: TimeInterval = 30
     private var transcriptionTask: Task<Void, Never>?
     private var transcribingAudioFileName: String?
     private var contextService: AppContextService
@@ -1659,6 +1678,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             if isRecording {
                 activeRecordingTriggerMode = .toggle
                 overlayManager.setRecordingTriggerMode(.toggle, animated: true)
+                startToggleRecordingReminderIfNeeded()
             } else if pendingShortcutStartMode != nil {
                 pendingShortcutStartMode = .toggle
             }
@@ -2137,7 +2157,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     )
                 }
                 overlayShown = true
-                self.playAlertSound(named: "Tink")
+                self.startToggleRecordingReminderIfNeeded()
+                self.playStartSound()
+                // Defer the system audio mute until AFTER the start sound has
+                // begun playing. Doing the mute earlier (at recording-start
+                // time) raced against mic warm-up: a fast first audio buffer
+                // played the chime before the OS finished applying the mute
+                // (loud), a slow first buffer played it after (quiet). Playing
+                // the chime first then muting gives consistent volume every
+                // time. The ~50–300ms of unmuted system audio during mic
+                // warm-up is negligible since the user is starting to speak.
+                self.applyAudioInterruptionIfNeeded()
             }
         }
         audioRecorder.onRecordingFailure = { [weak self] error in
@@ -3214,6 +3244,36 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func cancelRecordingInitializationTimer() {
         recordingInitializationTimer?.cancel()
         recordingInitializationTimer = nil
+    }
+
+    private func startToggleRecordingReminderIfNeeded() {
+        guard isRecording,
+              activeRecordingTriggerMode == .toggle,
+              toggleRecordingReminderTimer == nil else {
+            return
+        }
+
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(
+            deadline: .now() + Self.toggleRecordingReminderInterval,
+            repeating: Self.toggleRecordingReminderInterval
+        )
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            guard self.isRecording, self.activeRecordingTriggerMode == .toggle else {
+                self.stopToggleRecordingReminder()
+                return
+            }
+            self.overlayManager.pulseToggleRecordingReminder()
+        }
+        toggleRecordingReminderTimer = timer
+        timer.resume()
+    }
+
+    private func stopToggleRecordingReminder() {
+        toggleRecordingReminderTimer?.cancel()
+        toggleRecordingReminderTimer = nil
+        overlayManager.clearToggleRecordingReminder()
     }
 
     private func scheduleReadyStatusReset(after delay: TimeInterval, matching statuses: Set<String>? = nil) {
