@@ -76,17 +76,38 @@ Then your response would be ONLY the cleaned up text, so here your response is O
 "Hey, I just wanted to follow up on the meeting from yesterday. I think we should definitely move the deadline to next Friday because the design team still needs more time to finish the mockups. Let me know if that works for you. Thanks."</code></pre>
 </details>
 
-## FAQ
+## Using a Local Model
 
-**Why does this use Groq instead of a local transcription model?**
+FreeFlow can use OpenAI-compatible local or self-hosted providers instead of Groq. In settings, configure the API base URL and model IDs for your local LLM provider, such as Ollama, LM Studio, or another OpenAI-compatible server. If your transcription backend uses a different endpoint from your LLM backend, set the transcription API URL separately.
 
-I love this idea, and originally planned to build FreeFlow using local models, but to have post-processing (that's where you get correctly spelled names when replying to emails / etc), you need to have a local LLM too.
+Local models are often slower than hosted providers, especially on cold start, long recordings, or busy hardware.
 
-If you do that, the total pipeline takes too long for the UX to be good (5-10 seconds per transcription instead of <1s). I also had concerns around battery life.
+<details>
+  <summary>Configure longer timeouts for local models</summary>
 
-Some day!
+  FreeFlow keeps the default network timeout at 20 seconds, but you can extend it with macOS defaults:
 
-**Update:** You can now use a custom model with FreeFlow by configuring the LLM API URL in the FreeFlow settings to use Ollama. Thank you @taciturnaxolotl!
+```bash
+defaults write com.zachlatta.freeflow transcription_timeout_seconds -float 120
+defaults write com.zachlatta.freeflow post_processing_timeout_seconds -float 120
+defaults write com.zachlatta.freeflow context_request_timeout_seconds -float 120
+```
+
+The timeout keys are:
+
+- `transcription_timeout_seconds`: audio transcription requests
+- `post_processing_timeout_seconds`: transcript cleanup and edit mode requests
+- `context_request_timeout_seconds`: nearby app context requests
+
+Only positive values are used. Remove a custom timeout to return to the 20-second default:
+
+```bash
+defaults delete com.zachlatta.freeflow transcription_timeout_seconds
+defaults delete com.zachlatta.freeflow post_processing_timeout_seconds
+defaults delete com.zachlatta.freeflow context_request_timeout_seconds
+```
+
+</details>
 
 ## License
 
