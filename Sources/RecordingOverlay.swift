@@ -10,6 +10,7 @@ final class RecordingOverlayState: ObservableObject {
     @Published var isCommandMode = false
     @Published var updateVersion: String = ""
     @Published var errorMessage: String?
+    @Published var toastID: UUID?
 }
 
 enum OverlayPhase {
@@ -164,17 +165,21 @@ final class RecordingOverlayManager {
             return String(message[..<cutoff]) + "…"
         }()
         DispatchQueue.main.async {
+            let toastID = UUID()
             self.overlayState.errorMessage = truncated
+            self.overlayState.toastID = toastID
             self.lockedOverlayWidth = nil
             self.overlayState.phase = .feedback
             self.showOverlayPanel(animatedResize: true)
             DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
                 guard let self else { return }
                 guard self.overlayState.phase == .feedback,
-                      self.overlayState.errorMessage == truncated else {
+                      self.overlayState.errorMessage == truncated,
+                      self.overlayState.toastID == toastID else {
                     return
                 }
                 self.overlayState.errorMessage = nil
+                self.overlayState.toastID = nil
                 self.dismissAll()
             }
         }
