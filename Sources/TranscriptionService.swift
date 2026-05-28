@@ -9,7 +9,10 @@ class TranscriptionService {
     private let transcriptionModel: String
     private let language: String?
     private let transcriptionResponseFormat = "verbose_json"
-    private let transcriptionTimeoutSeconds: TimeInterval = 20
+    private var transcriptionTimeoutSeconds: TimeInterval {
+        let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
+        return override > 0 ? override : 20
+    }
 
     init(
         apiKey: String,
