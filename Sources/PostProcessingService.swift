@@ -132,7 +132,10 @@ Behavior:
     private let defaultFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let defaultModelReasoningEffort = "low"
     private let postProcessingMaxCompletionTokens = 4096
-    private let postProcessingTimeoutSeconds: TimeInterval = 20
+    private var postProcessingTimeoutSeconds: TimeInterval {
+        let override = UserDefaults.standard.double(forKey: "post_processing_timeout_seconds")
+        return override > 0 ? override : 20
+    }
 
     init(
         apiKey: String,
