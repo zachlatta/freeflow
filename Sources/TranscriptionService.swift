@@ -8,7 +8,12 @@ class TranscriptionService {
     private let baseURL: URL
     private let transcriptionModel: String
     private let language: String?
-    private let transcriptionResponseFormat = "verbose_json"
+    private var transcriptionResponseFormat: String {
+        // OpenAI's *-transcribe model family rejects "verbose_json" with a 400 error;
+        // other providers (Groq whisper-large-v3, etc.) need it for no_speech_prob segments.
+        // The hallucination filter degrades gracefully when segments are absent.
+        transcriptionModel.lowercased().contains("transcribe") ? "json" : "verbose_json"
+    }
     private var transcriptionTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
         return override > 0 ? override : 20
@@ -199,6 +204,8 @@ class TranscriptionService {
             return "Endpoint not found at \(provider) (HTTP 404). Base URL is likely wrong for this provider."
         case 413:
             return "Audio file too large for \(provider) (HTTP 413). Try a shorter recording."
+        case 400:
+            return "Provider rejected the request (HTTP 400). Check your model name and Base URL in Settings."
         case 429:
             return "Rate limit reached at \(provider) (HTTP 429). Wait a moment and try again."
         case 500..<600:
