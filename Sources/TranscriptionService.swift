@@ -53,10 +53,30 @@ class TranscriptionService {
             throw CancellationError()
         }
 
-        do {
-            return try await transcribeAudio(fileURL: fileURL)
-        } catch let urlError as URLError where urlError.code == .timedOut {
-            throw TranscriptionError.transcriptionTimedOut(transcriptionTimeoutSeconds)
+        let timeoutSeconds = transcriptionTimeoutSeconds
+        return try await withThrowingTaskGroup(of: String.self) { group in
+            group.addTask { [weak self] in
+                guard let self else {
+                    throw TranscriptionError.transcriptionFailed("Transcription service deallocated")
+                }
+                return try await self.transcribeAudio(fileURL: fileURL)
+            }
+
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                throw TranscriptionError.transcriptionTimedOut(timeoutSeconds)
+            }
+
+            do {
+                guard let result = try await group.next() else {
+                    throw TranscriptionError.transcriptionFailed("No transcription result")
+                }
+                group.cancelAll()
+                return result
+            } catch {
+                group.cancelAll()
+                throw error
+            }
         }
     }
 
