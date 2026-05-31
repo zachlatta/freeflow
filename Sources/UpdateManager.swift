@@ -126,6 +126,35 @@ enum UpdateStatus: Equatable {
     case error(String)
 }
 
+private enum UpdateSecurityError: LocalizedError {
+    case missingExpectedAsset
+    case untrustedDownloadURL
+    case unexpectedDownloadSize(expected: Int, actual: Int)
+    case bundleIdentifierMismatch(expected: String, actual: String?)
+    case signatureVerificationFailed(String)
+    case teamIdentifierMismatch(expected: String, actual: String?)
+    case gatekeeperAssessmentFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingExpectedAsset:
+            return "Release does not contain the expected FreeFlow.dmg asset."
+        case .untrustedDownloadURL:
+            return "Update download URL is not from the expected GitHub release host."
+        case .unexpectedDownloadSize(let expected, let actual):
+            return "Downloaded DMG size mismatch (expected \(expected), got \(actual) bytes)."
+        case .bundleIdentifierMismatch(let expected, let actual):
+            return "Downloaded app bundle ID mismatch (expected \(expected), got \(actual ?? "none"))."
+        case .signatureVerificationFailed(let details):
+            return "Downloaded app failed code signature verification: \(details)"
+        case .teamIdentifierMismatch(let expected, let actual):
+            return "Downloaded app signing team mismatch (expected \(expected), got \(actual ?? "none"))."
+        case .gatekeeperAssessmentFailed(let details):
+            return "Downloaded app failed Gatekeeper assessment: \(details)"
+        }
+    }
+}
+
 // MARK: - Update Manager
 
 @MainActor
@@ -171,6 +200,9 @@ final class UpdateManager: ObservableObject {
     private let stabilityBufferDays: TimeInterval = 3
     private let checkIntervalSeconds: TimeInterval = 7 * 24 * 60 * 60 // 7 days
     private let postTranscriptionReminderInterval: TimeInterval = 24 * 60 * 60 // 1 day
+    private let expectedDMGAssetName = "FreeFlow.dmg"
+    private let releaseOwner = "zachlatta"
+    private let releaseRepository = "freeflow"
     private var periodicTimer: Timer?
     private var activeDownloadTask: Task<Void, Never>?
 
@@ -697,24 +729,30 @@ final class UpdateManager: ObservableObject {
     }
 
     func downloadAndInstall(release: GitHubRelease) {
-        guard let dmgAsset = release.assets.first(where: { $0.name.hasSuffix(".dmg") }) else {
-            if let url = URL(string: release.htmlUrl) {
-                NSWorkspace.shared.open(url)
-            }
+        guard let dmgAsset = release.assets.first(where: { $0.name == expectedDMGAssetName }) else {
+            updateStatus = .error(UpdateSecurityError.missingExpectedAsset.localizedDescription)
             return
         }
 
-        guard let downloadURL = URL(string: dmgAsset.browserDownloadUrl) else { return }
+        guard let downloadURL = URL(string: dmgAsset.browserDownloadUrl),
+              isAllowedInitialDownloadURL(downloadURL, releaseTag: release.tagName) else {
+            updateStatus = .error(UpdateSecurityError.untrustedDownloadURL.localizedDescription)
+            return
+        }
 
         activeDownloadTask?.cancel()
         activeDownloadTask = Task {
-            await performUpdate(downloadURL: downloadURL, expectedSize: dmgAsset.size)
+            await performUpdate(
+                downloadURL: downloadURL,
+                expectedSize: dmgAsset.size
+            )
         }
     }
 
     private func performUpdate(downloadURL: URL, expectedSize: Int) async {
         let fm = FileManager.default
         let tempDir = fm.temporaryDirectory.appendingPathComponent("freeflow-update-\(UUID().uuidString)")
+        var stagingDir: URL?
 
         do {
             try fm.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -734,6 +772,9 @@ final class UpdateManager: ObservableObject {
             request.cachePolicy = .reloadIgnoringLocalCacheData
 
             let (asyncBytes, response) = try await URLSession.shared.bytes(for: request)
+            guard isAllowedFinalDownloadURL(response.url ?? downloadURL) else {
+                throw UpdateSecurityError.untrustedDownloadURL
+            }
 
             let totalSize = (response as? HTTPURLResponse)
                 .flatMap { Int($0.value(forHTTPHeaderField: "Content-Length") ?? "") }
@@ -779,9 +820,13 @@ final class UpdateManager: ObservableObject {
                     receivedBytes += buffer.count
                 }
                 try outputHandle.close()
+                return receivedBytes
             }
 
-            try await downloadTask.value
+            let downloadedBytes = try await downloadTask.value
+            if expectedSize > 0 && downloadedBytes != expectedSize {
+                throw UpdateSecurityError.unexpectedDownloadSize(expected: expectedSize, actual: downloadedBytes)
+            }
             downloadProgress = 1.0
 
         } catch is CancellationError {
@@ -825,28 +870,35 @@ final class UpdateManager: ObservableObject {
             }
 
             // Copy app to staging directory
-            let stagingDir = fm.temporaryDirectory.appendingPathComponent("freeflow-staged-\(UUID().uuidString)")
-            try fm.createDirectory(at: stagingDir, withIntermediateDirectories: true)
-            let stagedApp = stagingDir.appendingPathComponent(appBundle.lastPathComponent)
+            let createdStagingDir = fm.temporaryDirectory.appendingPathComponent("freeflow-staged-\(UUID().uuidString)")
+            stagingDir = createdStagingDir
+            try fm.createDirectory(at: createdStagingDir, withIntermediateDirectories: true)
+            let stagedApp = createdStagingDir.appendingPathComponent(appBundle.lastPathComponent)
             try fm.copyItem(at: appBundle, to: stagedApp)
+            try await Task.detached {
+                try self.validateStagedApp(stagedApp)
+            }.value
 
             // Clean up DMG (detach happens in defer above, delete temp dir)
             try? fm.removeItem(at: tempDir)
 
             // MARK: Replace & relaunch
             updateStatus = .readyToRelaunch
-            replaceAndRelaunch(stagedApp: stagedApp, stagingDir: stagingDir)
+            replaceAndRelaunch(stagedApp: stagedApp, stagingDir: createdStagingDir)
 
         } catch {
             updateStatus = .error("Install failed: \(error.localizedDescription)")
             try? fm.removeItem(at: tempDir)
+            if let stagingDir {
+                try? fm.removeItem(at: stagingDir)
+            }
         }
     }
 
     nonisolated private func mountDMG(at path: URL) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        process.arguments = ["attach", path.path, "-nobrowse", "-noverify", "-noautoopen", "-plist"]
+        process.arguments = ["attach", path.path, "-nobrowse", "-noautoopen", "-plist"]
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -881,6 +933,121 @@ final class UpdateManager: ObservableObject {
         throw NSError(domain: "UpdateManager", code: 3, userInfo: [
             NSLocalizedDescriptionKey: "No mount point found in hdiutil output"
         ])
+    }
+
+    private func isAllowedInitialDownloadURL(_ url: URL, releaseTag: String) -> Bool {
+        guard url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "github.com" else {
+            return false
+        }
+
+        let expectedPath = "/\(releaseOwner)/\(releaseRepository)/releases/download/\(releaseTag)/\(expectedDMGAssetName)"
+        return url.path == expectedPath
+    }
+
+    private func isAllowedFinalDownloadURL(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == "https",
+              let host = url.host?.lowercased() else {
+            return false
+        }
+
+        return host == "github.com"
+            || host == "objects.githubusercontent.com"
+            || host.hasSuffix(".githubusercontent.com")
+    }
+
+    nonisolated private func validateStagedApp(_ stagedApp: URL) throws {
+        let currentBundleID = Bundle.main.bundleIdentifier
+        let stagedBundle = Bundle(url: stagedApp)
+        guard stagedBundle?.bundleIdentifier == currentBundleID else {
+            throw UpdateSecurityError.bundleIdentifierMismatch(
+                expected: currentBundleID ?? "unknown",
+                actual: stagedBundle?.bundleIdentifier
+            )
+        }
+
+        try runProcess(
+            executable: "/usr/bin/codesign",
+            arguments: ["--verify", "--deep", "--strict", "--verbose=2", stagedApp.path],
+            failure: UpdateSecurityError.signatureVerificationFailed
+        )
+
+        let currentTeamID = try signingTeamIdentifier(for: Bundle.main.bundleURL)
+        let stagedTeamID = try signingTeamIdentifier(for: stagedApp)
+        if let currentTeamID, !currentTeamID.isEmpty, currentTeamID != stagedTeamID {
+            throw UpdateSecurityError.teamIdentifierMismatch(expected: currentTeamID, actual: stagedTeamID)
+        }
+
+        try runProcess(
+            executable: "/usr/sbin/spctl",
+            arguments: ["--assess", "--type", "exec", "--verbose=2", stagedApp.path],
+            failure: UpdateSecurityError.gatekeeperAssessmentFailed
+        )
+    }
+
+    nonisolated private func signingTeamIdentifier(for appURL: URL) throws -> String? {
+        let output = try runProcessCapturingOutput(
+            executable: "/usr/bin/codesign",
+            arguments: ["-dv", "--verbose=4", appURL.path]
+        )
+        for line in output.components(separatedBy: .newlines) {
+            guard line.hasPrefix("TeamIdentifier=") else { continue }
+            let value = String(line.dropFirst("TeamIdentifier=".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return value == "not set" ? nil : value
+        }
+        return nil
+    }
+
+    nonisolated private func runProcess(
+        executable: String,
+        arguments: [String],
+        failure: (String) -> UpdateSecurityError
+    ) throws {
+        do {
+            _ = try runProcessCapturingOutput(executable: executable, arguments: arguments)
+        } catch let error as UpdateSecurityError {
+            throw error
+        } catch {
+            throw failure(error.localizedDescription)
+        }
+    }
+
+    nonisolated private func runProcessCapturingOutput(
+        executable: String,
+        arguments: [String]
+    ) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        try process.run()
+        process.waitUntilExit()
+
+        let output = String(
+            data: outputPipe.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
+        let errorOutput = String(
+            data: errorPipe.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
+        let combined = [output, errorOutput]
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard process.terminationStatus == 0 else {
+            throw NSError(domain: "UpdateManager", code: Int(process.terminationStatus), userInfo: [
+                NSLocalizedDescriptionKey: combined.isEmpty ? "exit code \(process.terminationStatus)" : combined
+            ])
+        }
+
+        return combined
     }
 
     private func replaceAndRelaunch(stagedApp: URL, stagingDir: URL) {

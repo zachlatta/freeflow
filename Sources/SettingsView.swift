@@ -1972,11 +1972,15 @@ struct RunLogView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Run Log")
                         .font(.headline)
-                    Text("Stored locally. Only the \(appState.maxPipelineHistoryCount) most recent runs are kept.")
+                    Text(appState.retainPipelineHistory
+                        ? "Stored locally. Only the \(appState.maxPipelineHistoryCount) most recent runs are kept."
+                        : "Disabled by default. Turn on retention to keep recent runs locally.")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
+                Toggle("Keep Run Log", isOn: $appState.retainPipelineHistory)
+                    .toggleStyle(.switch)
                 Button("Clear History") {
                     appState.clearPipelineHistory()
                 }

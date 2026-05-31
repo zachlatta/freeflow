@@ -11,7 +11,7 @@ enum RealtimeTranscriptionError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidBaseURL(let url): return "Cannot derive a WebSocket URL from \(url)"
+        case .invalidBaseURL: return ProviderURLPolicy.secureWebSocketProviderMessage
         case .notConnected: return "Realtime transcription socket is not connected"
         case .serverError(let code, let message): return "Realtime server error [\(code)]: \(message)"
         case .closedBeforeFinal: return "Realtime socket closed before emitting the final transcript"
@@ -254,8 +254,11 @@ final class RealtimeTranscriptionService {
         case "error":
             let errObj = json["error"] as? [String: Any]
             let code = errObj?["code"] as? String ?? "unknown"
-            let message = errObj?["message"] as? String ?? "unknown realtime error"
-            os_log(.error, log: realtimeLog, "server error [%{public}@]: %{public}@", code, message)
+            let rawMessage = errObj?["message"] as? String ?? ""
+            let message = rawMessage.isEmpty
+                ? "Provider returned an unknown realtime error."
+                : "Provider returned \(rawMessage.utf8.count) bytes of realtime error details."
+            os_log(.error, log: realtimeLog, "server error [%{public}@] messageBytes=%{public}ld", code, rawMessage.utf8.count)
             let error = RealtimeTranscriptionError.serverError(code: code, message: message)
             stateQueue.sync {
                 terminalError = error
@@ -345,39 +348,19 @@ final class RealtimeTranscriptionService {
 
     // MARK: URL derivation
 
-    /// Turn `https://host[/prefix]` or `http://host[/prefix]` into
-    /// `wss://host[/prefix]/realtime`, reusing a trailing `/v1` prefix when
-    /// the configured base URL already includes it.
+    /// Turn a secure provider URL into `wss://host[/prefix]/realtime`,
+    /// reusing a trailing `/v1` prefix when the configured base URL has it.
+    /// Cleartext websocket/http endpoints are allowed only for loopback dev servers.
     static func deriveWebSocketURL(
         baseURL: String,
         model: String,
         language: String?
     ) -> URL? {
-        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard var components = URLComponents(string: trimmed) else { return nil }
-
-        switch components.scheme?.lowercased() {
-        case "http": components.scheme = "ws"
-        case "https": components.scheme = "wss"
-        case "ws", "wss": break
-        default: return nil
-        }
-
-        var path = components.path
-        if path.hasSuffix("/") { path.removeLast() }
-        if path.hasSuffix("/v1") {
-            path += "/realtime"
-        } else {
-            path += "/v1/realtime"
-        }
-        components.path = path
-
-        var queryItems = components.queryItems ?? []
-        if !queryItems.contains(where: { $0.name == "intent" }) {
-            queryItems.append(URLQueryItem(name: "intent", value: "transcription"))
-        }
-        components.queryItems = queryItems.isEmpty ? nil : queryItems
-        return components.url
+        ProviderURLPolicy.normalizedRealtimeWebSocketURL(
+            from: baseURL,
+            model: model,
+            language: language
+        )
     }
 
     private func resumeIfReadyAfterCommit() {

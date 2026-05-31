@@ -38,7 +38,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     static let defaultScreenshotMaxDimension: CGFloat = 1024
 
     private let apiKey: String
-    private let baseURL: String
+    private let baseURL: URL?
     private let customContextPrompt: String
     private let contextModel: String
     private let maxScreenshotDataURILength = 500_000
@@ -57,7 +57,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         screenshotMaxDimension: CGFloat = AppContextService.defaultScreenshotMaxDimension
     ) {
         self.apiKey = apiKey
-        self.baseURL = baseURL
+        self.baseURL = try? ProviderURLPolicy.normalizedHTTPBaseURL(from: baseURL)
         self.customContextPrompt = customContextPrompt
         let trimmedModel = contextModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.contextModel = trimmedModel.isEmpty ? "meta-llama/llama-4-scout-17b-16e-instruct" : trimmedModel
@@ -214,7 +214,10 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         model: String
     ) async -> (activity: String, prompt: String)? {
         do {
-            var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
+            guard let baseURL else { return nil }
+            var request = URLRequest(url: baseURL
+                .appendingPathComponent("chat")
+                .appendingPathComponent("completions"))
             request.httpMethod = "POST"
             request.timeoutInterval = contextRequestTimeoutSeconds
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")

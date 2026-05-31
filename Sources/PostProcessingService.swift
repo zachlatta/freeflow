@@ -125,7 +125,7 @@ Behavior:
 """
 
     private let apiKey: String
-    private let baseURL: String
+    private let baseURL: URL?
     private let preferredModel: String
     private let preferredFallbackModel: String
     private let defaultModel = "openai/gpt-oss-20b"
@@ -144,7 +144,7 @@ Behavior:
         preferredFallbackModel: String = ""
     ) {
         self.apiKey = apiKey
-        self.baseURL = baseURL
+        self.baseURL = try? ProviderURLPolicy.normalizedHTTPBaseURL(from: baseURL)
         self.preferredModel = preferredModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.preferredFallbackModel = preferredFallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -362,7 +362,12 @@ Behavior:
         customSystemPrompt: String = "",
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
+        guard let baseURL else {
+            throw PostProcessingError.invalidInput(ProviderURLPolicy.secureHTTPProviderMessage)
+        }
+        var request = URLRequest(url: baseURL
+            .appendingPathComponent("chat")
+            .appendingPathComponent("completions"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -436,7 +441,7 @@ Model: \(model)
         }
 
         guard httpResponse.statusCode == 200 else {
-            let message = String(data: data, encoding: .utf8) ?? ""
+            let message = Self.sanitizedProviderError(statusCode: httpResponse.statusCode, data: data)
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
 
@@ -467,7 +472,12 @@ Model: \(model)
         customVocabulary: [String],
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
+        guard let baseURL else {
+            throw PostProcessingError.invalidInput(ProviderURLPolicy.secureHTTPProviderMessage)
+        }
+        var request = URLRequest(url: baseURL
+            .appendingPathComponent("chat")
+            .appendingPathComponent("completions"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -544,7 +554,7 @@ Model: \(model)
         }
 
         guard httpResponse.statusCode == 200 else {
-            let message = String(data: data, encoding: .utf8) ?? ""
+            let message = Self.sanitizedProviderError(statusCode: httpResponse.statusCode, data: data)
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
 
@@ -569,6 +579,13 @@ Model: \(model)
 
     static func applyOutputLanguage(_ prompt: String, language: String) -> String {
         prompt + "\n\nIMPORTANT: Translate the final cleaned text into \(language). Output ONLY in \(language), regardless of the original spoken language."
+    }
+
+    private static func sanitizedProviderError(statusCode: Int, data: Data) -> String {
+        if data.isEmpty {
+            return "Provider returned HTTP \(statusCode) with no response body."
+        }
+        return "Provider returned HTTP \(statusCode) with \(data.count) bytes of error details."
     }
 
     private func sanitizePostProcessedTranscript(_ value: String) -> String {

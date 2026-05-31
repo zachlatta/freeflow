@@ -21,21 +21,23 @@ enum AppSettingsStorage {
     // MARK: - Public API
 
     static func load(account: String) -> String? {
-        migrateFromKeychainIfNeeded(account: account)
-        let dict = loadSettings()
-        return dict[account]
+        migratePlaintextSettingToKeychainIfNeeded(account: account)
+        return loadFromKeychain(account: account)
     }
 
     static func save(_ value: String, account: String) {
-        var dict = loadSettings()
-        dict[account] = value
-        writeSettings(dict)
+        removePlaintextSetting(account: account)
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            deleteFromKeychain(account: account)
+        } else {
+            saveToKeychain(value, account: account)
+        }
     }
 
     static func delete(account: String) {
-        var dict = loadSettings()
-        dict.removeValue(forKey: account)
-        writeSettings(dict)
+        deleteFromKeychain(account: account)
+        removePlaintextSetting(account: account)
     }
 
     // MARK: - File I/O
@@ -51,8 +53,13 @@ enum AppSettingsStorage {
     }
 
     private static func writeSettings(_ dict: [String: String]) {
-        guard let data = try? JSONEncoder().encode(dict) else { return }
         let url = settingsFileURL
+        guard !dict.isEmpty else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+
+        guard let data = try? JSONEncoder().encode(dict) else { return }
         try? data.write(to: url, options: [.atomic])
         // Restrict to owner-only read/write (0600)
         try? FileManager.default.setAttributes(
@@ -61,32 +68,33 @@ enum AppSettingsStorage {
         )
     }
 
-    // MARK: - One-time migration from Keychain
+    // MARK: - Plaintext migration
 
-    private static let migrationDoneKey = "keychain_migration_done"
+    private static func migratePlaintextSettingToKeychainIfNeeded(account: String) {
+        var dict = loadSettings()
+        guard let plaintextValue = dict[account] else { return }
 
-    private static func migrateFromKeychainIfNeeded(account: String) {
-        let dict = loadSettings()
-        if dict[migrationDoneKey] != nil { return }
-
-        // Try to load from Keychain
-        if let keychainValue = loadFromKeychain(account: account),
-           !keychainValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            var updated = dict
-            updated[account] = keychainValue
-            updated[migrationDoneKey] = "true"
-            writeSettings(updated)
-            // Clean up old keychain entry
-            deleteFromKeychain(account: account)
-        } else {
-            // Mark migration as done even if nothing was in Keychain
-            var updated = dict
-            updated[migrationDoneKey] = "true"
-            writeSettings(updated)
+        let existingKeychainValue = loadFromKeychain(account: account)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if existingKeychainValue.isEmpty,
+           !plaintextValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            saveToKeychain(plaintextValue, account: account)
         }
+
+        dict.removeValue(forKey: account)
+        dict.removeValue(forKey: "keychain_migration_done")
+        writeSettings(dict)
     }
 
-    // MARK: - Legacy Keychain helpers (for migration only)
+    private static func removePlaintextSetting(account: String) {
+        var dict = loadSettings()
+        guard dict[account] != nil || dict["keychain_migration_done"] != nil else { return }
+        dict.removeValue(forKey: account)
+        dict.removeValue(forKey: "keychain_migration_done")
+        writeSettings(dict)
+    }
+
+    // MARK: - Keychain helpers
 
     private static func loadFromKeychain(account: String) -> String? {
         let query: [String: Any] = [
@@ -104,6 +112,33 @@ enum AppSettingsStorage {
             return nil
         }
         return value
+    }
+
+    private static func saveToKeychain(_ value: String, account: String) {
+        let data = Data(value.utf8)
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: bundleID,
+            kSecAttrAccount as String: account
+        ]
+
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: data
+        ]
+
+        let status = SecItemUpdate(query as CFDictionary, updateAttributes as CFDictionary)
+        if status == errSecSuccess {
+            return
+        }
+
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: bundleID,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: data
+        ]
+        SecItemAdd(addQuery as CFDictionary, nil)
     }
 
     private static func deleteFromKeychain(account: String) {

@@ -111,15 +111,14 @@ class TranscriptionService {
         }
 
         guard httpResponse.statusCode == 200 else {
-            let responseBody = String(data: data, encoding: .utf8) ?? ""
             os_log(
                 .error,
                 log: transcriptionLog,
-                "URLSession upload returned HTTP %ld for %{public}@ (bytes=%{public}lld) body=%{public}@",
+                "URLSession upload returned HTTP %ld for %{public}@ (bytes=%{public}lld responseBytes=%{public}ld)",
                 httpResponse.statusCode,
                 fileURL.lastPathComponent,
                 fileSizeBytes(for: fileURL),
-                responseBody
+                data.count
             )
             throw TranscriptionError.submissionFailed(Self.friendlyHTTPMessage(
                 status: httpResponse.statusCode,
@@ -209,39 +208,11 @@ class TranscriptionService {
     }
 
     private static func normalizedBaseURL(from baseURL: String) throws -> URL {
-        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            throw TranscriptionError.invalidBaseURL("Provider URL is empty.")
+        do {
+            return try ProviderURLPolicy.normalizedHTTPBaseURL(from: baseURL)
+        } catch {
+            throw TranscriptionError.invalidBaseURL(error.localizedDescription)
         }
-
-        guard var components = URLComponents(string: trimmed) else {
-            throw TranscriptionError.invalidBaseURL("Provider URL is malformed.")
-        }
-
-        guard let scheme = components.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
-            throw TranscriptionError.invalidBaseURL("Provider URL must use http or https.")
-        }
-
-        guard let host = components.host, !host.isEmpty else {
-            throw TranscriptionError.invalidBaseURL("Provider URL must include a host.")
-        }
-
-        components.scheme = scheme
-        if components.path == "/" {
-            components.path = ""
-        } else {
-            components.path = components.path.replacingOccurrences(
-                of: "/+$",
-                with: "",
-                options: .regularExpression
-            )
-        }
-
-        guard let normalizedURL = components.url else {
-            throw TranscriptionError.invalidBaseURL("Provider URL is malformed.")
-        }
-
-        return normalizedURL
     }
 
     // Whisper-large-v3 hallucinates common short phrases on silence/background
