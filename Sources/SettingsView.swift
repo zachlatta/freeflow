@@ -151,109 +151,57 @@ struct ProviderSettingsFields: View {
                     .foregroundStyle(.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Post-Processing Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField(AppState.defaultPostProcessingModel, text: $postProcessingModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isEditingPostProcessingModel)
-                        .onSubmit {
-                            commitPostProcessingModel()
-                        }
-                        .onChange(of: isEditingPostProcessingModel) { isEditing in
-                            if !isEditing {
-                                commitPostProcessingModel()
-                            }
-                        }
-                    Button("Reset to Default") {
-                        postProcessingModelDraft = AppState.defaultPostProcessingModel
-                        appState.postProcessingModel = AppState.defaultPostProcessingModel
-                    }
-                    .font(.caption)
+            ModelDropdownView(
+                title: "Post-Processing Model",
+                subtitle: "Used for transcript cleanup and Edit Mode transforms.",
+                predefinedModels: ModelConfiguration.llmModels,
+                defaultModel: AppState.defaultPostProcessingModel,
+                textDraft: $postProcessingModelDraft,
+                onCommit: commitPostProcessingModel,
+                onReset: {
+                    postProcessingModelDraft = AppState.defaultPostProcessingModel
+                    appState.postProcessingModel = AppState.defaultPostProcessingModel
                 }
-                Text("Used for transcript cleanup and Edit Mode transforms.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            )
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Post-Processing Fallback Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField(AppState.defaultPostProcessingFallbackModel, text: $postProcessingFallbackModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isEditingPostProcessingFallbackModel)
-                        .onSubmit {
-                            commitPostProcessingFallbackModel()
-                        }
-                        .onChange(of: isEditingPostProcessingFallbackModel) { isEditing in
-                            if !isEditing {
-                                commitPostProcessingFallbackModel()
-                            }
-                        }
-                    Button("Reset to Default") {
-                        postProcessingFallbackModelDraft = AppState.defaultPostProcessingFallbackModel
-                        appState.postProcessingFallbackModel = AppState.defaultPostProcessingFallbackModel
-                    }
-                    .font(.caption)
+            ModelDropdownView(
+                title: "Post-Processing Fallback Model",
+                subtitle: "Used as the explicit retry model for transcript cleanup and Edit Mode transforms.",
+                predefinedModels: ModelConfiguration.llmModels,
+                defaultModel: AppState.defaultPostProcessingFallbackModel,
+                textDraft: $postProcessingFallbackModelDraft,
+                onCommit: commitPostProcessingFallbackModel,
+                onReset: {
+                    postProcessingFallbackModelDraft = AppState.defaultPostProcessingFallbackModel
+                    appState.postProcessingFallbackModel = AppState.defaultPostProcessingFallbackModel
                 }
-                Text("Used as the explicit retry model for transcript cleanup and Edit Mode transforms.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            )
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Context Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField(AppState.defaultContextModel, text: $contextModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isEditingContextModel)
-                        .onSubmit {
-                            commitContextModel()
-                        }
-                        .onChange(of: isEditingContextModel) { isEditing in
-                            if !isEditing {
-                                commitContextModel()
-                            }
-                        }
-                    Button("Reset to Default") {
-                        contextModelDraft = AppState.defaultContextModel
-                        appState.contextModel = AppState.defaultContextModel
-                    }
-                    .font(.caption)
+            ModelDropdownView(
+                title: "Context Model",
+                subtitle: "Used for context inference, with a text-only retry when screenshot analysis fails.",
+                predefinedModels: ModelConfiguration.llmModels,
+                defaultModel: AppState.defaultContextModel,
+                textDraft: $contextModelDraft,
+                onCommit: commitContextModel,
+                onReset: {
+                    contextModelDraft = AppState.defaultContextModel
+                    appState.contextModel = AppState.defaultContextModel
                 }
-                Text("Used for context inference, with a text-only retry when screenshot analysis fails.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            )
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Transcription Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField(AppState.defaultTranscriptionModel, text: $transcriptionModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isEditingTranscriptionModel)
-                        .onSubmit {
-                            commitTranscriptionModel()
-                        }
-                        .onChange(of: isEditingTranscriptionModel) { isEditing in
-                            if !isEditing {
-                                commitTranscriptionModel()
-                            }
-                        }
-                    Button("Reset to Default") {
-                        transcriptionModelDraft = AppState.defaultTranscriptionModel
-                        appState.transcriptionModel = AppState.defaultTranscriptionModel
-                    }
-                    .font(.caption)
+            ModelDropdownView(
+                title: "Transcription Model",
+                subtitle: "Used for speech-to-text transcription.",
+                predefinedModels: ModelConfiguration.transcriptionModels,
+                defaultModel: AppState.defaultTranscriptionModel,
+                textDraft: $transcriptionModelDraft,
+                onCommit: commitTranscriptionModel,
+                onReset: {
+                    transcriptionModelDraft = AppState.defaultTranscriptionModel
+                    appState.transcriptionModel = AppState.defaultTranscriptionModel
                 }
-                Text("Used for speech-to-text transcription.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            )
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Transcription Language")
