@@ -31,7 +31,13 @@ public struct ModelConfiguration {
     ]
 
     public static func config(for model: String) -> ModelConfig {
-        let cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        // Normalize providerless aliases
+        if cleanModel == "qwen3-32b" { cleanModel = "qwen/qwen3-32b" }
+        else if cleanModel == "gpt-oss-20b" { cleanModel = "openai/gpt-oss-20b" }
+        else if cleanModel == "gpt-oss-120b" { cleanModel = "openai/gpt-oss-120b" }
+        else if cleanModel == "gpt-oss-safeguard-20b" { cleanModel = "openai/gpt-oss-safeguard-20b" }
         
         if cleanModel == "openai/gpt-oss-20b" {
             return ModelConfig(
@@ -163,7 +169,8 @@ public struct ModelConfiguration {
         var cleaned = text
         
         // First, replace fully closed tags: <think>...</think>
-        let closedRegexPattern = "^\\s*<think>[\\s\\S]*?</think>"
+        // We use a group with + to catch multiple consecutive think blocks.
+        let closedRegexPattern = "^(?:\\s*<think>[\\s\\S]*?</think>)+"
         if let regex = try? NSRegularExpression(pattern: closedRegexPattern, options: []) {
             let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
             cleaned = regex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
