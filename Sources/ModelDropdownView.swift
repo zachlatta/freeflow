@@ -86,5 +86,11 @@ struct ModelDropdownView: View {
                 isCustom = true
             }
         }
+        .onChange(of: textDraft) { newValue in
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                isCustom = !predefinedModels.contains(trimmed)
+            }
+        }
     }
 }

@@ -163,7 +163,7 @@ public struct ModelConfiguration {
         var cleaned = text
         
         // First, replace fully closed tags: <think>...</think>
-        let closedRegexPattern = "<think>[\\s\\S]*?</think>"
+        let closedRegexPattern = "^\\s*<think>[\\s\\S]*?</think>"
         if let regex = try? NSRegularExpression(pattern: closedRegexPattern, options: []) {
             let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
             cleaned = regex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
@@ -171,7 +171,7 @@ public struct ModelConfiguration {
         
         // Next, if there is an unclosed <think> tag remaining (meaning it started thinking but got truncated),
         // we strip from the opening <think> tag to the very end of the string.
-        let openRegexPattern = "<think>[\\s\\S]*$"
+        let openRegexPattern = "^\\s*<think>[\\s\\S]*$"
         if let regex = try? NSRegularExpression(pattern: openRegexPattern, options: []) {
             let range = NSRange(cleaned.startIndex..<cleaned.endIndex, in: cleaned)
             cleaned = regex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
