@@ -127,17 +127,17 @@ private struct PendingClipboardRestore {
     let writtenTranscript: String
 }
 
-private struct TranscriptCommandParsingResult {
+struct TranscriptCommandParsingResult {
     let transcript: String
     let shouldPressEnterAfterPaste: Bool
 }
 
-private enum CommandInvocation: String {
+enum CommandInvocation: String {
     case automatic
     case manual
 }
 
-private enum SessionIntent {
+enum SessionIntent {
     case dictation
     case command(invocation: CommandInvocation, selectedText: String)
 
@@ -580,7 +580,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var hasShownScreenshotPermissionAlert = false
     private var audioDeviceObservers: [NSObjectProtocol] = []
     private var needsMicrophoneRefreshAfterRecording = false
-    private let pipelineHistoryStore = PipelineHistoryStore()
+    let pipelineHistoryStore = PipelineHistoryStore()
     private let shortcutSessionController = DictationShortcutSessionController()
     private var activeRecordingTriggerMode: RecordingTriggerMode?
     private var currentSessionIntent: SessionIntent = .dictation
@@ -1098,74 +1098,102 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    func retryTranscription(item: PipelineHistoryItem) {
-        guard let audioFileName = item.audioFileName else { return }
+    // Defines the destination behavior for a transcription retry
+    enum RetryAction: Sendable {
+        case pasteAtCursor
+        case copyToClipboard
+    }
+
+    // Retries transcription, updates history, and executes the specified action
+    func retryTranscription(item: PipelineHistoryItem, overrideModel: String? = nil, action: RetryAction = .copyToClipboard) {
+        // Prevent concurrent retries for the same history item
         guard !retryingItemIDs.contains(item.id) else { return }
-
         retryingItemIDs.insert(item.id)
-
-        let audioURL = Self.audioStorageDirectory().appendingPathComponent(audioFileName)
-        guard FileManager.default.fileExists(atPath: audioURL.path) else {
-            retryingItemIDs.remove(item.id)
-            errorMessage = "Audio file not found for retry."
-            return
-        }
-
-        let restoredContext = AppContext(
-            appName: nil,
-            bundleIdentifier: nil,
-            windowTitle: nil,
-            selectedText: nil,
-            currentActivity: item.contextSummary,
-            contextSystemPrompt: item.contextSystemPrompt,
-            contextPrompt: item.contextPrompt,
-            screenshotDataURL: item.contextScreenshotDataURL,
-            screenshotMimeType: item.contextScreenshotDataURL != nil ? "image/jpeg" : nil,
-            screenshotError: nil
-        )
-
+        
+        let targetModel = overrideModel ?? postProcessingModel
         let postProcessingService = PostProcessingService(
             apiKey: apiKey,
             baseURL: apiBaseURL,
-            preferredModel: postProcessingModel,
+            preferredModel: targetModel,
             preferredFallbackModel: postProcessingFallbackModel
         )
-        let capturedCustomVocabulary = customVocabulary
-        let capturedCustomSystemPrompt = customSystemPrompt
-
+        
         Task {
             do {
-                let transcriptionService = try makeTranscriptionService()
-                let rawTranscript = try await transcriptionService.transcribe(fileURL: audioURL)
-                let parsedTranscript = Self.parseTranscriptCommands(
-                    from: rawTranscript,
-                    pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
-                )
-
                 let finalTranscript: String
                 let processingStatus: String
-                let postProcessingPrompt: String
-                let restoredIntent = SessionIntent.fromPersisted(
-                    intent: item.intent,
-                    selectedText: item.selectedText
-                )
-                let result = await self.processTranscript(
-                    parsedTranscript.transcript,
-                    intent: restoredIntent,
-                    context: restoredContext,
-                    postProcessingService: postProcessingService,
-                    customVocabulary: capturedCustomVocabulary,
-                    customSystemPrompt: capturedCustomSystemPrompt,
-                    outputLanguage: self.outputLanguage
-                )
-                finalTranscript = result.finalTranscript
-                processingStatus = Self.statusMessage(
-                    for: result.outcome,
-                    parsedTranscript: parsedTranscript,
-                    isRetry: true
-                )
-                postProcessingPrompt = result.prompt
-
+                let promptForDisplay: String
+                let isCommandMode = item.intent == .commandAutomatic || item.intent == .commandManual
+                
+                if let savedPrompt = item.postProcessingPrompt,
+                   let parsed = parsePostProcessingPrompt(savedPrompt) {
+                    
+                    let result = try await postProcessingService.retryWithPrompt(
+                        systemPrompt: parsed.system,
+                        userMessage: parsed.user,
+                        model: targetModel,
+                        isCommandMode: isCommandMode
+                    )
+                    finalTranscript = result.transcript
+                    promptForDisplay = result.prompt
+                    processingStatus = "Post-processing succeeded (retried from log)"
+                    
+                } else {
+                    let rawTranscript: String
+                    let trimmedSavedRaw = item.rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    if !trimmedSavedRaw.isEmpty {
+                        rawTranscript = item.rawTranscript
+                    } else {
+                        guard let audioFileName = item.audioFileName else {
+                            throw NSError(domain: "TranscribeAgain", code: 1, userInfo: [NSLocalizedDescriptionKey: "No raw transcript and no audio file available."])
+                        }
+                        let audioURL = Self.audioStorageDirectory().appendingPathComponent(audioFileName)
+                        guard FileManager.default.fileExists(atPath: audioURL.path) else {
+                            throw NSError(domain: "TranscribeAgain", code: 2, userInfo: [NSLocalizedDescriptionKey: "Audio file not found for retry."])
+                        }
+                        let transcriptionService = try makeTranscriptionService()
+                        rawTranscript = try await transcriptionService.transcribe(fileURL: audioURL)
+                    }
+                    
+                    let parsedTranscript = Self.parseTranscriptCommands(
+                        from: rawTranscript,
+                        pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
+                    )
+                    
+                    let restoredContext = AppContext(
+                        appName: item.contextAppName,
+                        bundleIdentifier: item.contextBundleIdentifier,
+                        windowTitle: item.contextWindowTitle,
+                        selectedText: item.selectedText,
+                        currentActivity: item.contextSummary,
+                        contextSystemPrompt: item.contextSystemPrompt,
+                        contextPrompt: item.contextPrompt,
+                        screenshotDataURL: item.contextScreenshotDataURL,
+                        screenshotMimeType: item.contextScreenshotDataURL != nil ? "image/jpeg" : nil,
+                        screenshotError: nil
+                    )
+                    
+                    let restoredIntent = SessionIntent.fromPersisted(
+                        intent: item.intent,
+                        selectedText: item.selectedText
+                    )
+                    
+                    let result = await self.processTranscript(
+                        parsedTranscript.transcript,
+                        intent: restoredIntent,
+                        context: restoredContext,
+                        postProcessingService: postProcessingService,
+                        customVocabulary: self.customVocabulary,
+                        customSystemPrompt: self.customSystemPrompt,
+                        outputLanguage: self.outputLanguage
+                    )
+                    
+                    finalTranscript = result.finalTranscript
+                    promptForDisplay = result.prompt
+                    processingStatus = finalTranscript.isEmpty ? "Post-processing failed on retry, using raw transcript" : "Post-processing succeeded (retried)"
+                }
+                
                 await MainActor.run {
                     let updatedItem = PipelineHistoryItem(
                         intent: item.intent,
@@ -1173,9 +1201,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         capturedSelection: item.capturedSelection,
                         id: item.id,
                         timestamp: item.timestamp,
-                        rawTranscript: parsedTranscript.transcript,
+                        rawTranscript: item.rawTranscript,
                         postProcessedTranscript: finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
-                        postProcessingPrompt: postProcessingPrompt,
+                        postProcessingPrompt: promptForDisplay,
                         systemPrompt: item.systemPrompt,
                         contextSummary: item.contextSummary,
                         contextSystemPrompt: item.contextSystemPrompt,
@@ -1191,18 +1219,32 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         contextWindowTitle: item.contextWindowTitle
                     )
                     do {
-                        try pipelineHistoryStore.update(updatedItem)
-                        pipelineHistory = pipelineHistoryStore.loadAllHistory()
+                        try self.pipelineHistoryStore.update(updatedItem)
+                        self.pipelineHistory = self.pipelineHistoryStore.loadAllHistory()
                         let trimmedRetryTranscript = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !trimmedRetryTranscript.isEmpty {
-                            lastTranscript = trimmedRetryTranscript
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(trimmedRetryTranscript, forType: .string)
+                            self.lastTranscript = trimmedRetryTranscript
+                            switch action {
+                            case .pasteAtCursor:
+                                // Option 1: Forces the text to be pasted at the current system cursor
+                                let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedRetryTranscript)
+                                self.pasteAtCursorWhenShortcutReleased {
+                                    _ = pendingClipboardRestore
+                                }
+                            case .copyToClipboard:
+                                // Option 2: Silently copies to clipboard and flashes HUD without pasting
+                                let pasteboard = NSPasteboard.general
+                                pasteboard.clearContents()
+                                pasteboard.setString(trimmedRetryTranscript, forType: .string)
+                                let completionMsg = "Dictation copied to the clipboard"
+                                self.statusText = completionMsg
+                                self.scheduleReadyStatusReset(after: 3, matching: [completionMsg])
+                            }
                         }
                     } catch {
-                        errorMessage = "Failed to save retry result: \(error.localizedDescription)"
+                        self.errorMessage = "Failed to save retry result: \(error.localizedDescription)"
                     }
-                    retryingItemIDs.remove(item.id)
+                    self.retryingItemIDs.remove(item.id)
                 }
             } catch {
                 await MainActor.run {
@@ -1230,13 +1272,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         contextWindowTitle: item.contextWindowTitle
                     )
                     do {
-                        try pipelineHistoryStore.update(updatedItem)
-                        pipelineHistory = pipelineHistoryStore.loadAllHistory()
+                        try self.pipelineHistoryStore.update(updatedItem)
+                        self.pipelineHistory = self.pipelineHistoryStore.loadAllHistory()
                     } catch {}
-                    retryingItemIDs.remove(item.id)
+                    
+                    self.errorMessage = "Retry failed: \(error.localizedDescription)"
+                    self.retryingItemIDs.remove(item.id)
                 }
             }
         }
+    }
+
+    private func parsePostProcessingPrompt(_ prompt: String) -> (system: String, user: String)? {
+        guard let userMarkerRange = prompt.range(of: "\n[User]\n") else { return nil }
+        let userMessage = String(prompt[userMarkerRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let firstPart = prompt[..<userMarkerRange.lowerBound]
+        guard let systemMarkerRange = firstPart.range(of: "\n[System]\n") else { return nil }
+        let systemPrompt = String(firstPart[systemMarkerRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        return (systemPrompt, userMessage)
     }
 
     func startAccessibilityPolling() {
@@ -2275,7 +2330,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return strippedPunctuation.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func parseTranscriptCommands(
+    static func parseTranscriptCommands(
         from transcript: String,
         pressEnterCommandEnabled: Bool
     ) -> TranscriptCommandParsingResult {
@@ -2333,7 +2388,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }?.original
     }
 
-    private enum TranscriptProcessingOutcome {
+    enum TranscriptProcessingOutcome {
         case skippedEmptyRawTranscript
         case voiceMacro(command: String)
         case postProcessingSucceeded
@@ -2361,7 +2416,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    private func processTranscript(
+    func processTranscript(
         _ rawTranscript: String,
         intent: SessionIntent,
         context: AppContext,

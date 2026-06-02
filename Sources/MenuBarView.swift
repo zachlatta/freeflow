@@ -138,6 +138,27 @@ struct MenuBarView: View {
 
             Divider()
 
+            let lastItem = appState.pipelineHistory.first
+            let isRetrying = lastItem.map { appState.retryingItemIDs.contains($0.id) } ?? false
+            Menu(isRetrying ? "Transcribing Again..." : "Transcribe Again") {
+                Button("Use Default Model") {
+                    if let item = lastItem {
+                        appState.retryTranscription(item: item, overrideModel: nil, action: .pasteAtCursor)
+                    }
+                }
+                Divider()
+                ForEach(ModelConfiguration.llmModels, id: \.self) { model in
+                    Button(model) {
+                        if let item = lastItem {
+                            appState.retryTranscription(item: item, overrideModel: model, action: .pasteAtCursor)
+                        }
+                    }
+                }
+            }
+            .disabled(lastItem == nil || isRetrying)
+            
+            Divider()
+
             if !appState.lastTranscript.isEmpty && !appState.isRecording && !appState.isTranscribing {
                 Button(appState.copyAgainShortcut.isDisabled
                     ? "Paste Again"

@@ -124,8 +124,8 @@ Behavior:
 - Do not treat VOICE_COMMAND as dictation to clean up and paste directly.
 """
 
-    private let apiKey: String
-    private let baseURL: String
+    let apiKey: String
+    let baseURL: String
     private let preferredModel: String
     private let preferredFallbackModel: String
     private let defaultModel = "openai/gpt-oss-20b"
