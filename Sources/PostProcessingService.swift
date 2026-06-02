@@ -571,7 +571,7 @@ Model: \(model)
         prompt + "\n\nIMPORTANT: Translate the final cleaned text into \(language). Output ONLY in \(language), regardless of the original spoken language."
     }
 
-    private func sanitizePostProcessedTranscript(_ value: String) -> String {
+    func sanitizePostProcessedTranscript(_ value: String) -> String {
         var result = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !result.isEmpty else { return "" }
 
@@ -590,7 +590,7 @@ Model: \(model)
         return result
     }
 
-    private func sanitizeCommandModeTranscript(_ value: String) -> String {
+    func sanitizeCommandModeTranscript(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

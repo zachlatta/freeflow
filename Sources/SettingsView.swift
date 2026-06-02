@@ -2028,6 +2028,7 @@ struct RunLogEntryView: View {
     @State private var copiedCleanedTranscriptResetWorkItem: DispatchWorkItem?
     @State private var showCopiedMessage = false
     @State private var showCopiedMessageResetWorkItem: DispatchWorkItem?
+    @State private var isPendingCopy = false
 
     // Displays a temporary toast message and schedules its removal
     @MainActor
@@ -2133,10 +2134,11 @@ struct RunLogEntryView: View {
 
                 HStack(spacing: 4) {
                     // Renders the retry button, supporting model selection dropdown if models exist
-                    if item.audioFileName != nil {
+                    if item.canRetry {
                         if ModelConfiguration.llmModels.isEmpty {
                             // Fallback to simple button if no specific models are defined
                             Button {
+                                isPendingCopy = true
                                 appState.retryTranscription(item: item, overrideModel: nil, action: .copyToClipboard)
                             } label: {
                                 if isRetrying {
@@ -2158,11 +2160,13 @@ struct RunLogEntryView: View {
                             // Dropdown menu showing all available LLM models
                             Menu {
                                 Button("Use Default Model") {
+                                    isPendingCopy = true
                                     appState.retryTranscription(item: item, overrideModel: nil, action: .copyToClipboard)
                                 }
                                 Divider()
                                 ForEach(ModelConfiguration.llmModels, id: \.self) { model in
                                     Button(model) {
+                                        isPendingCopy = true
                                         appState.retryTranscription(item: item, overrideModel: model, action: .copyToClipboard)
                                     }
                                 }
@@ -2431,11 +2435,14 @@ struct RunLogEntryView: View {
             let wasRetrying = isRetrying
             isRetrying = ids.contains(item.id)
             if wasRetrying && !isRetrying {
-                // If retry completed, show copied toast on success
-                if let updatedItem = appState.pipelineHistory.first(where: { $0.id == item.id }) {
-                    let newIsError = updatedItem.postProcessingStatus.hasPrefix("Error:")
-                    if !newIsError {
-                        retryCallback()
+                // If retry completed, show copied toast on success if initiated from this row
+                if isPendingCopy {
+                    isPendingCopy = false
+                    if let updatedItem = appState.pipelineHistory.first(where: { $0.id == item.id }) {
+                        let newIsError = updatedItem.postProcessingStatus.hasPrefix("Error:")
+                        if !newIsError {
+                            retryCallback()
+                        }
                     }
                 }
             }

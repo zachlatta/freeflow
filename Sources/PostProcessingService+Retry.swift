@@ -87,33 +87,13 @@ Model: \(model)
             throw PostProcessingError.emptyOutput
         }
         
-        // Use the existing sanitize functions (they are public/internal)
-        // Wait, sanitizePostProcessedTranscript and sanitizeCommandModeTranscript are private in PostProcessingService?
-        // Let's check if they are private. I might need to reproduce them or make them internal.
-        // For now, I'll reproduce the exact logic they have since it's just trimming quotes.
-        let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        let sanitizedTranscript = sanitizeTranscript(trimmedContent)
+        let sanitizedTranscript = isCommandMode
+            ? sanitizeCommandModeTranscript(content)
+            : sanitizePostProcessedTranscript(content)
         
         return PostProcessingResult(
             transcript: sanitizedTranscript,
             prompt: promptForDisplay
         )
-    }
-    
-    // Sanitizes final transcript text by trimming quotes and handling EMPTY outputs.
-    private func sanitizeTranscript(_ transcript: String) -> String {
-        var clean = transcript
-        if clean.hasPrefix("\"") && clean.hasSuffix("\"") && clean.count >= 2 {
-            clean.removeFirst()
-            clean.removeLast()
-        }
-        if clean.hasPrefix("'") && clean.hasSuffix("'") && clean.count >= 2 {
-            clean.removeFirst()
-            clean.removeLast()
-        }
-        if clean.uppercased() == "EMPTY" {
-            return ""
-        }
-        return clean.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

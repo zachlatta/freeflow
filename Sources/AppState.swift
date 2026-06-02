@@ -1123,6 +1123,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 let finalTranscript: String
                 let processingStatus: String
                 let promptForDisplay: String
+                let rawTranscriptForHistory: String
                 let isCommandMode = item.intent == .commandAutomatic || item.intent == .commandManual
                 
                 if let savedPrompt = item.postProcessingPrompt,
@@ -1137,6 +1138,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     finalTranscript = result.transcript
                     promptForDisplay = result.prompt
                     processingStatus = "Post-processing succeeded (retried from log)"
+                    rawTranscriptForHistory = item.rawTranscript
                     
                 } else {
                     let rawTranscript: String
@@ -1191,7 +1193,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     
                     finalTranscript = result.finalTranscript
                     promptForDisplay = result.prompt
-                    processingStatus = finalTranscript.isEmpty ? "Post-processing failed on retry, using raw transcript" : "Post-processing succeeded (retried)"
+                    processingStatus = Self.statusMessage(
+                        for: result.outcome,
+                        parsedTranscript: parsedTranscript,
+                        isRetry: true
+                    )
+                    rawTranscriptForHistory = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
                 
                 await MainActor.run {
@@ -1201,7 +1208,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         capturedSelection: item.capturedSelection,
                         id: item.id,
                         timestamp: item.timestamp,
-                        rawTranscript: item.rawTranscript,
+                        rawTranscript: rawTranscriptForHistory,
                         postProcessedTranscript: finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
                         postProcessingPrompt: promptForDisplay,
                         systemPrompt: item.systemPrompt,
@@ -1228,8 +1235,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             case .pasteAtCursor:
                                 // Option 1: Forces the text to be pasted at the current system cursor
                                 let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedRetryTranscript)
-                                self.pasteAtCursorWhenShortcutReleased {
-                                    _ = pendingClipboardRestore
+                                self.pasteAtCursorWhenShortcutReleased { [weak self] in
+                                    self?.restoreClipboardIfNeeded(pendingClipboardRestore)
                                 }
                             case .copyToClipboard:
                                 // Option 2: Silently copies to clipboard and flashes HUD without pasting

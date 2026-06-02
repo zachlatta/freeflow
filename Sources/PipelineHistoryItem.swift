@@ -74,4 +74,14 @@ struct PipelineHistoryItem: Identifiable, Codable {
         self.contextBundleIdentifier = contextBundleIdentifier
         self.contextWindowTitle = contextWindowTitle
     }
+
+    var canRetry: Bool {
+        if let prompt = postProcessingPrompt, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if !rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return audioFileName != nil
+    }
 }
