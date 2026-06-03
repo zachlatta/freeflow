@@ -41,7 +41,7 @@ public struct ModelConfiguration {
         
         if cleanModel == "openai/gpt-oss-20b" {
             return ModelConfig(
-                maxCompletionTokens: 1024,
+                maxCompletionTokens: 4096,
                 reasoningEffort: "low",
                 includeReasoning: false,
                 shouldStripThinkTags: false
