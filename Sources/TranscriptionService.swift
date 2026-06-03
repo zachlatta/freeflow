@@ -54,29 +54,41 @@ class TranscriptionService {
         }
 
         let timeoutSeconds = transcriptionTimeoutSeconds
-        return try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask { [weak self] in
-                guard let self else {
-                    throw TranscriptionError.transcriptionFailed("Transcription service deallocated")
-                }
-                return try await self.transcribeAudio(fileURL: fileURL)
-            }
+        let raceState = TranscriptionTimeoutRaceState()
 
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
-                throw TranscriptionError.transcriptionTimedOut(timeoutSeconds)
-            }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                raceState.setContinuation(continuation)
 
-            do {
-                guard let result = try await group.next() else {
-                    throw TranscriptionError.transcriptionFailed("No transcription result")
+                let transcriptionTask = Task { [weak self] in
+                    do {
+                        guard let self else {
+                            throw TranscriptionError.transcriptionFailed("Transcription service deallocated")
+                        }
+                        let result = try await self.transcribeAudio(fileURL: fileURL)
+                        raceState.finish(.success(result))
+                    } catch {
+                        raceState.finish(.failure(Self.transcriptionTimeoutErrorIfNeeded(
+                            error,
+                            timeoutSeconds: timeoutSeconds
+                        )))
+                    }
                 }
-                group.cancelAll()
-                return result
-            } catch {
-                group.cancelAll()
-                throw error
+
+                let timeoutTask = Task {
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                        raceState.finish(.failure(TranscriptionError.transcriptionTimedOut(timeoutSeconds)))
+                    } catch is CancellationError {
+                    } catch {
+                        raceState.finish(.failure(error))
+                    }
+                }
+
+                raceState.setTasks([transcriptionTask, timeoutTask])
             }
+        } onCancel: {
+            raceState.cancel()
         }
     }
 
@@ -228,6 +240,16 @@ class TranscriptionService {
         }
     }
 
+    private static func transcriptionTimeoutErrorIfNeeded(
+        _ error: Error,
+        timeoutSeconds: TimeInterval
+    ) -> Error {
+        if let urlError = error as? URLError, urlError.code == .timedOut {
+            return TranscriptionError.transcriptionTimedOut(timeoutSeconds)
+        }
+        return error
+    }
+
     private static func normalizedBaseURL(from baseURL: String) throws -> URL {
         let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -358,6 +380,65 @@ enum TranscriptionError: LocalizedError {
         case .pollFailed(let msg): return "Polling failed: \(msg)"
         case .audioPreparationFailed(let msg): return "Audio preparation failed: \(msg)"
         }
+    }
+}
+
+private final class TranscriptionTimeoutRaceState {
+    private let lock = NSLock()
+    private var didFinish = false
+    private var continuation: CheckedContinuation<String, Error>?
+    private var tasks: [Task<Void, Never>] = []
+
+    func setContinuation(_ continuation: CheckedContinuation<String, Error>) {
+        lock.lock()
+        if didFinish {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func setTasks(_ tasks: [Task<Void, Never>]) {
+        lock.lock()
+        if didFinish {
+            lock.unlock()
+            tasks.forEach { $0.cancel() }
+            return
+        }
+
+        self.tasks = tasks
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<String, Error>) {
+        lock.lock()
+        guard !didFinish else {
+            lock.unlock()
+            return
+        }
+
+        didFinish = true
+        let continuation = self.continuation
+        self.continuation = nil
+        let tasks = self.tasks
+        self.tasks = []
+        lock.unlock()
+
+        tasks.forEach { $0.cancel() }
+
+        switch result {
+        case .success(let value):
+            continuation?.resume(returning: value)
+        case .failure(let error):
+            continuation?.resume(throwing: error)
+        }
+    }
+
+    func cancel() {
+        finish(.failure(CancellationError()))
     }
 }
 
