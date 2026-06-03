@@ -422,9 +422,20 @@ Model: \(model)
                 ]
             ]
         ]
-        if model == defaultModel {
+        let config = ModelConfiguration.config(for: model)
+        if let maxTokens = config.maxCompletionTokens {
+            payload["max_completion_tokens"] = maxTokens
+        } else if model == defaultModel {
             payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
+        }
+        if let effort = config.reasoningEffort {
+            payload["reasoning_effort"] = effort
+        } else if model == defaultModel {
             payload["reasoning_effort"] = defaultModelReasoningEffort
+        }
+        if let include = config.includeReasoning {
+            payload["include_reasoning"] = include
+        } else if model == defaultModel {
             payload["include_reasoning"] = false
         }
 
@@ -444,8 +455,13 @@ Model: \(model)
               let choices = json["choices"] as? [[String: Any]],
               let firstChoice = choices.first,
               let message = firstChoice["message"] as? [String: Any],
-              let content = message["content"] as? String else {
+              let rawContent = message["content"] as? String else {
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
+        }
+        
+        var content = rawContent
+        if config.shouldStripThinkTags {
+            content = ModelConfiguration.stripThinkTags(content)
         }
 
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -530,9 +546,20 @@ Model: \(model)
                 ]
             ]
         ]
-        if model == defaultModel {
+        let config = ModelConfiguration.config(for: model)
+        if let maxTokens = config.maxCompletionTokens {
+            payload["max_completion_tokens"] = maxTokens
+        } else if model == defaultModel {
             payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
+        }
+        if let effort = config.reasoningEffort {
+            payload["reasoning_effort"] = effort
+        } else if model == defaultModel {
             payload["reasoning_effort"] = defaultModelReasoningEffort
+        }
+        if let include = config.includeReasoning {
+            payload["include_reasoning"] = include
+        } else if model == defaultModel {
             payload["include_reasoning"] = false
         }
 
@@ -552,8 +579,13 @@ Model: \(model)
               let choices = json["choices"] as? [[String: Any]],
               let firstChoice = choices.first,
               let message = firstChoice["message"] as? [String: Any],
-              let content = message["content"] as? String else {
+              let rawContent = message["content"] as? String else {
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
+        }
+        
+        var content = rawContent
+        if config.shouldStripThinkTags {
+            content = ModelConfiguration.stripThinkTags(content)
         }
 
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
