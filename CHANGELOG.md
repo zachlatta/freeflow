@@ -8,6 +8,27 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [1.1.0] - 2026-06-03
+
+### Added
+
+- Model pickers in Settings for post-processing, fallback, context, and transcription models, including Qwen 3 32B and custom model entries.
+- A recording overlay display picker for choosing the active window, primary display, or a specific connected monitor.
+- In-pill error notifications so transient failures such as network or provider errors are visible without opening logs.
+- Advanced timeout overrides for local model and slow network setups.
+
+### Improved
+
+- Retried dictations now place the successful transcript on the clipboard and update Paste Again.
+- Paste Again now preserves the latest raw transcript earlier in the dictation flow, so it remains useful if later cleanup or pasting fails.
+- Post-processing handles reasoning-oriented model output more cleanly, including Qwen thinking tags and providerless model aliases.
+
+### Fixed
+
+- Fixed cases where transcription could hang indefinitely when a provider accepted a connection but never returned a response.
+- Fixed false screen-recording permission alerts from unrelated permission messages.
+- Fixed duplicate in-pill error notifications being dismissed by an older timer.
+
 ## [1.0.0] - 2026-05-20
 
 FreeFlow is now considered feature-complete and stable enough for a 1.0 release.
