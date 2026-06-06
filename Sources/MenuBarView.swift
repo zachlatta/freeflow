@@ -180,6 +180,14 @@ struct MenuBarView: View {
 
             Divider()
 
+            Button("Paste Custom Word to Vocabulary") {
+                if appState.pasteWordToVocabulary() != nil {
+                    VocabularyNotificationManager.shared.flashCheckmark()
+                }
+            }
+
+            Divider()
+
             Menu("Hold Shortcut") {
                 Button {
                     _ = appState.setShortcut(.disabled, for: .hold)
