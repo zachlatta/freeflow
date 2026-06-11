@@ -1241,12 +1241,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     func startAccessibilityPolling() {
         accessibilityTimer?.invalidate()
+        accessibilityTimer = nil
         hasAccessibility = AXIsProcessTrusted()
         hasScreenRecordingPermission = hasScreenCapturePermission()
+        if hasAccessibility && hasScreenRecordingPermission {
+            return
+        }
         accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             DispatchQueue.main.async {
-                self?.hasAccessibility = AXIsProcessTrusted()
-                self?.hasScreenRecordingPermission = self?.hasScreenCapturePermission() ?? false
+                guard let self else { return }
+                self.hasAccessibility = AXIsProcessTrusted()
+                self.hasScreenRecordingPermission = self.hasScreenCapturePermission()
+                if self.hasAccessibility && self.hasScreenRecordingPermission {
+                    self.accessibilityTimer?.invalidate()
+                    self.accessibilityTimer = nil
+                }
             }
         }
     }
