@@ -1925,7 +1925,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         startedAt: CFAbsoluteTime? = nil
     ) -> Bool {
         activeRecordingTriggerMode = triggerMode
-        guard hasAccessibility else {
+        let isAccessibilityTrusted = AXIsProcessTrusted()
+        hasAccessibility = isAccessibilityTrusted
+        guard isAccessibilityTrusted else {
             errorMessage = "Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility."
             statusText = "No Accessibility"
             activeRecordingTriggerMode = nil
