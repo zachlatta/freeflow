@@ -448,6 +448,11 @@ final class RecordingOverlayManager {
         overlayState.updateVersion = ""
         if let panel = overlayWindow {
             panel.orderOut(nil)
+            // orderOut alone leaves the panel retained in NSApp.windows with its
+            // SwiftUI hierarchy mounted — repeatForever animations keep flushing
+            // Core Animation forever. Unmount and close so the panel deallocates.
+            panel.contentView = nil
+            panel.close()
             overlayWindow = nil
         }
     }
