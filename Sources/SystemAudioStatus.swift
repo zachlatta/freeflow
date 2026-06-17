@@ -13,7 +13,13 @@ enum SystemAudioStatus {
             case unmute
         }
 
+        let deviceID: AudioDeviceID?
         let restoration: Restoration
+
+        init(deviceID: AudioDeviceID? = nil, restoration: Restoration) {
+            self.deviceID = deviceID
+            self.restoration = restoration
+        }
     }
 
     private static let dictationDuckVolumeRatio: Float = 0.15
@@ -21,52 +27,12 @@ enum SystemAudioStatus {
 
     static func isDefaultOutputMuted() -> Bool {
         guard let deviceID = defaultOutputDeviceID() else { return false }
-
-        var muteValue: UInt32 = 0
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyMute,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        guard AudioObjectHasProperty(deviceID, &address) else { return false }
-
-        let status = AudioObjectGetPropertyData(
-            deviceID,
-            &address,
-            0,
-            nil,
-            &size,
-            &muteValue
-        )
-
-        guard status == noErr else { return false }
-        return muteValue == 1
+        return isOutputMuted(deviceID: deviceID)
     }
 
     static func setDefaultOutputMuted(_ muted: Bool) -> Bool {
         guard let deviceID = defaultOutputDeviceID() else { return false }
-
-        var muteValue: UInt32 = muted ? 1 : 0
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyMute,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        guard AudioObjectHasProperty(deviceID, &address) else { return false }
-
-        let status = AudioObjectSetPropertyData(
-            deviceID,
-            &address,
-            0,
-            nil,
-            UInt32(MemoryLayout<UInt32>.size),
-            &muteValue
-        )
-
-        return status == noErr
+        return setOutputMuted(muted, deviceID: deviceID)
     }
 
     static func defaultOutputVolume() -> Float? {
@@ -90,7 +56,7 @@ enum SystemAudioStatus {
             return OutputAudioDuckingSnapshot(restoration: .unchanged)
         }
 
-        if isDefaultOutputMuted() {
+        if isOutputMuted(deviceID: deviceID) {
             return OutputAudioDuckingSnapshot(restoration: .unchanged)
         }
 
@@ -107,19 +73,22 @@ enum SystemAudioStatus {
             }
 
             if !appliedChanges.isEmpty {
-                return OutputAudioDuckingSnapshot(restoration: .restoreVolumes(appliedChanges))
+                return OutputAudioDuckingSnapshot(
+                    deviceID: deviceID,
+                    restoration: .restoreVolumes(appliedChanges)
+                )
             }
         }
 
-        if setDefaultOutputMuted(true) {
-            return OutputAudioDuckingSnapshot(restoration: .unmute)
+        if setOutputMuted(true, deviceID: deviceID) {
+            return OutputAudioDuckingSnapshot(deviceID: deviceID, restoration: .unmute)
         }
 
         return OutputAudioDuckingSnapshot(restoration: .unchanged)
     }
 
     static func restoreDictationOutputDucking(_ snapshot: OutputAudioDuckingSnapshot) {
-        guard let deviceID = defaultOutputDeviceID() else { return }
+        guard let deviceID = snapshot.deviceID else { return }
 
         switch snapshot.restoration {
         case .unchanged:
@@ -133,8 +102,54 @@ enum SystemAudioStatus {
                 )
             }
         case .unmute:
-            _ = setDefaultOutputMuted(false)
+            _ = setOutputMuted(false, deviceID: deviceID)
         }
+    }
+
+    private static func isOutputMuted(deviceID: AudioDeviceID) -> Bool {
+        var muteValue: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        guard AudioObjectHasProperty(deviceID, &address) else { return false }
+
+        let status = AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &size,
+            &muteValue
+        )
+
+        guard status == noErr else { return false }
+        return muteValue == 1
+    }
+
+    private static func setOutputMuted(_ muted: Bool, deviceID: AudioDeviceID) -> Bool {
+        var muteValue: UInt32 = muted ? 1 : 0
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyMute,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        guard AudioObjectHasProperty(deviceID, &address) else { return false }
+
+        let status = AudioObjectSetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            UInt32(MemoryLayout<UInt32>.size),
+            &muteValue
+        )
+
+        return status == noErr
     }
 
     private static func duckedVolumeScalar(for currentScalar: Float) -> Float {
