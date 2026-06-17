@@ -194,9 +194,6 @@ private enum SessionIntent {
 }
 
 final class AppState: ObservableObject, @unchecked Sendable {
-    private enum ActiveAudioInterruption {
-        case muted(previouslyMuted: Bool)
-    }
 
     private let apiKeyStorageKey = "groq_api_key"
     private let apiBaseURLStorageKey = "api_base_url"
@@ -590,7 +587,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingShortcutStartMode: RecordingTriggerMode?
     private var realtimeService: RealtimeTranscriptionService?
     private var automaticTerminationDisabled = false
-    private var activeAudioInterruption: ActiveAudioInterruption?
+    private var activeAudioInterruption: SystemAudioStatus.OutputAudioDuckingSnapshot?
     private var pendingOverlayDismissToken: UUID?
     private var shouldMonitorHotkeys = false
     private var isCapturingShortcut = false
@@ -656,9 +653,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
         let realtimeStreamingEnabled = UserDefaults.standard.bool(forKey: realtimeStreamingEnabledStorageKey)
         let realtimeStreamingModel = UserDefaults.standard.string(forKey: realtimeStreamingModelStorageKey) ?? ""
-        let dictationAudioInterruptionEnabled = UserDefaults.standard.bool(
+        let dictationAudioInterruptionEnabled = UserDefaults.standard.object(
             forKey: dictationAudioInterruptionEnabledStorageKey
-        )
+        ) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: dictationAudioInterruptionEnabledStorageKey)
         let isPressEnterVoiceCommandEnabled = UserDefaults.standard.object(forKey: pressEnterVoiceCommandStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: pressEnterVoiceCommandStorageKey)
@@ -2072,25 +2071,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func applyAudioInterruptionIfNeeded() {
         guard dictationAudioInterruptionEnabled, activeAudioInterruption == nil else { return }
-
-        let wasMuted = SystemAudioStatus.isDefaultOutputMuted()
-        if wasMuted {
-            activeAudioInterruption = .muted(previouslyMuted: true)
-        } else if SystemAudioStatus.setDefaultOutputMuted(true) {
-            activeAudioInterruption = .muted(previouslyMuted: false)
-        }
+        activeAudioInterruption = SystemAudioStatus.beginDictationOutputDucking()
     }
 
     private func restoreAudioInterruptionIfNeeded() {
         guard let activeAudioInterruption else { return }
+        let snapshot = activeAudioInterruption
         self.activeAudioInterruption = nil
-
-        switch activeAudioInterruption {
-        case .muted(let previouslyMuted):
-            if !previouslyMuted {
-                _ = SystemAudioStatus.setDefaultOutputMuted(false)
-            }
-        }
+        SystemAudioStatus.restoreDictationOutputDucking(snapshot)
     }
 
     private func beginCriticalDictationActivity() {
