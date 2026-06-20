@@ -538,6 +538,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
     private var transcriptionStartTime: Date?
     private var transcriptionElapsedTimer: Timer?
+    // App that was frontmost when the user pressed stop — paste target for async delivery.
+    private var pasteTargetApp: NSRunningApplication?
     @Published var retryingItemIDs: Set<UUID> = []
     @Published var lastTranscript: String = ""
     @Published var errorMessage: String?
@@ -2455,6 +2457,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func stopAndTranscribe() {
+        // Capture the app the user was working in when they pressed stop.
+        // Must happen before any focus changes. Prefer the true stop-time frontmost
+        // app; fall back to the session-start context only when FreeFlow is already
+        // frontmost (i.e. the user opened the menu to click stop).
+        let stopTimeFrontmost = NSWorkspace.shared.frontmostApplication
+        if let front = stopTimeFrontmost, front.bundleIdentifier != Bundle.main.bundleIdentifier {
+            pasteTargetApp = front
+        } else if let bundleId = capturedContext?.bundleIdentifier, bundleId != Bundle.main.bundleIdentifier {
+            pasteTargetApp = NSWorkspace.shared.runningApplications.first {
+                $0.bundleIdentifier == bundleId && $0.activationPolicy == .regular
+            }
+        } else {
+            pasteTargetApp = nil
+        }
+
         cancelPendingShortcutStart()
         cancelRecordingInitializationTimer()
         shortcutSessionController.reset()
@@ -3071,7 +3088,33 @@ final class AppState: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .showSettings, object: nil)
     }
 
-    private func pasteAtCursor() {
+    private func pasteAtCursor(completion: (() -> Void)? = nil) {
+        guard let target = pasteTargetApp, !target.isTerminated else {
+            pasteTargetApp = nil
+            sendCmdV()
+            completion?()
+            return
+        }
+        pasteTargetApp = nil
+        target.activate(options: [.activateIgnoringOtherApps])
+        // Poll until the target is actually frontmost before sending Cmd-V —
+        // a fixed delay is unreliable under CPU load (local model inference).
+        waitUntilFrontmost(target, attemptsLeft: 20, completion: completion)
+    }
+
+    private func waitUntilFrontmost(_ target: NSRunningApplication, attemptsLeft: Int, completion: (() -> Void)?) {
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
+            || attemptsLeft <= 0 {
+            sendCmdV()
+            completion?()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.waitUntilFrontmost(target, attemptsLeft: attemptsLeft - 1, completion: completion)
+        }
+    }
+
+    private func sendCmdV() {
         let source = CGEventSource(stateID: .hidSystemState)
         let vKeyCode = keyCodeForCharacter("v") ?? 9
 
@@ -3213,8 +3256,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func pasteAtCursorWhenShortcutReleased(completion: (() -> Void)? = nil) {
         performAfterShortcutReleased { [weak self] in
-            self?.pasteAtCursor()
-            completion?()
+            self?.pasteAtCursor(completion: completion)
         }
     }
 

@@ -410,3 +410,158 @@ Replace:
 ```
 	@codesign --force --sign - --entitlements FreeFlow.entitlements "$(APP_BUNDLE)"
 ```
+
+---
+
+### P11
+
+- **File:** `Sources/AppState.swift`
+- **Description:** Async paste — capture the frontmost app at stop time and activate it before sending Cmd-V, so the paste lands in the right window even if the user has switched away during transcription. Uses poll-until-frontmost instead of a fixed delay, because local model inference saturates CPU and a fixed 100ms races. Prefers stop-time frontmost over session-start context; falls back to session-start context only when FreeFlow itself is frontmost (menu-bar-stop case).
+
+**Sub-patch P11a** — add `pasteTargetApp` property after `transcriptionElapsedTimer`:
+
+**Search:**
+```
+    private var transcriptionStartTime: Date?
+    private var transcriptionElapsedTimer: Timer?
+```
+
+**Replace:**
+```
+    private var transcriptionStartTime: Date?
+    private var transcriptionElapsedTimer: Timer?
+    // App that was frontmost when the user pressed stop — paste target for async delivery.
+    private var pasteTargetApp: NSRunningApplication?
+```
+
+**Sub-patch P11b** — capture paste target at top of `stopAndTranscribe()`:
+
+**Search:**
+```
+    private func stopAndTranscribe() {
+        cancelPendingShortcutStart()
+        cancelRecordingInitializationTimer()
+        shortcutSessionController.reset()
+        activeRecordingTriggerMode = nil
+        let sessionIntent = currentSessionIntent
+        currentSessionIntent = .dictation
+        audioRecorder.onRecordingReady = nil
+        audioRecorder.onRecordingFailure = nil
+        audioLevelCancellable?.cancel()
+        audioLevelCancellable = nil
+        debugStatusMessage = "Preparing audio"
+        let sessionContext = capturedContext
+```
+
+**Replace:**
+```
+    private func stopAndTranscribe() {
+        // Capture the app the user was working in when they pressed stop.
+        // Must happen before any focus changes. Prefer the true stop-time frontmost
+        // app; fall back to the session-start context only when FreeFlow is already
+        // frontmost (i.e. the user opened the menu to click stop).
+        let stopTimeFrontmost = NSWorkspace.shared.frontmostApplication
+        if let front = stopTimeFrontmost, front.bundleIdentifier != Bundle.main.bundleIdentifier {
+            pasteTargetApp = front
+        } else if let bundleId = capturedContext?.bundleIdentifier, bundleId != Bundle.main.bundleIdentifier {
+            pasteTargetApp = NSWorkspace.shared.runningApplications.first {
+                $0.bundleIdentifier == bundleId && $0.activationPolicy == .regular
+            }
+        } else {
+            pasteTargetApp = nil
+        }
+
+        cancelPendingShortcutStart()
+        cancelRecordingInitializationTimer()
+        shortcutSessionController.reset()
+        activeRecordingTriggerMode = nil
+        let sessionIntent = currentSessionIntent
+        currentSessionIntent = .dictation
+        audioRecorder.onRecordingReady = nil
+        audioRecorder.onRecordingFailure = nil
+        audioLevelCancellable?.cancel()
+        audioLevelCancellable = nil
+        debugStatusMessage = "Preparing audio"
+        let sessionContext = capturedContext
+```
+
+**Sub-patch P11c** — replace `pasteAtCursor()` with activation-aware version, extract `sendCmdV`, add `waitUntilFrontmost`:
+
+**Search:**
+```
+    private func pasteAtCursor() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let vKeyCode = keyCodeForCharacter("v") ?? 9
+
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true)
+        keyDown?.flags = .maskCommand
+        keyDown?.post(tap: .cgSessionEventTap)
+
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
+        keyUp?.flags = .maskCommand
+        keyUp?.post(tap: .cgSessionEventTap)
+    }
+```
+
+**Replace:**
+```
+    private func pasteAtCursor(completion: (() -> Void)? = nil) {
+        guard let target = pasteTargetApp, !target.isTerminated else {
+            pasteTargetApp = nil
+            sendCmdV()
+            completion?()
+            return
+        }
+        pasteTargetApp = nil
+        target.activate(options: [.activateIgnoringOtherApps])
+        // Poll until the target is actually frontmost before sending Cmd-V —
+        // a fixed delay is unreliable under CPU load (local model inference).
+        waitUntilFrontmost(target, attemptsLeft: 20, completion: completion)
+    }
+
+    private func waitUntilFrontmost(_ target: NSRunningApplication, attemptsLeft: Int, completion: (() -> Void)?) {
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
+            || attemptsLeft <= 0 {
+            sendCmdV()
+            completion?()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.waitUntilFrontmost(target, attemptsLeft: attemptsLeft - 1, completion: completion)
+        }
+    }
+
+    private func sendCmdV() {
+        let source = CGEventSource(stateID: .hidSystemState)
+        let vKeyCode = keyCodeForCharacter("v") ?? 9
+
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true)
+        keyDown?.flags = .maskCommand
+        keyDown?.post(tap: .cgSessionEventTap)
+
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false)
+        keyUp?.flags = .maskCommand
+        keyUp?.post(tap: .cgSessionEventTap)
+    }
+```
+
+**Sub-patch P11d** — thread completion through `pasteAtCursorWhenShortcutReleased`:
+
+**Search:**
+```
+    private func pasteAtCursorWhenShortcutReleased(completion: (() -> Void)? = nil) {
+        performAfterShortcutReleased { [weak self] in
+            self?.pasteAtCursor()
+            completion?()
+        }
+    }
+```
+
+**Replace:**
+```
+    private func pasteAtCursorWhenShortcutReleased(completion: (() -> Void)? = nil) {
+        performAfterShortcutReleased { [weak self] in
+            self?.pasteAtCursor(completion: completion)
+        }
+    }
+```
