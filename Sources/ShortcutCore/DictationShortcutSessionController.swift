@@ -70,7 +70,10 @@ final class DictationShortcutSessionController {
 
     func beginManual(mode: RecordingTriggerMode) {
         activeMode = mode
-        toggleStopArmed = false
+        // When started without a physical key press/release cycle (e.g. via menu
+        // bar button), arm stop immediately so the first shortcut press stops the
+        // recording rather than being silently swallowed.
+        toggleStopArmed = (mode == .toggle)
     }
 
     func forceToggleMode() {

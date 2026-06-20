@@ -30,6 +30,7 @@ struct MenuBarLabel: View {
         if AppBuild.isDevBundle && !appState.isRecording && !appState.isTranscribing {
             Image(nsImage: StampedMenuBarIcon.templateImage)
                 .renderingMode(.template)
+                .opacity(0.4)
         } else {
             Image(systemName: iconName)
         }

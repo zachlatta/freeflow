@@ -529,7 +529,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
             AppState.writeRecordingStateFlag(isRecording)
         }
     }
-    @Published var isTranscribing = false
+    @Published var isTranscribing = false {
+        didSet {
+            if !isTranscribing && oldValue {
+                stopTranscriptionElapsedTimer()
+            }
+        }
+    }
+    private var transcriptionStartTime: Date?
+    private var transcriptionElapsedTimer: Timer?
     @Published var retryingItemIDs: Set<UUID> = []
     @Published var lastTranscript: String = ""
     @Published var errorMessage: String?
@@ -1770,10 +1778,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Cancelled"
         overlayManager.dismiss()
         audioRecorder.cleanup()
-        if let transcribingAudioFileName {
-            Self.deleteAudioFile(transcribingAudioFileName)
-            self.transcribingAudioFileName = nil
-        }
+        // Keep the saved audio file — it's available in the run log for retry.
+        self.transcribingAudioFileName = nil
         endCriticalDictationActivity()
         refreshAvailableMicrophonesIfNeeded()
         if !isRecording && !isTranscribing && statusText == "Cancelled" {
@@ -2209,10 +2215,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         isTranscribing = false
         transcriptionTask?.cancel()
         transcriptionTask = nil
-        if let transcribingAudioFileName {
-            Self.deleteAudioFile(transcribingAudioFileName)
-            self.transcribingAudioFileName = nil
-        }
+        // Keep the saved audio file — it's available in the run log for retry.
+        self.transcribingAudioFileName = nil
         activeRecordingTriggerMode = nil
         currentSessionIntent = .dictation
         shortcutSessionController.reset()
@@ -2505,6 +2509,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.transcribingAudioFileName = savedAudioFile?.fileName
             self.statusText = "Transcribing..."
             self.debugStatusMessage = "Transcribing audio"
+            self.startTranscriptionElapsedTimer()
 
         let postProcessingService = PostProcessingService(
             apiKey: apiKey,
@@ -2518,9 +2523,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.audioRecorder.onPCM16Samples = nil
             self.transcriptionTask?.cancel()
             guard self.isTranscribing else {
-                if let savedAudioFile {
-                    Self.deleteAudioFile(savedAudioFile.fileName)
-                }
+                // Transcription was cancelled mid-flight. Keep the saved audio
+                // file so it remains available in the run log for retry.
                 self.transcribingAudioFileName = nil
                 activeRealtime?.cancel()
                 self.audioRecorder.cleanup()
@@ -3231,6 +3235,23 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func cancelRecordingInitializationTimer() {
         recordingInitializationTimer?.cancel()
         recordingInitializationTimer = nil
+    }
+
+    private func startTranscriptionElapsedTimer() {
+        transcriptionStartTime = Date()
+        transcriptionElapsedTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self, self.isTranscribing, let start = self.transcriptionStartTime else { return }
+            let elapsed = Int(-start.timeIntervalSinceNow)
+            guard elapsed >= 20 else { return }
+            let prefix = elapsed >= 60 ? "Still processing" : "Transcribing"
+            self.statusText = "\(prefix)... (\(elapsed)s)"
+        }
+    }
+
+    private func stopTranscriptionElapsedTimer() {
+        transcriptionElapsedTimer?.invalidate()
+        transcriptionElapsedTimer = nil
+        transcriptionStartTime = nil
     }
 
     private func scheduleReadyStatusReset(after delay: TimeInterval, matching statuses: Set<String>? = nil) {

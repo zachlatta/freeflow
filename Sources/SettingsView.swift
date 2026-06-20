@@ -466,6 +466,7 @@ struct GeneralSettingsView: View {
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
     @AppStorage("use_compact_overlay") private var useCompactOverlay = true
+    @AppStorage("transcription_timeout_seconds") private var transcriptionTimeoutRaw: Double = 300
     @State private var screensVersion = 0
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
@@ -671,6 +672,9 @@ struct GeneralSettingsView: View {
                 }
                 SettingsCard("Sound Volume", icon: "speaker.wave.2.fill") {
                     soundVolumeSection
+                }
+                SettingsCard("Transcription Timeout", icon: "clock.fill") {
+                    transcriptionTimeoutSection
                 }
                 SettingsCard("Custom Vocabulary", icon: "text.book.closed.fill") {
                     vocabularySection
@@ -1284,6 +1288,37 @@ struct GeneralSettingsView: View {
         }
         .onChange(of: appState.alertSoundsEnabled) { enabled in
             if !enabled { showMutedHint = false }
+        }
+    }
+
+    // MARK: Transcription Timeout
+
+    private var noTimeoutBinding: Binding<Bool> {
+        Binding(
+            get: { transcriptionTimeoutRaw < 0 },
+            set: { transcriptionTimeoutRaw = $0 ? -1 : 300 }
+        )
+    }
+
+    private var transcriptionTimeoutSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("No timeout — wait as long as needed", isOn: noTimeoutBinding)
+
+            if !noTimeoutBinding.wrappedValue {
+                HStack {
+                    Text("Timeout after")
+                    Spacer()
+                    TextField("", value: $transcriptionTimeoutRaw, format: .number)
+                        .frame(width: 64)
+                        .multilineTextAlignment(.trailing)
+                        .textFieldStyle(.roundedBorder)
+                    Text("seconds")
+                        .foregroundStyle(.secondary)
+                }
+                Text("Status shows elapsed time after 20 s so you know it's still working.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

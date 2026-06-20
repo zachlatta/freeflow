@@ -11,7 +11,8 @@ class TranscriptionService {
     private let transcriptionResponseFormat = "verbose_json"
     private var transcriptionTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
-        return override > 0 ? override : 20
+        if override < 0 { return .infinity }   // -1 = no timeout
+        return override > 0 ? override : 300   // default: 5 min
     }
 
     init(
@@ -75,17 +76,20 @@ class TranscriptionService {
                     }
                 }
 
-                let timeoutTask = Task {
-                    do {
-                        try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
-                        raceState.finish(.failure(TranscriptionError.transcriptionTimedOut(timeoutSeconds)))
-                    } catch is CancellationError {
-                    } catch {
-                        raceState.finish(.failure(error))
+                if timeoutSeconds.isFinite {
+                    let timeoutTask = Task {
+                        do {
+                            try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                            raceState.finish(.failure(TranscriptionError.transcriptionTimedOut(timeoutSeconds)))
+                        } catch is CancellationError {
+                        } catch {
+                            raceState.finish(.failure(error))
+                        }
                     }
+                    raceState.setTasks([transcriptionTask, timeoutTask])
+                } else {
+                    raceState.setTasks([transcriptionTask])
                 }
-
-                raceState.setTasks([transcriptionTask, timeoutTask])
             }
         } onCancel: {
             raceState.cancel()
