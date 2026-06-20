@@ -2241,6 +2241,57 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return "Failed to start recording: \(error.localizedDescription)"
     }
 
+    /// Turn a transcription failure into a concise, user-facing message,
+    /// classifying by the locale-independent `URLError.Code` rather than the
+    /// system's English description (which varies across releases and locales).
+    private func formattedTranscriptionError(_ error: Error) -> String {
+        if let code = Self.urlErrorCode(in: error) {
+            switch code {
+            case .notConnectedToInternet, .networkConnectionLost,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed:
+                return "No internet — check connection"
+            case .timedOut:
+                return NetworkMonitor.shared.isOnline
+                    ? "Request timed out — try again"
+                    : "No internet — check connection"
+            default:
+                break
+            }
+        }
+
+        let lower = error.localizedDescription.lowercased()
+        if lower.contains("timed out") || lower.contains("timeout") {
+            return NetworkMonitor.shared.isOnline
+                ? "Request timed out — try again"
+                : "No internet — check connection"
+        }
+        if lower.contains("offline") || lower.contains("internet connection")
+            || lower.contains("not connected") || lower.contains("network")
+            || lower.contains("cannot find host") {
+            return "No internet — check connection"
+        }
+        return error.localizedDescription
+    }
+
+    /// Find a `URLError.Code` anywhere in the error's underlying-error chain,
+    /// so a wrapped transport error is still classified by its root cause.
+    private static func urlErrorCode(in error: Error) -> URLError.Code? {
+        var current: Error? = error
+        var depth = 0
+        while let err = current, depth < 8 {
+            if let urlError = err as? URLError {
+                return urlError.code
+            }
+            let nsError = err as NSError
+            if nsError.domain == NSURLErrorDomain {
+                return URLError.Code(rawValue: nsError.code)
+            }
+            current = nsError.userInfo[NSUnderlyingErrorKey] as? Error
+            depth += 1
+        }
+        return nil
+    }
+
     func showMicrophonePermissionAlert() {
         let alert = NSAlert()
         alert.messageText = "Microphone Permission Required"
@@ -2682,7 +2733,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         guard self.isTranscribing else { return }
                         self.transcriptionTask = nil
                         self.transcribingAudioFileName = nil
-                        self.errorMessage = error.localizedDescription
+                        self.errorMessage = self.formattedTranscriptionError(error)
                         self.isTranscribing = false
                         self.endCriticalDictationActivity()
                         self.statusText = "Error"
