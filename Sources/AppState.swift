@@ -538,6 +538,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
     private var transcriptionStartTime: Date?
     private var transcriptionElapsedTimer: Timer?
+    private var transcriptionAlertShown = false
     // App that was frontmost when the user pressed stop — paste target for async delivery.
     private var pasteTargetApp: NSRunningApplication?
     @Published var retryingItemIDs: Set<UUID> = []
@@ -3281,9 +3282,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func startTranscriptionElapsedTimer() {
         transcriptionStartTime = Date()
+        transcriptionAlertShown = false
         transcriptionElapsedTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self, self.isTranscribing, let start = self.transcriptionStartTime else { return }
             let elapsed = Int(-start.timeIntervalSinceNow)
+            if elapsed == 10 && !self.transcriptionAlertShown {
+                self.transcriptionAlertShown = true
+                self.showTranscriptionStillRunningAlert(elapsed: elapsed)
+            }
             guard elapsed >= 20 else { return }
             let prefix = elapsed >= 60 ? "Still processing" : "Transcribing"
             self.statusText = "\(prefix)... (\(elapsed)s)"
@@ -3294,6 +3300,29 @@ final class AppState: ObservableObject, @unchecked Sendable {
         transcriptionElapsedTimer?.invalidate()
         transcriptionElapsedTimer = nil
         transcriptionStartTime = nil
+        transcriptionAlertShown = false
+    }
+
+    private func showTranscriptionStillRunningAlert(elapsed: Int) {
+        guard isTranscribing else { return }
+        let audioNote: String
+        if let fileName = transcribingAudioFileName {
+            let path = Self.audioStorageDirectory().appendingPathComponent(fileName).path
+            audioNote = "Audio saved to:\n\(path)"
+        } else {
+            audioNote = "Audio saved to:\n~/Library/Application Support/FreeFlow Dev/audio/"
+        }
+        let alert = NSAlert()
+        alert.messageText = "Still transcribing (\(elapsed)s elapsed)"
+        alert.informativeText = "With local processing, this can take as long as your recording — or longer under load.\n\nYour audio is already saved. If you cancel, it will remain on disk and you can retry transcription from the recording history.\n\n\(audioNote)"
+        alert.addButton(withTitle: "Keep Waiting")
+        alert.addButton(withTitle: "Cancel Transcription")
+        if let icon = NSImage(systemSymbolName: "waveform.badge.exclamationmark", accessibilityDescription: nil) {
+            alert.icon = icon
+        }
+        let response = alert.runModal()
+        guard response == .alertSecondButtonReturn, isTranscribing else { return }
+        cancelTranscription()
     }
 
     private func scheduleReadyStatusReset(after delay: TimeInterval, matching statuses: Set<String>? = nil) {

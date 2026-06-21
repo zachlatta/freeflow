@@ -466,7 +466,7 @@ struct GeneralSettingsView: View {
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
     @AppStorage("use_compact_overlay") private var useCompactOverlay = true
-    @AppStorage("transcription_timeout_seconds") private var transcriptionTimeoutRaw: Double = 300
+    @AppStorage("transcription_timeout_seconds") private var transcriptionTimeoutRaw: Double = -1
     @State private var screensVersion = 0
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""

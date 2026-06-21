@@ -11,8 +11,8 @@ class TranscriptionService {
     private let transcriptionResponseFormat = "verbose_json"
     private var transcriptionTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
-        if override < 0 { return .infinity }   // -1 = no timeout
-        return override > 0 ? override : 300   // default: 5 min
+        if override < 0 { return .infinity }   // -1 = no timeout (default)
+        return override > 0 ? override : .infinity
     }
 
     init(

@@ -565,3 +565,125 @@ Replace:
         }
     }
 ```
+
+---
+
+### P12
+
+- **Files:** `Sources/AppState.swift`, `Sources/SettingsView.swift`, `Sources/TranscriptionService.swift`
+- **Description:** No timeout by default + "still processing" alert at 10s. Default timeout changed from 300s to infinity (-1). If transcription takes longer than 10s, an NSAlert appears telling the user the audio is saved, showing the file path, and offering "Keep Waiting" or "Cancel Transcription". Cancel preserves the audio (P2 already ensures this). Alert shown at most once per transcription session.
+
+**Sub-patch P12a** — `Sources/TranscriptionService.swift` — default timeout to infinity:
+
+**Search:**
+```
+        if override < 0 { return .infinity }   // -1 = no timeout
+        return override > 0 ? override : 300   // default: 5 min
+```
+
+**Replace:**
+```
+        if override < 0 { return .infinity }   // -1 = no timeout (default)
+        return override > 0 ? override : .infinity
+```
+
+**Sub-patch P12b** — `Sources/SettingsView.swift` — @AppStorage default to -1:
+
+**Search:**
+```
+    @AppStorage("transcription_timeout_seconds") private var transcriptionTimeoutRaw: Double = 300
+```
+
+**Replace:**
+```
+    @AppStorage("transcription_timeout_seconds") private var transcriptionTimeoutRaw: Double = -1
+```
+
+**Sub-patch P12c** — `Sources/AppState.swift` — add `transcriptionAlertShown` flag near timer vars:
+
+**Search:**
+```
+    private var transcriptionStartTime: Date?
+    private var transcriptionElapsedTimer: Timer?
+    // App that was frontmost when the user pressed stop — paste target for async delivery.
+    private var pasteTargetApp: NSRunningApplication?
+```
+
+**Replace:**
+```
+    private var transcriptionStartTime: Date?
+    private var transcriptionElapsedTimer: Timer?
+    private var transcriptionAlertShown = false
+    // App that was frontmost when the user pressed stop — paste target for async delivery.
+    private var pasteTargetApp: NSRunningApplication?
+```
+
+**Sub-patch P12d** — `Sources/AppState.swift` — update `startTranscriptionElapsedTimer` and `stopTranscriptionElapsedTimer`, add `showTranscriptionStillRunningAlert`:
+
+**Search:**
+```
+    private func startTranscriptionElapsedTimer() {
+        transcriptionStartTime = Date()
+        transcriptionElapsedTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self, self.isTranscribing, let start = self.transcriptionStartTime else { return }
+            let elapsed = Int(-start.timeIntervalSinceNow)
+            guard elapsed >= 20 else { return }
+            let prefix = elapsed >= 60 ? "Still processing" : "Transcribing"
+            self.statusText = "\(prefix)... (\(elapsed)s)"
+        }
+    }
+
+    private func stopTranscriptionElapsedTimer() {
+        transcriptionElapsedTimer?.invalidate()
+        transcriptionElapsedTimer = nil
+        transcriptionStartTime = nil
+    }
+```
+
+**Replace:**
+```
+    private func startTranscriptionElapsedTimer() {
+        transcriptionStartTime = Date()
+        transcriptionAlertShown = false
+        transcriptionElapsedTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self, self.isTranscribing, let start = self.transcriptionStartTime else { return }
+            let elapsed = Int(-start.timeIntervalSinceNow)
+            if elapsed == 10 && !self.transcriptionAlertShown {
+                self.transcriptionAlertShown = true
+                self.showTranscriptionStillRunningAlert(elapsed: elapsed)
+            }
+            guard elapsed >= 20 else { return }
+            let prefix = elapsed >= 60 ? "Still processing" : "Transcribing"
+            self.statusText = "\(prefix)... (\(elapsed)s)"
+        }
+    }
+
+    private func stopTranscriptionElapsedTimer() {
+        transcriptionElapsedTimer?.invalidate()
+        transcriptionElapsedTimer = nil
+        transcriptionStartTime = nil
+        transcriptionAlertShown = false
+    }
+
+    private func showTranscriptionStillRunningAlert(elapsed: Int) {
+        guard isTranscribing else { return }
+        let audioNote: String
+        if let fileName = transcribingAudioFileName {
+            let path = Self.audioStorageDirectory().appendingPathComponent(fileName).path
+            audioNote = "Audio saved to:\n\(path)"
+        } else {
+            audioNote = "Audio saved to:\n~/Library/Application Support/FreeFlow Dev/audio/"
+        }
+        let alert = NSAlert()
+        alert.messageText = "Still transcribing (\(elapsed)s elapsed)"
+        alert.informativeText = "With local processing, this can take as long as your recording — or longer under load.\n\nYour audio is already saved. If you cancel, it will remain on disk and you can retry transcription from the recording history.\n\n\(audioNote)"
+        alert.addButton(withTitle: "Keep Waiting")
+        alert.addButton(withTitle: "Cancel Transcription")
+        if let icon = NSImage(systemSymbolName: "waveform.badge.exclamationmark", accessibilityDescription: nil) {
+            alert.icon = icon
+        }
+        let response = alert.runModal()
+        guard response == .alertSecondButtonReturn, isTranscribing else { return }
+        cancelTranscription()
+    }
+```
