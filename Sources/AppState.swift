@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import SwiftUI
 import AVFoundation
 import ServiceManagement
 import ApplicationServices
@@ -3301,28 +3302,54 @@ final class AppState: ObservableObject, @unchecked Sendable {
         transcriptionElapsedTimer = nil
         transcriptionStartTime = nil
         transcriptionAlertShown = false
+        dismissTranscriptionAlertPanelIfShowing()
     }
+
+    private weak var transcriptionAlertPanel: NSPanel?
 
     private func showTranscriptionStillRunningAlert(elapsed: Int) {
         guard isTranscribing else { return }
-        let audioNote: String
+        guard transcriptionAlertPanel == nil else { return }  // already showing
+
+        let audioPath: String
         if let fileName = transcribingAudioFileName {
-            let path = Self.audioStorageDirectory().appendingPathComponent(fileName).path
-            audioNote = "Audio saved to:\n\(path)"
+            audioPath = Self.audioStorageDirectory().appendingPathComponent(fileName).path
         } else {
-            audioNote = "Audio saved to:\n~/Library/Application Support/FreeFlow Dev/audio/"
+            audioPath = Self.audioStorageDirectory().path
         }
-        let alert = NSAlert()
-        alert.messageText = "Still transcribing (\(elapsed)s elapsed)"
-        alert.informativeText = "With local processing, this can take as long as your recording — or longer under load.\n\nYour audio is already saved. If you cancel, it will remain on disk and you can retry transcription from the recording history.\n\n\(audioNote)"
-        alert.addButton(withTitle: "Keep Waiting")
-        alert.addButton(withTitle: "Cancel Transcription")
-        if let icon = NSImage(systemSymbolName: "waveform.badge.exclamationmark", accessibilityDescription: nil) {
-            alert.icon = icon
-        }
-        let response = alert.runModal()
-        guard response == .alertSecondButtonReturn, isTranscribing else { return }
-        cancelTranscription()
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 1),
+            styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Still transcribing (\(elapsed)s elapsed)"
+        panel.level = .floating
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let hostingView = NSHostingView(rootView: TranscriptionProgressPanel(
+            audioPath: audioPath,
+            onDismiss: { [weak panel] in panel?.orderOut(nil) },
+            onCancel: { [weak self, weak panel] in
+                panel?.orderOut(nil)
+                guard self?.isTranscribing == true else { return }
+                self?.cancelTranscription()
+            }
+        ))
+        hostingView.frame = NSRect(x: 0, y: 0, width: 440, height: hostingView.fittingSize.height)
+        panel.contentView = hostingView
+        panel.setContentSize(hostingView.fittingSize)
+        panel.center()
+        panel.orderFront(nil)
+        transcriptionAlertPanel = panel
+    }
+
+    private func dismissTranscriptionAlertPanelIfShowing() {
+        transcriptionAlertPanel?.orderOut(nil)
+        transcriptionAlertPanel = nil
     }
 
     private func scheduleReadyStatusReset(after delay: TimeInterval, matching statuses: Set<String>? = nil) {

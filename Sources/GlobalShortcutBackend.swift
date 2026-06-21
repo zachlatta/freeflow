@@ -148,7 +148,8 @@ final class GlobalShortcutBackend {
 
     private func handleKeyDown(_ event: NSEvent) -> Bool {
         if event.keyCode == 53 {
-            guard !event.isARepeat else { return false }
+            // Require Fn to be held so bare Esc in other apps isn't intercepted.
+            guard !event.isARepeat, fnKeyIsDown else { return false }
             return onEscapeKeyPressed?() ?? false
         }
 
