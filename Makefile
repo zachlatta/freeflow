@@ -119,6 +119,12 @@ notarize:
 		--keychain-profile "$(NOTARIZE_PROFILE)" --wait
 	xcrun stapler staple "$(BUILD_DIR)/$(APP_NAME).dmg"
 
+install: all
+	@rm -rf "$(HOME)/Applications/$(APP_NAME).app"
+	@cp -r "$(APP_BUNDLE)" "$(HOME)/Applications/$(APP_NAME).app"
+	@xattr -dr com.apple.quarantine "$(HOME)/Applications/$(APP_NAME).app" 2>/dev/null || true
+	@echo "Installed $(APP_NAME).app"
+
 clean:
 	rm -rf $(BUILD_DIR)
 
