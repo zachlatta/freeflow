@@ -3286,7 +3286,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         transcriptionElapsedTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self, self.isTranscribing, let start = self.transcriptionStartTime else { return }
             let elapsed = Int(-start.timeIntervalSinceNow)
-            if elapsed == 10 && !self.transcriptionAlertShown {
+            if elapsed >= 10 && !self.transcriptionAlertShown {
                 self.transcriptionAlertShown = true
                 self.showTranscriptionStillRunningAlert(elapsed: elapsed)
             }
