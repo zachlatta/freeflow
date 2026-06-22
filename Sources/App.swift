@@ -17,8 +17,10 @@ struct FreeFlowApp: App {
     }
 }
 
+@MainActor
 struct MenuBarLabel: View {
     @EnvironmentObject var appState: AppState
+    @ObservedObject var notificationManager = VocabularyNotificationManager.shared
 
     private var iconName: String {
         if appState.isRecording { return "record.circle" }
@@ -27,12 +29,18 @@ struct MenuBarLabel: View {
     }
 
     var body: some View {
-        if AppBuild.isDevBundle && !appState.isRecording && !appState.isTranscribing {
-            Image(nsImage: StampedMenuBarIcon.templateImage)
-                .renderingMode(.template)
-        } else {
-            Image(systemName: iconName)
+        HStack(spacing: 4) {
+            if notificationManager.showCheckmark {
+                Image(systemName: "checkmark")
+            }
+            if AppBuild.isDevBundle && !appState.isRecording && !appState.isTranscribing {
+                Image(nsImage: StampedMenuBarIcon.templateImage)
+                    .renderingMode(.template)
+            } else {
+                Image(systemName: iconName)
+            }
         }
+        .animation(.easeInOut(duration: 0.2), value: notificationManager.showCheckmark)
     }
 }
 
