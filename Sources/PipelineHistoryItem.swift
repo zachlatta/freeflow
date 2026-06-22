@@ -28,6 +28,8 @@ struct PipelineHistoryItem: Identifiable, Codable {
     let contextAppName: String?
     let contextBundleIdentifier: String?
     let contextWindowTitle: String?
+    let precedingText: String?
+    let followingText: String?
 
     init(
         intent: PipelineHistoryItemIntent = .dictation,
@@ -50,7 +52,9 @@ struct PipelineHistoryItem: Identifiable, Codable {
         audioFileName: String? = nil,
         contextAppName: String? = nil,
         contextBundleIdentifier: String? = nil,
-        contextWindowTitle: String? = nil
+        contextWindowTitle: String? = nil,
+        precedingText: String? = nil,
+        followingText: String? = nil
     ) {
         self.intent = intent
         self.selectedText = selectedText
@@ -73,5 +77,17 @@ struct PipelineHistoryItem: Identifiable, Codable {
         self.contextAppName = contextAppName
         self.contextBundleIdentifier = contextBundleIdentifier
         self.contextWindowTitle = contextWindowTitle
+        self.precedingText = precedingText
+        self.followingText = followingText
+    }
+
+    var canRetry: Bool {
+        if !rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        if let audioFileName {
+            return !audioFileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return false
     }
 }

@@ -1974,6 +1974,25 @@ struct RunLogEntryView: View {
     @State private var copiedRawTranscriptResetWorkItem: DispatchWorkItem?
     @State private var copiedCleanedTranscript = false
     @State private var copiedCleanedTranscriptResetWorkItem: DispatchWorkItem?
+    @State private var showCopiedMessage = false
+    @State private var showCopiedMessageResetWorkItem: DispatchWorkItem?
+    @State private var isPendingCopy = false
+
+    // Displays a temporary toast message and schedules its removal
+    @MainActor
+    private func retryCallback() {
+        showCopiedMessageResetWorkItem?.cancel()
+        withAnimation(.easeInOut(duration: 0.3)) {
+            showCopiedMessage = true
+        }
+        let workItem = DispatchWorkItem {
+            withAnimation(.easeInOut(duration: 0.3)) {
+                showCopiedMessage = false
+            }
+        }
+        showCopiedMessageResetWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: workItem)
+    }
 
     private var isError: Bool {
         item.postProcessingStatus.hasPrefix("Error:")
@@ -2035,14 +2054,25 @@ struct RunLogEntryView: View {
                                 .font(.caption)
                                 .foregroundStyle(.red)
                         }
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(item.timestamp.formatted(date: .numeric, time: .standard))
-                                .font(.subheadline.weight(.semibold))
-                            Text(item.postProcessedTranscript.isEmpty ? "(no transcript)" : item.postProcessedTranscript)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
+                        // Displays a temporary toast message when transcription is successfully copied
+                        ZStack(alignment: .leading) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.timestamp.formatted(date: .numeric, time: .standard))
+                                    .font(.subheadline.weight(.semibold))
+                                Text(item.postProcessedTranscript.isEmpty ? "(no transcript)" : item.postProcessedTranscript)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                            .opacity(showCopiedMessage ? 0 : 1) // Hides text gracefully when showing toast
+                            
+                            if showCopiedMessage {
+                                Text("Dictation copied to the clipboard")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(Color.accentColor)
+                                    .transition(.opacity) // Fades toast in and out
+                            }
                         }
                         Spacer()
                     }
@@ -2051,25 +2081,62 @@ struct RunLogEntryView: View {
                 .buttonStyle(.plain)
 
                 HStack(spacing: 4) {
-                    if isError && item.audioFileName != nil {
-                        Button {
-                            appState.retryTranscription(item: item)
-                        } label: {
-                            if isRetrying {
-                                ProgressView()
-                                    .controlSize(.mini)
-                                    .frame(width: actionIconSize, height: actionIconSize)
-                            } else {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
-                                    .frame(width: actionIconSize, height: actionIconSize)
-                                    .contentShape(Rectangle())
+                    // Renders the retry button, supporting model selection dropdown if models exist
+                    if item.canRetry {
+                        if ModelConfiguration.llmModels.isEmpty {
+                            // Fallback to simple button if no specific models are defined
+                            Button {
+                                isPendingCopy = true
+                                appState.retryTranscription(item: item, overrideModel: nil, action: .copyToClipboard)
+                            } label: {
+                                if isRetrying {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                        .frame(width: actionIconSize, height: actionIconSize)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption)
+                                        .foregroundStyle(isError ? Color.orange : Color.accentColor)
+                                        .frame(width: actionIconSize, height: actionIconSize)
+                                        .contentShape(Rectangle())
+                                }
                             }
+                            .buttonStyle(.plain)
+                            .disabled(isRetrying)
+                            .help("Retry transcription")
+                        } else {
+                            // Dropdown menu showing all available LLM models
+                            Menu {
+                                Button("Use Default Model") {
+                                    isPendingCopy = true
+                                    appState.retryTranscription(item: item, overrideModel: nil, action: .copyToClipboard)
+                                }
+                                Divider()
+                                ForEach(ModelConfiguration.llmModels, id: \.self) { model in
+                                    Button(model) {
+                                        isPendingCopy = true
+                                        appState.retryTranscription(item: item, overrideModel: model, action: .copyToClipboard)
+                                    }
+                                }
+                            } label: {
+                                if isRetrying {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                        .frame(width: actionIconSize, height: actionIconSize)
+                                } else {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.caption)
+                                        .foregroundStyle(isError ? Color.orange : Color.accentColor)
+                                        .frame(width: actionIconSize, height: actionIconSize)
+                                        .contentShape(Rectangle())
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .menuIndicator(.hidden)
+                            .frame(width: actionIconSize, height: actionIconSize)
+                            .disabled(isRetrying)
+                            .help("Retry transcription")
                         }
-                        .buttonStyle(.plain)
-                        .disabled(isRetrying)
-                        .help("Retry transcription")
                     } else {
                         Color.clear
                             .frame(width: actionIconSize, height: actionIconSize)
@@ -2313,7 +2380,20 @@ struct RunLogEntryView: View {
                 .stroke(isError ? Color.red.opacity(0.4) : Color.secondary.opacity(0.2), lineWidth: 1)
         )
         .onReceive(appState.$retryingItemIDs) { ids in
+            let wasRetrying = isRetrying
             isRetrying = ids.contains(item.id)
+            if wasRetrying && !isRetrying {
+                // If retry completed, show copied toast on success if initiated from this row
+                if isPendingCopy {
+                    isPendingCopy = false
+                    if let updatedItem = appState.pipelineHistory.first(where: { $0.id == item.id }) {
+                        let newIsError = updatedItem.postProcessingStatus.hasPrefix("Error:")
+                        if !newIsError {
+                            retryCallback()
+                        }
+                    }
+                }
+            }
         }
     }
 

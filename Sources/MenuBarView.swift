@@ -138,6 +138,32 @@ struct MenuBarView: View {
 
             Divider()
 
+            // Retrieve the most recent item from pipeline history to retry
+            let lastItem = appState.pipelineHistory.first
+            // Check if this specific item is currently in the process of retrying
+            let isRetrying = lastItem.map { appState.retryingItemIDs.contains($0.id) } ?? false
+            // Check if the last item contains enough data (audio, transcript, or prompt) to allow a retry
+            let canRetry = lastItem?.canRetry ?? false
+            Menu(isRetrying ? "Transcribing Again..." : "Transcribe Again") {
+                Button("Use Default Model") {
+                    if let item = lastItem, item.canRetry {
+                        appState.retryTranscription(item: item, overrideModel: nil, action: .pasteAtCursor)
+                    }
+                }
+                Divider()
+                ForEach(ModelConfiguration.llmModels, id: \.self) { model in
+                    Button(model) {
+                        if let item = lastItem, item.canRetry {
+                            appState.retryTranscription(item: item, overrideModel: model, action: .pasteAtCursor)
+                        }
+                    }
+                }
+            }
+            // Disable the menu if there is no history, retry is already running, or the item cannot be retried
+            .disabled(lastItem == nil || isRetrying || !canRetry)
+            
+            Divider()
+
             if !appState.lastTranscript.isEmpty && !appState.isRecording && !appState.isTranscribing {
                 Button(appState.copyAgainShortcut.isDisabled
                     ? "Paste Again"

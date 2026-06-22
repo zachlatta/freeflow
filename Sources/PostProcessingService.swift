@@ -124,15 +124,15 @@ Behavior:
 - Do not treat VOICE_COMMAND as dictation to clean up and paste directly.
 """
 
-    private let apiKey: String
-    private let baseURL: String
+    let apiKey: String
+    let baseURL: String
     private let preferredModel: String
     private let preferredFallbackModel: String
     private let defaultModel = "openai/gpt-oss-20b"
     private let defaultFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let defaultModelReasoningEffort = "low"
     private let postProcessingMaxCompletionTokens = 4096
-    private var postProcessingTimeoutSeconds: TimeInterval {
+    internal var postProcessingTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "post_processing_timeout_seconds")
         return override > 0 ? override : 20
     }
@@ -354,6 +354,7 @@ Behavior:
         return nil
     }
 
+    /// Executes the primary LLM processing flow for standard dictation cleanup.
     private func process(
         transcript: String,
         contextSummary: String,
@@ -362,12 +363,6 @@ Behavior:
         customSystemPrompt: String = "",
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = postProcessingTimeoutSeconds
-
         let normalizedVocabulary = normalizedVocabularyText(customVocabulary)
         let vocabularyPrompt = if !normalizedVocabulary.isEmpty {
             """
@@ -422,51 +417,16 @@ Model: \(model)
                 ]
             ]
         ]
-        let config = ModelConfiguration.config(for: model)
-        if let maxTokens = config.maxCompletionTokens {
-            payload["max_completion_tokens"] = maxTokens
-        } else if model == defaultModel {
-            payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
-        }
-        if let effort = config.reasoningEffort {
-            payload["reasoning_effort"] = effort
-        } else if model == defaultModel {
-            payload["reasoning_effort"] = defaultModelReasoningEffort
-        }
-        if let include = config.includeReasoning {
-            payload["include_reasoning"] = include
-        } else if model == defaultModel {
-            payload["include_reasoning"] = false
-        }
-
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
-
-        let (data, response) = try await LLMAPITransport.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw PostProcessingError.invalidResponse("No HTTP response")
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            let message = String(data: data, encoding: .utf8) ?? ""
-            throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
-        }
-
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
-              let firstChoice = choices.first,
-              let message = firstChoice["message"] as? [String: Any],
-              let rawContent = message["content"] as? String else {
-            throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
-        }
         
-        var content = rawContent
-        if config.shouldStripThinkTags {
-            content = ModelConfiguration.stripThinkTags(content)
-        }
+        let config = ModelConfiguration.config(for: model)
+        applyModelConfigAndFallbacks(to: &payload, model: model, config: config)
 
-        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw PostProcessingError.emptyOutput
-        }
+        let timeoutSeconds = postProcessingTimeoutSeconds
+        let content = try await executeAPIRequest(
+            payload: payload,
+            config: config,
+            timeoutInterval: timeoutSeconds
+        )
 
         let sanitizedTranscript = sanitizePostProcessedTranscript(content)
         return PostProcessingResult(
@@ -475,6 +435,7 @@ Model: \(model)
         )
     }
 
+    /// Executes the command-based text transformation flow.
     private func processCommandTransform(
         selectedText: String,
         voiceCommand: String,
@@ -483,12 +444,6 @@ Model: \(model)
         customVocabulary: [String],
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = postProcessingTimeoutSeconds
-
         let normalizedVocabulary = normalizedVocabularyText(customVocabulary)
         let vocabularyPrompt = if !normalizedVocabulary.isEmpty {
             """
@@ -546,23 +501,38 @@ Model: \(model)
                 ]
             ]
         ]
+        
         let config = ModelConfiguration.config(for: model)
-        if let maxTokens = config.maxCompletionTokens {
-            payload["max_completion_tokens"] = maxTokens
-        } else if model == defaultModel {
-            payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
-        }
-        if let effort = config.reasoningEffort {
-            payload["reasoning_effort"] = effort
-        } else if model == defaultModel {
-            payload["reasoning_effort"] = defaultModelReasoningEffort
-        }
-        if let include = config.includeReasoning {
-            payload["include_reasoning"] = include
-        } else if model == defaultModel {
-            payload["include_reasoning"] = false
-        }
+        applyModelConfigAndFallbacks(to: &payload, model: model, config: config)
 
+        let timeoutSeconds = postProcessingTimeoutSeconds
+        let content = try await executeAPIRequest(
+            payload: payload,
+            config: config,
+            timeoutInterval: timeoutSeconds
+        )
+
+        let sanitizedTranscript = sanitizeCommandModeTranscript(content)
+        return PostProcessingResult(
+            transcript: sanitizedTranscript,
+            prompt: promptForDisplay
+        )
+    }
+
+    /// Performs the network API call to the LLM backend, handles HTTP responses, and extracts the response string.
+    internal func executeAPIRequest(
+        payload: [String: Any],
+        config: ModelConfig,
+        timeoutInterval: TimeInterval
+    ) async throws -> String {
+        guard let url = URL(string: "\(baseURL)/chat/completions") else {
+            throw PostProcessingError.invalidResponse("Invalid API base URL: \(baseURL)")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = timeoutInterval
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
 
         let (data, response) = try await LLMAPITransport.data(for: request)
@@ -591,19 +561,34 @@ Model: \(model)
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PostProcessingError.emptyOutput
         }
+        
+        return content
+    }
 
-        let sanitizedTranscript = sanitizeCommandModeTranscript(content)
-        return PostProcessingResult(
-            transcript: sanitizedTranscript,
-            prompt: promptForDisplay
-        )
+    /// Sets token limits and fallback configurations on the request payload.
+    internal func applyModelConfigAndFallbacks(to payload: inout [String: Any], model: String, config: ModelConfig) {
+        if let maxTokens = config.maxCompletionTokens {
+            payload["max_completion_tokens"] = maxTokens
+        } else if model == defaultModel {
+            payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
+        }
+        if let effort = config.reasoningEffort {
+            payload["reasoning_effort"] = effort
+        } else if model == defaultModel {
+            payload["reasoning_effort"] = defaultModelReasoningEffort
+        }
+        if let include = config.includeReasoning {
+            payload["include_reasoning"] = include
+        } else if model == defaultModel {
+            payload["include_reasoning"] = false
+        }
     }
 
     static func applyOutputLanguage(_ prompt: String, language: String) -> String {
         prompt + "\n\nIMPORTANT: Translate the final cleaned text into \(language). Output ONLY in \(language), regardless of the original spoken language."
     }
 
-    private func sanitizePostProcessedTranscript(_ value: String) -> String {
+    func sanitizePostProcessedTranscript(_ value: String) -> String {
         var result = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !result.isEmpty else { return "" }
 
@@ -622,7 +607,7 @@ Model: \(model)
         return result
     }
 
-    private func sanitizeCommandModeTranscript(_ value: String) -> String {
+    func sanitizeCommandModeTranscript(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
