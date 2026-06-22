@@ -201,6 +201,9 @@ final class UpdateManager: ObservableObject {
                 }
             }
         }
+        // Exact firing time does not matter for an hourly check; tolerance
+        // lets the system coalesce the wakeup with other timers to save power.
+        periodicTimer?.tolerance = 300
     }
 
     private func shouldAutoCheck() -> Bool {
