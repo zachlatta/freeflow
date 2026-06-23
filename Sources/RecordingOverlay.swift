@@ -340,14 +340,17 @@ final class RecordingOverlayManager {
     }
 
     /// True iff the overlay renders as wings flanking the notch (notched display
-    /// + use_compact_overlay on). updateAvailable still uses the drop-down pill.
+    /// + use_compact_overlay on). updateAvailable and error toasts still use
+    /// the drop-down pill.
     private var useWingedLayout: Bool {
         guard screenHasNotch else { return false }
         let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
         guard useCompact else { return false }
         switch overlayState.phase {
-        case .recording, .initializing, .transcribing, .feedback:
+        case .recording, .initializing, .transcribing:
             return true
+        case .feedback:
+            return overlayState.errorMessage?.isEmpty ?? true
         case .updateAvailable:
             return false
         }
@@ -379,12 +382,17 @@ final class RecordingOverlayManager {
 
         let width = overlayWidth
         let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
+        let forceDropDownPill = overlayState.phase == .feedback
+            && !(overlayState.errorMessage?.isEmpty ?? true)
         // Compact mode: overlay sits flush with the menu bar on every display.
         // notchOverlap equals the menu-bar height on non-notched screens too,
         // so zero protrusion is universal — not notch-only. The legacy
         // 38pt drop-down pill remains available when use_compact_overlay
-        // is explicitly toggled off.
-        let height: CGFloat = useCompact ? notchOverlap : 38 + (screenHasNotch ? notchOverlap : 0)
+        // is explicitly toggled off. Error toasts also force the drop-down
+        // height so messages stay readable even when compact overlay is enabled.
+        let height: CGFloat = (useCompact && !forceDropDownPill)
+            ? notchOverlap
+            : 38 + (screenHasNotch ? notchOverlap : 0)
         let x = screen.frame.midX - width / 2
         let y = screen.frame.maxY - height
         return NSRect(x: x, y: y, width: width, height: height)
