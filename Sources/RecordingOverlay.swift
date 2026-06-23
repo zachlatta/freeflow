@@ -57,12 +57,18 @@ private func makeNotchContent<V: View>(
     width: CGFloat,
     height: CGFloat,
     cornerRadius: CGFloat,
-    rootView: V
+    rootView: V,
+    roundsTopCorners: Bool = false
 ) -> NSView {
     let shaped = rootView
         .frame(width: width, height: height)
         .background(Color.black)
-        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: cornerRadius, bottomTrailingRadius: cornerRadius))
+        .clipShape(UnevenRoundedRectangle(
+            topLeadingRadius: roundsTopCorners ? cornerRadius : 0,
+            bottomLeadingRadius: cornerRadius,
+            bottomTrailingRadius: cornerRadius,
+            topTrailingRadius: roundsTopCorners ? cornerRadius : 0
+        ))
 
     let hosting = NSHostingView(rootView: shaped)
     hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
@@ -73,6 +79,8 @@ private func makeNotchContent<V: View>(
 // MARK: - Manager
 
 final class RecordingOverlayManager {
+    private static let nearCursorOverlayGap: CGFloat = 8
+
     private var overlayWindow: NSPanel?
     private let overlayState = RecordingOverlayState()
     private var lockedOverlayWidth: CGFloat?
@@ -106,6 +114,17 @@ final class RecordingOverlayManager {
         }
     }
 
+    /// `0` keeps the drop-down overlay at the top of the display. `1` moves
+    /// only the standard pill near the pointer; winged notch layout stays top-
+    /// anchored because it is part of the menu-bar affordance.
+    private var overlayVerticalPosition: Int {
+        UserDefaults.standard.integer(forKey: "overlay_vertical_position")
+    }
+
+    private var usesNearCursorOverlayPlacement: Bool {
+        overlayVerticalPosition == 1 && !useWingedLayout
+    }
+
     private var screenHasNotch: Bool {
         guard let screen = targetScreen else { return false }
         return screen.safeAreaInsets.top > 0
@@ -126,6 +145,33 @@ final class RecordingOverlayManager {
     private var overlayAcceptsMouseEvents: Bool {
         (overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle)
             || overlayState.phase == .updateAvailable
+    }
+
+    private func screen(containing point: NSPoint, fallback: NSScreen) -> NSScreen {
+        NSScreen.screens.first { screen in
+            screen.frame.contains(point)
+        } ?? fallback
+    }
+
+    private func clampedFrame(_ frame: NSRect, to visibleFrame: NSRect) -> NSRect {
+        let maxX = visibleFrame.maxX - frame.width
+        let maxY = visibleFrame.maxY - frame.height
+
+        let x: CGFloat
+        if maxX >= visibleFrame.minX {
+            x = min(max(frame.origin.x, visibleFrame.minX), maxX)
+        } else {
+            x = visibleFrame.midX - frame.width / 2
+        }
+
+        let y: CGFloat
+        if maxY >= visibleFrame.minY {
+            y = min(max(frame.origin.y, visibleFrame.minY), maxY)
+        } else {
+            y = visibleFrame.midY - frame.height / 2
+        }
+
+        return NSRect(x: x, y: y, width: frame.width, height: frame.height)
     }
 
     func showInitializing(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
@@ -258,7 +304,19 @@ final class RecordingOverlayManager {
 
         guard let screen = targetScreen else { return }
 
-        let hiddenFrame = NSRect(x: frame.origin.x, y: screen.frame.maxY, width: frame.width, height: frame.height)
+        let hiddenFrame: NSRect
+        if usesNearCursorOverlayPlacement {
+            let overlayScreen = self.screen(containing: NSEvent.mouseLocation, fallback: screen)
+            let entranceFrame = NSRect(
+                x: frame.origin.x,
+                y: frame.origin.y + frame.height,
+                width: frame.width,
+                height: frame.height
+            )
+            hiddenFrame = clampedFrame(entranceFrame, to: overlayScreen.visibleFrame)
+        } else {
+            hiddenFrame = NSRect(x: frame.origin.x, y: screen.frame.maxY, width: frame.width, height: frame.height)
+        }
         panel.setFrame(hiddenFrame, display: true)
         panel.alphaValue = 1
         panel.orderFrontRegardless()
@@ -307,10 +365,14 @@ final class RecordingOverlayManager {
             )
         }
 
+        let usesNearCursorPosition = usesNearCursorOverlayPlacement
+        let cornerRadius: CGFloat = usesNearCursorPosition ? 12 : (screenHasNotch ? 18 : 12)
+        let notchTopPadding: CGFloat = usesNearCursorPosition ? 0 : (screenHasNotch ? notchOverlap : 0)
+
         return makeNotchContent(
             width: frame.width,
             height: frame.height,
-            cornerRadius: screenHasNotch ? 18 : 12,
+            cornerRadius: cornerRadius,
             rootView: AnyView(
                 RecordingOverlayView(
                     state: overlayState,
@@ -321,8 +383,9 @@ final class RecordingOverlayManager {
                         self?.onUpdateOverlayPressed?()
                     }
                 )
-                .padding(.top, screenHasNotch ? notchOverlap : 0)
-            )
+                .padding(.top, notchTopPadding)
+            ),
+            roundsTopCorners: usesNearCursorPosition
         )
     }
 
@@ -363,23 +426,28 @@ final class RecordingOverlayManager {
     static let rightWingWidth: CGFloat = wingWidth
 
     private var overlayFrame: NSRect {
-        guard let screen = targetScreen else { return .zero }
+        guard let targetScreen = targetScreen else { return .zero }
 
         if useWingedLayout {
             // Anchor to the screen's auxiliary-area boundaries of the notch;
             // panel height matches the menu-bar overlap so nothing protrudes below.
             let nWidth = notchWidth
-            let nLeftX = screen.auxiliaryTopLeftArea?.maxX
-                ?? (screen.frame.midX - nWidth / 2)
+            let nLeftX = targetScreen.auxiliaryTopLeftArea?.maxX
+                ?? (targetScreen.frame.midX - nWidth / 2)
             let leftWing = Self.leftWingWidth
             let rightWing = Self.rightWingWidth
             let panelHeight = notchOverlap
             let panelWidth = leftWing + nWidth + rightWing
             let panelX = nLeftX - leftWing
-            let panelY = screen.frame.maxY - panelHeight
+            let panelY = targetScreen.frame.maxY - panelHeight
             return NSRect(x: panelX, y: panelY, width: panelWidth, height: panelHeight)
         }
 
+        let usesNearCursorPosition = overlayVerticalPosition == 1
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = usesNearCursorPosition
+            ? self.screen(containing: mouseLocation, fallback: targetScreen)
+            : targetScreen
         let width = overlayWidth
         let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
         let forceDropDownPill = overlayState.phase == .feedback
@@ -390,12 +458,25 @@ final class RecordingOverlayManager {
         // 38pt drop-down pill remains available when use_compact_overlay
         // is explicitly toggled off. Error toasts also force the drop-down
         // height so messages stay readable even when compact overlay is enabled.
-        let height: CGFloat = (useCompact && !forceDropDownPill)
-            ? notchOverlap
-            : 38 + (screenHasNotch ? notchOverlap : 0)
+        let height: CGFloat
+        if usesNearCursorPosition {
+            height = 38
+        } else {
+            height = (useCompact && !forceDropDownPill)
+                ? notchOverlap
+                : 38 + (screenHasNotch ? notchOverlap : 0)
+        }
         let x = screen.frame.midX - width / 2
         let y = screen.frame.maxY - height
-        return NSRect(x: x, y: y, width: width, height: height)
+        guard usesNearCursorPosition else {
+            return NSRect(x: x, y: y, width: width, height: height)
+        }
+
+        let nearCursorY = mouseLocation.y - Self.nearCursorOverlayGap - height
+        return clampedFrame(
+            NSRect(x: x, y: nearCursorY, width: width, height: height),
+            to: screen.visibleFrame
+        )
     }
 
     private var overlayWidth: CGFloat {

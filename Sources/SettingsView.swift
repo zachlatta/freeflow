@@ -465,6 +465,7 @@ struct GeneralSettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
+    @AppStorage("overlay_vertical_position") private var overlayVerticalPosition = 0
     @AppStorage("use_compact_overlay") private var useCompactOverlay = true
     @State private var screensVersion = 0
     @State private var apiKeyInput: String = ""
@@ -1068,6 +1069,10 @@ struct GeneralSettingsView: View {
             Divider()
 
             overlayDisplaySection
+
+            Divider()
+
+            overlayVerticalPositionSection
         }
     }
 
@@ -1112,6 +1117,24 @@ struct GeneralSettingsView: View {
         // reopening Settings. screensVersion is just a cache-buster.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)) { _ in
             screensVersion &+= 1
+        }
+    }
+
+    /// Picks whether the drop-down recording overlay stays at the top of the
+    /// display or appears near the pointer while dictation is active.
+    private var overlayVerticalPositionSection: some View {
+        HStack {
+            Text("Show at")
+                .font(.system(size: 13))
+            Spacer()
+            Picker("", selection: $overlayVerticalPosition) {
+                Text("Top of screen (default)").tag(0)
+                Text("Near cursor").tag(1)
+            }
+            .labelsHidden()
+            .accessibilityLabel("Show at")
+            .pickerStyle(.menu)
+            .frame(maxWidth: 240)
         }
     }
 
