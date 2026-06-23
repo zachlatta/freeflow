@@ -2,6 +2,9 @@ import Foundation
 
 enum PostProcessingError: LocalizedError {
     case requestFailed(Int, String)
+    /// The model rejected the request because its rate limit was exceeded.
+    /// Carries the model name and the number of seconds until the limit resets.
+    case rateLimited(model: String, retryAfter: TimeInterval)
     case invalidResponse(String)
     case invalidInput(String)
     case emptyOutput
@@ -12,6 +15,8 @@ enum PostProcessingError: LocalizedError {
         switch self {
         case .requestFailed(let statusCode, let details):
             "Post-processing failed with status \(statusCode): \(details)"
+        case .rateLimited(let model, let retryAfter):
+            "Model \(model) rate-limited — retry in \(Int(retryAfter))s"
         case .invalidResponse(let details):
             "Invalid post-processing response: \(details)"
         case .invalidInput(let details):
@@ -254,8 +259,17 @@ Behavior:
         customSystemPrompt: String = "",
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        let primaryModel = resolvedPrimaryModel()
+        var primaryModel = resolvedPrimaryModel()
         let retryModel = resolvedRetryModel(for: primaryModel)
+
+        // Circuit breaker: if the primary model has an active cooldown from a recent 429,
+        // switch to the fallback up-front — no wasted RPM slot on a doomed request.
+        // Reassigning primaryModel (not a new local) keeps the call site below byte-identical
+        // to upstream, so it never collides with the context-format parameter refactor.
+        if await LLMCooldownManager.shared.isInCooldown(primaryModel), let fallback = retryModel {
+            primaryModel = fallback
+        }
+
         do {
             return try await process(
                 transcript: transcript,
@@ -266,11 +280,17 @@ Behavior:
                 outputLanguage: outputLanguage
             )
         } catch let error as PostProcessingError {
+            // Unified fallback policy: decide whether to retry on the other model.
             let shouldFallback: Bool
             switch error {
+            case .rateLimited(_, let retryAfter):
+                // Register how long to avoid this model, then fall back to the other one.
+                await LLMCooldownManager.shared.setCooldown(primaryModel, retryAfterSeconds: retryAfter)
+                shouldFallback = true
             case .requestFailed(let statusCode, _):
                 shouldFallback = statusCode == 429
             case .emptyOutput:
+                // Empty output is a soft failure; try the other model once before giving up.
                 shouldFallback = true
             case .suspectedInstructionExecution:
                 shouldFallback = true
@@ -282,7 +302,8 @@ Behavior:
                 throw error
             }
 
-            guard let retryModel else {
+            // Guard against re-trying the same model when primaryModel is already the fallback.
+            guard let retryModel, primaryModel != retryModel else {
                 throw error
             }
 
@@ -311,8 +332,15 @@ Behavior:
         customVocabulary: [String],
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        let primaryModel = resolvedPrimaryModel()
+        var primaryModel = resolvedPrimaryModel()
         let retryModel = resolvedRetryModel(for: primaryModel)
+
+        // Circuit breaker: switch to the fallback up-front when the primary is cooling down.
+        // Reassigning primaryModel keeps the call site below byte-identical to upstream.
+        if await LLMCooldownManager.shared.isInCooldown(primaryModel), let fallback = retryModel {
+            primaryModel = fallback
+        }
+
         do {
             return try await processCommandTransform(
                 selectedText: selectedText,
@@ -323,11 +351,15 @@ Behavior:
                 outputLanguage: outputLanguage
             )
         } catch let error as PostProcessingError {
+            // Unified fallback policy: decide whether to retry on the other model.
             let shouldFallback: Bool
             switch error {
-            case .requestFailed(let statusCode, _):
-                shouldFallback = statusCode == 429
+            case .rateLimited(_, let retryAfter):
+                // Register how long to avoid this model, then fall back to the other one.
+                await LLMCooldownManager.shared.setCooldown(primaryModel, retryAfterSeconds: retryAfter)
+                shouldFallback = true
             case .emptyOutput:
+                // Empty output is a soft failure; try the other model once before giving up.
                 shouldFallback = true
             default:
                 shouldFallback = false
@@ -337,7 +369,8 @@ Behavior:
                 throw error
             }
 
-            guard let retryModel else {
+            // Guard against re-trying the same model when primaryModel is already the fallback.
+            guard let retryModel, primaryModel != retryModel else {
                 throw error
             }
 
@@ -465,6 +498,16 @@ Model: \(model)
         }
 
         guard httpResponse.statusCode == 200 else {
+            // For 429 responses, read the retry-after duration from headers so the circuit
+            // breaker knows exactly when the model becomes available again.
+            if httpResponse.statusCode == 429 {
+                // Priority order: retry-after (seconds integer) → x-ratelimit-reset-tokens ("8.192s") → 60s fallback.
+                // The 60s fallback is only used when Groq omits both timing headers, which is rare.
+                let retryAfter = httpResponse.value(forHTTPHeaderField: "retry-after").flatMap(Double.init)
+                    ?? httpResponse.value(forHTTPHeaderField: "x-ratelimit-reset-tokens").flatMap(Self.parseGroqDuration)
+                    ?? 60.0
+                throw PostProcessingError.rateLimited(model: model, retryAfter: retryAfter)
+            }
             let message = String(data: data, encoding: .utf8) ?? ""
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
@@ -476,7 +519,7 @@ Model: \(model)
               let rawContent = message["content"] as? String else {
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
-        
+
         var content = rawContent
         if config.shouldStripThinkTags {
             content = ModelConfiguration.stripThinkTags(content)
@@ -596,6 +639,13 @@ Model: \(model)
         }
 
         guard httpResponse.statusCode == 200 else {
+            // Same 429 handling as in process(): read retry-after to feed the circuit breaker.
+            if httpResponse.statusCode == 429 {
+                let retryAfter = httpResponse.value(forHTTPHeaderField: "retry-after").flatMap(Double.init)
+                    ?? httpResponse.value(forHTTPHeaderField: "x-ratelimit-reset-tokens").flatMap(Self.parseGroqDuration)
+                    ?? 60.0
+                throw PostProcessingError.rateLimited(model: model, retryAfter: retryAfter)
+            }
             let message = String(data: data, encoding: .utf8) ?? ""
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
@@ -607,7 +657,7 @@ Model: \(model)
               let rawContent = message["content"] as? String else {
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
-        
+
         var content = rawContent
         if config.shouldStripThinkTags {
             content = ModelConfiguration.stripThinkTags(content)
@@ -724,5 +774,13 @@ Model: \(model)
 
         guard !terms.isEmpty else { return "" }
         return terms.joined(separator: ", ")
+    }
+
+    /// Converts Groq's duration string format (e.g. "8.192s") to a TimeInterval.
+    /// Used to parse x-ratelimit-reset-tokens as a fallback when retry-after is absent.
+    private static func parseGroqDuration(_ value: String) -> TimeInterval? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix("s") else { return nil }
+        return Double(trimmed.dropLast())
     }
 }

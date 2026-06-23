@@ -56,6 +56,10 @@ struct ProviderSettingsFields: View {
     @State private var postProcessingModelDraft: String = ""
     @State private var postProcessingFallbackModelDraft: String = ""
     @State private var contextModelDraft: String = ""
+    /// Updated by the cooldown timer so warning labels clear at expiry without user interaction.
+    @State private var now: Date = Date()
+    /// Tracks whether the Settings window is the frontmost active window.
+    @Environment(\.controlActiveState) private var controlActiveState
 
     let showsModelDescription: Bool
 
@@ -92,6 +96,27 @@ struct ProviderSettingsFields: View {
         postProcessingFallbackModelDraft = trimmed
         guard appState.postProcessingFallbackModel != trimmed else { return }
         appState.postProcessingFallbackModel = trimmed
+    }
+
+    /// True only when all three conditions are met: a cooldown warning is visible, the
+    /// Settings window is the frontmost key window, and the view is on the General tab
+    /// (which is implicit — this view leaves the hierarchy when any other tab is selected).
+    /// When false, no timer runs and no CPU is spent.
+    private var shouldRunCooldownTimer: Bool {
+        controlActiveState == .key &&
+        (dailyCooldownExpiry(for: appState.postProcessingModel) != nil ||
+         dailyCooldownExpiry(for: appState.postProcessingFallbackModel) != nil)
+    }
+
+    /// Reads the persisted daily-limit expiry date for a model directly from UserDefaults.
+    /// Uses the shared key from LLMCooldownManager to avoid duplicating the storage contract.
+    /// Returns nil if no daily limit is active or if the entry has already expired.
+    private func dailyCooldownExpiry(for model: String) -> Date? {
+        let key = LLMCooldownManager.udKey(for: model)
+        let timestamp = UserDefaults.standard.double(forKey: key)
+        guard timestamp > 0 else { return nil }
+        let date = Date(timeIntervalSince1970: timestamp)
+        return date > now ? date : nil
     }
 
     private func commitContextModel() {
@@ -164,6 +189,18 @@ struct ProviderSettingsFields: View {
                 }
             )
 
+            // Shows when this model has hit its daily Groq rate limit.
+            // Disappears automatically once the limit window resets.
+            if let expiry = dailyCooldownExpiry(for: appState.postProcessingModel) {
+                Label {
+                    Text("Daily limit reached — resets at \(expiry.formatted(date: .omitted, time: .shortened))")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
             ModelDropdownView(
                 title: "Post-Processing Fallback Model",
                 subtitle: "Used as the explicit retry model for transcript cleanup and Edit Mode transforms.",
@@ -176,6 +213,18 @@ struct ProviderSettingsFields: View {
                     appState.postProcessingFallbackModel = AppState.defaultPostProcessingFallbackModel
                 }
             )
+
+            // Shows when the fallback model has also hit its daily limit.
+            // In this state, both models are unavailable until their limits reset.
+            if let expiry = dailyCooldownExpiry(for: appState.postProcessingFallbackModel) {
+                Label {
+                    Text("Fallback daily limit reached — resets at \(expiry.formatted(date: .omitted, time: .shortened))")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
 
             ModelDropdownView(
                 title: "Context Model",
@@ -340,8 +389,17 @@ struct ProviderSettingsFields: View {
                 contextModelDraft = value
             }
         }
+        // Tick every 5s only when: a warning is visible, the window is key, and this view
+        // is on screen (General tab). SwiftUI removes this timer when any condition turns false.
+        if shouldRunCooldownTimer {
+            Color.clear.frame(width: 0, height: 0)
+                .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { value in
+                    now = value
+                }
+        }
     }
 }
+
 
 // MARK: - Settings
 
