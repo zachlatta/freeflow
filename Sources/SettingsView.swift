@@ -1443,6 +1443,9 @@ struct PromptsSettingsView: View {
                 SettingsCard("System Prompt", icon: "text.bubble.fill") {
                     systemPromptSection
                 }
+                SettingsCard("Instruction Guard", icon: "shield.lefthalf.filled") {
+                    instructionGuardSection
+                }
                 SettingsCard("Context Prompt", icon: "eye.fill") {
                     contextPromptSection
                 }
@@ -1635,6 +1638,20 @@ struct PromptsSettingsView: View {
         }
     }
 
+    private var instructionGuardSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(
+                "Prevent dictated prompts from being executed",
+                isOn: $appState.instructionExecutionGuardEnabled
+            )
+            .toggleStyle(.switch)
+
+            Text("When enabled, FreeFlow retries or falls back to the literal transcript if post-processing looks like it answered the dictated text instead of cleaning it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     private func runSystemPromptTest() {
         systemTestRunning = true
         systemTestOutput = nil
@@ -1645,7 +1662,8 @@ struct PromptsSettingsView: View {
             apiKey: appState.apiKey,
             baseURL: appState.apiBaseURL,
             preferredModel: appState.postProcessingModel,
-            preferredFallbackModel: appState.postProcessingFallbackModel
+            preferredFallbackModel: appState.postProcessingFallbackModel,
+            instructionExecutionGuardEnabled: appState.instructionExecutionGuardEnabled
         )
         let input = systemTestInput
         let customPrompt = appState.customSystemPrompt
