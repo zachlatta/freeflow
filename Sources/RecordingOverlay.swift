@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ApplicationServices
 
 // MARK: - State
 
@@ -151,6 +152,23 @@ final class RecordingOverlayManager {
         NSScreen.screens.first { screen in
             screen.frame.contains(point)
         } ?? fallback
+    }
+
+    private func nearCursorAnchorPoint() -> NSPoint {
+        let mouseLocation = NSEvent.mouseLocation
+        let systemWide = AXUIElementCreateSystemWide()
+        var focusedValue: CFTypeRef?, rangeValue: CFTypeRef?, boundsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(systemWide, kAXFocusedUIElementAttribute as CFString, &focusedValue) == .success,
+              let focusedRaw = focusedValue, CFGetTypeID(focusedRaw) == AXUIElementGetTypeID() else { return mouseLocation }
+        let focusedElement = unsafeBitCast(focusedRaw, to: AXUIElement.self)
+        guard AXUIElementCopyAttributeValue(focusedElement, kAXSelectedTextRangeAttribute as CFString, &rangeValue) == .success,
+              let rangeRaw = rangeValue, CFGetTypeID(rangeRaw) == AXValueGetTypeID(),
+              AXUIElementCopyParameterizedAttributeValue(focusedElement, kAXBoundsForRangeParameterizedAttribute as CFString, rangeRaw, &boundsValue) == .success,
+              let boundsRaw = boundsValue, CFGetTypeID(boundsRaw) == AXValueGetTypeID() else { return mouseLocation }
+        var rect = CGRect.zero
+        guard AXValueGetValue(unsafeBitCast(boundsRaw, to: AXValue.self), .cgRect, &rect), rect.height > 0, rect != .zero else { return mouseLocation }
+        let mainHeight = NSScreen.screens.first?.frame.height ?? mouseLocation.y + rect.maxY
+        return NSPoint(x: rect.midX, y: mainHeight - rect.maxY)
     }
 
     private func clampedFrame(_ frame: NSRect, to visibleFrame: NSRect) -> NSRect {
@@ -444,7 +462,7 @@ final class RecordingOverlayManager {
         }
 
         let usesNearCursorPosition = overlayVerticalPosition == 1
-        let mouseLocation = NSEvent.mouseLocation
+        let mouseLocation = usesNearCursorPosition ? nearCursorAnchorPoint() : NSEvent.mouseLocation
         let screen = usesNearCursorPosition
             ? self.screen(containing: mouseLocation, fallback: targetScreen)
             : targetScreen
