@@ -131,6 +131,7 @@ Behavior:
     private let baseURL: String
     private let preferredModel: String
     private let preferredFallbackModel: String
+    private let instructionExecutionGuardEnabled: Bool
     private let defaultModel = "openai/gpt-oss-20b"
     private let defaultFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let defaultModelReasoningEffort = "low"
@@ -144,12 +145,14 @@ Behavior:
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         preferredModel: String = "",
-        preferredFallbackModel: String = ""
+        preferredFallbackModel: String = "",
+        instructionExecutionGuardEnabled: Bool = true
     ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.preferredModel = preferredModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.preferredFallbackModel = preferredFallbackModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.instructionExecutionGuardEnabled = instructionExecutionGuardEnabled
     }
 
     func postProcess(
@@ -484,7 +487,7 @@ Model: \(model)
         }
 
         let sanitizedTranscript = sanitizePostProcessedTranscript(content)
-        if appearsToHaveExecutedInstruction(
+        if instructionExecutionGuardEnabled && appearsToHaveExecutedInstruction(
             rawTranscript: transcript,
             cleanedTranscript: sanitizedTranscript,
             outputLanguage: outputLanguage

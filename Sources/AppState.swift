@@ -217,6 +217,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
     private let customSystemPromptStorageKey = "custom_system_prompt"
     private let customContextPromptStorageKey = "custom_context_prompt"
+    private let instructionExecutionGuardEnabledStorageKey = "instruction_execution_guard_enabled"
     private let customSystemPromptLastModifiedStorageKey = "custom_system_prompt_last_modified"
     private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
     private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
@@ -423,6 +424,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
         didSet {
             UserDefaults.standard.set(customContextPrompt, forKey: customContextPromptStorageKey)
             rebuildContextService()
+        }
+    }
+
+    @Published var instructionExecutionGuardEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                instructionExecutionGuardEnabled,
+                forKey: instructionExecutionGuardEnabledStorageKey
+            )
         }
     }
 
@@ -634,6 +644,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
+        let instructionExecutionGuardEnabled = UserDefaults.standard.object(
+            forKey: instructionExecutionGuardEnabledStorageKey
+        ) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: instructionExecutionGuardEnabledStorageKey)
         let customSystemPromptLastModified = UserDefaults.standard.string(forKey: customSystemPromptLastModifiedStorageKey) ?? ""
         let customContextPromptLastModified = UserDefaults.standard.string(forKey: customContextPromptLastModifiedStorageKey) ?? ""
         let outputLanguage = UserDefaults.standard.string(forKey: outputLanguageStorageKey) ?? ""
@@ -720,6 +735,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.transcriptionLanguage = transcriptionLanguage
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
+        self.instructionExecutionGuardEnabled = instructionExecutionGuardEnabled
         self.contextScreenshotMaxDimension = contextScreenshotMaxDimension
         self.customSystemPromptLastModified = customSystemPromptLastModified
         self.customContextPromptLastModified = customContextPromptLastModified
@@ -1128,7 +1144,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             apiKey: apiKey,
             baseURL: apiBaseURL,
             preferredModel: postProcessingModel,
-            preferredFallbackModel: postProcessingFallbackModel
+            preferredFallbackModel: postProcessingFallbackModel,
+            instructionExecutionGuardEnabled: instructionExecutionGuardEnabled
         )
         let capturedCustomVocabulary = customVocabulary
         let capturedCustomSystemPrompt = customSystemPrompt
@@ -2499,7 +2516,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             apiKey: apiKey,
             baseURL: apiBaseURL,
             preferredModel: postProcessingModel,
-            preferredFallbackModel: postProcessingFallbackModel
+            preferredFallbackModel: postProcessingFallbackModel,
+            instructionExecutionGuardEnabled: instructionExecutionGuardEnabled
         )
 
             let activeRealtime = self.realtimeService
