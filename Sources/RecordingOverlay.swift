@@ -466,7 +466,9 @@ final class RecordingOverlayManager {
                 ? notchOverlap
                 : 38 + (screenHasNotch ? notchOverlap : 0)
         }
-        let x = screen.frame.midX - width / 2
+        let x = usesNearCursorPosition
+            ? mouseLocation.x - width / 2
+            : screen.frame.midX - width / 2
         let y = screen.frame.maxY - height
         guard usesNearCursorPosition else {
             return NSRect(x: x, y: y, width: width, height: height)
