@@ -2742,11 +2742,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         guard self.isTranscribing else { return }
                         self.transcriptionTask = nil
                         self.transcribingAudioFileName = nil
-                        self.errorMessage = self.formattedTranscriptionError(error)
+                        let userFacingErrorMessage = self.formattedTranscriptionError(error)
+                        self.errorMessage = userFacingErrorMessage
                         self.isTranscribing = false
                         self.endCriticalDictationActivity()
                         self.statusText = "Error"
-                        self.overlayManager.dismiss()
+                        self.overlayManager.showError(userFacingErrorMessage)
                         self.lastPostProcessedTranscript = ""
                         self.lastRawTranscript = ""
                         self.lastContextSummary = ""
