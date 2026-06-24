@@ -382,6 +382,8 @@ struct SettingsView: View {
                     PromptsSettingsView()
                 case .macros:
                     VoiceMacrosSettingsView()
+                case .dictionary:
+                    DictionarySettingsView()
                 case .runLog:
                     RunLogView()
                 case .debug:
@@ -2733,6 +2735,312 @@ struct VoiceMacroEditorView: View {
             if let m = macro {
                 command = m.command
                 payload = m.payload
+            }
+        }
+    }
+}
+
+// MARK: - Dictionary
+
+struct DictionarySettingsView: View {
+    @EnvironmentObject var appState: AppState
+    @State private var showingEditor = false
+    @State private var editingCorrection: Correction?
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                SettingsCard("Corrections", icon: "arrow.left.arrow.right") {
+                    correctionsSection
+                }
+            }
+            .padding(24)
+        }
+        .sheet(isPresented: $showingEditor, onDismiss: { editingCorrection = nil }) {
+            CorrectionEditorView(isPresented: $showingEditor, correction: $editingCorrection)
+        }
+    }
+
+    private var correctionsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                Text("A guaranteed find-and-replace. When you know the exact wrong text the transcription produces, add it here with what you meant. FreeFlow swaps it on every dictation, even when AI cleanup is off. Best for specific mishears you can name exactly.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(action: {
+                    editingCorrection = nil
+                    showingEditor = true
+                }) {
+                    Label("Add Word", systemImage: "plus")
+                }
+            }
+
+            if appState.corrections.isEmpty {
+                VStack {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 30))
+                        .foregroundStyle(.tertiary)
+                        .padding(.bottom, 4)
+                    Text("No Corrections Yet")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                    Text("Click 'Add Word' to teach FreeFlow your first correction.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 32)
+            } else {
+                VStack(spacing: 1) {
+                    ForEach(appState.corrections) { correction in
+                        correctionRow(correction)
+                    }
+                }
+                .cornerRadius(8)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+            }
+        }
+    }
+
+    private func correctionRow(_ correction: Correction) -> some View {
+        HStack(spacing: 10) {
+            Toggle("", isOn: Binding(
+                get: { correction.enabled },
+                set: { newValue in
+                    if let index = appState.corrections.firstIndex(where: { $0.id == correction.id }) {
+                        appState.corrections[index].enabled = newValue
+                    }
+                }
+            ))
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(correction.heard.isEmpty ? "(empty)" : correction.heard)
+                        .font(.headline)
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Text(correction.replacement.isEmpty ? "(empty)" : correction.replacement)
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                Text(ruleSummary(correction))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .opacity(correction.enabled ? 1 : 0.4)
+
+            Spacer()
+
+            Button("Edit") {
+                editingCorrection = correction
+                showingEditor = true
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+
+            Button("Delete") {
+                appState.corrections.removeAll { $0.id == correction.id }
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.8))
+    }
+
+    private func ruleSummary(_ correction: Correction) -> String {
+        var parts: [String] = [correction.wholeWord ? "Whole word" : "Anywhere"]
+        if correction.caseSensitive { parts.append("Case-sensitive") }
+        return parts.joined(separator: "  ·  ")
+    }
+}
+
+struct CorrectionEditorView: View {
+    @EnvironmentObject var appState: AppState
+    @Binding var isPresented: Bool
+    @Binding var correction: Correction?
+
+    @State private var heard: String = ""
+    @State private var replacement: String = ""
+    @State private var wholeWord: Bool = true
+    @State private var caseSensitive: Bool = false
+
+    private var canSave: Bool {
+        !heard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showPreview: Bool {
+        !heard.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !replacement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var heardTrimmed: String {
+        heard.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var replacementTrimmed: String {
+        replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // Three casings of the heard phrase so the case-sensitive card always has
+    // a spread to compare: typed, lowercase, UPPERCASE, then Title Case as a
+    // backup when one of the first three collapses into a duplicate.
+    private var caseSamples: [String] {
+        let h = heardTrimmed
+        guard !h.isEmpty else { return [] }
+        var samples: [String] = []
+        for candidate in [h, h.lowercased(), h.uppercased(), h.capitalized] {
+            if !candidate.isEmpty && !samples.contains(candidate) {
+                samples.append(candidate)
+            }
+        }
+        return Array(samples.prefix(3))
+    }
+
+    // Compact one-line example: the bare sample, an arrow, then the result or
+    // "unchanged". Used by both the whole-word card and the case-sensitive card.
+    @ViewBuilder
+    private func previewRow(_ sample: String) -> some View {
+        let rule = Correction(
+            heard: heardTrimmed,
+            replacement: replacementTrimmed,
+            wholeWord: wholeWord,
+            caseSensitive: caseSensitive,
+            enabled: true
+        )
+        let result = DictionaryEngine.apply(sample, corrections: [rule])
+        HStack(spacing: 6) {
+            Text(sample)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Image(systemName: "arrow.right")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+            if result == sample {
+                Text("unchanged")
+                    .font(.caption2)
+                    .italic()
+                    .foregroundStyle(.tertiary)
+            } else {
+                Text(result)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.green)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func settingCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text(correction == nil ? "Add Word" : "Edit Word")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Heard (what the transcription produced)")
+                    .font(.caption.weight(.semibold))
+                TextField("e.g. next message", text: $heard)
+                    .textFieldStyle(.roundedBorder)
+
+                Text("Replacement (what you meant)")
+                    .font(.caption.weight(.semibold))
+                    .padding(.top, 8)
+                TextField("e.g. nextMessage", text: $replacement)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            settingCard {
+                Toggle("Match whole words only", isOn: $wholeWord)
+                Text("On: \"cat\" will not touch \"category\". Off: replaces every occurrence, even inside other words.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                if showPreview {
+                    Text("Examples")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                    previewRow(heardTrimmed)
+                    previewRow(heardTrimmed + "s")
+                }
+            }
+
+            settingCard {
+                Toggle("Case-sensitive", isOn: $caseSensitive)
+                Text("Off: matches the heard phrase in any casing.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                if showPreview {
+                    Text("Examples")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 2)
+                    ForEach(caseSamples, id: \.self) { sample in
+                        previewRow(sample)
+                    }
+                }
+            }
+
+            HStack {
+                Button("Cancel") {
+                    isPresented = false
+                    correction = nil
+                }
+                Spacer()
+                Button("Save") {
+                    let updated = Correction(
+                        id: correction?.id ?? UUID(),
+                        heard: heardTrimmed,
+                        replacement: replacementTrimmed,
+                        wholeWord: wholeWord,
+                        caseSensitive: caseSensitive,
+                        enabled: correction?.enabled ?? true
+                    )
+                    if let index = appState.corrections.firstIndex(where: { $0.id == updated.id }) {
+                        appState.corrections[index] = updated
+                    } else {
+                        appState.corrections.append(updated)
+                    }
+                    isPresented = false
+                    correction = nil
+                }
+                .disabled(!canSave)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(20)
+        .frame(width: 440)
+        .onAppear {
+            if let c = correction {
+                heard = c.heard
+                replacement = c.replacement
+                wholeWord = c.wholeWord
+                caseSensitive = c.caseSensitive
             }
         }
     }
