@@ -478,6 +478,10 @@ struct GeneralSettingsView: View {
     @State private var customVocabularyInput: String = ""
     @State private var micPermissionGranted = false
     @State private var showMutedHint = false
+    /// Controls whether the "Press Enter" customization panel (input field + suggestions) is expanded.
+    @State private var showPressEnterCustomization = false
+    /// Backing text for the field where the user types a new "Press Enter" variation to add.
+    @State private var pressEnterInput = ""
     @State private var copiedBuildInfo = false
     @State private var copiedBuildInfoResetWorkItem: DispatchWorkItem?
     @StateObject private var githubCache = GitHubMetadataCache.shared
@@ -665,6 +669,9 @@ struct GeneralSettingsView: View {
                 }
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
                     clipboardSection
+                }
+                SettingsCard("Recognize 'Press Enter'", icon: "return") {
+                    pressEnterSection
                 }
                 SettingsCard("Microphone", icon: "mic.fill") {
                     microphoneSection
@@ -1205,16 +1212,137 @@ struct GeneralSettingsView: View {
             Text("When on, your clipboard manager (Paste, Raycast, Maccy, etc.) records each dictation so you can find it in your recent history. When off, \(AppName.displayName) marks dictations transient and your clipboard manager skips them.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+    
+    // MARK: Press Enter Command
 
-            Divider()
-                .padding(.vertical, 2)
+    /// Settings card body for the "Press Enter" voice command: the enable toggle, the list of active
+    /// variation tags, and the collapsible customization panel for adding or suggesting new variations.
+    private var pressEnterSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Say \"press enter\" at the end of dictation to press Return", isOn: $appState.isPressEnterVoiceCommandEnabled)
 
-            Toggle("Say \"press enter\" to submit after paste", isOn: $appState.isPressEnterVoiceCommandEnabled)
-
-            Text("When the transcription ends with \"press enter\", \(AppName.displayName) removes those words before cleanup, pastes the remaining transcript, then presses Return.")
+            Text("When the transcription ends with one of these commands, FreeFlow removes the trigger words, pastes the transcript, then presses Return. Capitalization doesn't matter.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            
+            if appState.isPressEnterVoiceCommandEnabled {
+                VStack(alignment: .leading, spacing: 10) {
+                    // 1. Active Variations (Always Visible)
+                    // These are extracted from the customization collapse menu to give the user 
+                    // immediate context on what variations are currently active.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Active variations:")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(.secondary)
+                        
+                        if !appState.customPressEnterCommands.isEmpty {
+                            FlowLayout(spacing: 8) {
+                                ForEach(appState.customPressEnterCommands, id: \.self) { command in
+                                    PressEnterActiveTagView(command: command) {
+                                        withAnimation {
+                                            appState.customPressEnterCommands.removeAll { $0 == command }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            Text("No variations active. The enter command is effectively disabled.")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        }
+                    }
+                    .padding(.top, 4)
+                    
+                    // 2. Customize Button
+                    // Acts as a toggle to show/hide the input field and suggested variations.
+                    // Designed with a larger clickable area (contentShape) for better accessibility.
+                    Button(action: {
+                        withAnimation {
+                            showPressEnterCustomization.toggle()
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Text("Customize")
+                                .font(.body.weight(.medium))
+                            Image(systemName: showPressEnterCustomization ? "chevron.up" : "chevron.down")
+                                .font(.callout)
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.vertical, 4)
+                        .padding(.trailing, 8) // Give some padding for easier clicking
+                        .contentShape(Rectangle()) // Make the padded area clickable
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 2)
+                }
+                
+                if showPressEnterCustomization {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Divider()
+                        
+                        // 3. Input field for adding new custom variations
+                        // Uses standard rounded borders for macOS HIG compliance.
+                        HStack(spacing: 6) {
+                            TextField("Add a new variation...", text: $pressEnterInput)
+                                .font(.body)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit { addPressEnterCommand() }
+                            
+                            Button("Add") {
+                                addPressEnterCommand()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
+                            .disabled(pressEnterInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        
+                        // 4. Suggested List
+                        // Only shows suggestions that haven't been added yet to avoid redundancy.
+                        let unusedSuggestions = MultilanguagePressEnter.suggestedCommands.filter { !appState.customPressEnterCommands.contains($0) }
+                        if !unusedSuggestions.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Suggested variations:")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundColor(.secondary)
+                                
+                                FlowLayout(spacing: 8) {
+                                    ForEach(unusedSuggestions, id: \.self) { command in
+                                        PressEnterSuggestedTagView(command: command) {
+                                            withAnimation {
+                                                appState.customPressEnterCommands.append(command)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(.top, 4)
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+            }
         }
+    }
+    
+    /// Validates and appends a newly typed variation into the user's active custom commands list.
+    /// - Sanitizes the string by trimming whitespaces and converting it to lowercase.
+    /// - Aborts if the resulting string is empty or already exists in the active list.
+    /// - Triggers a UI animation and updates `AppState.customPressEnterCommands`.
+    private func addPressEnterCommand() {
+        // Normalize the string: lowercase, remove leading/trailing spaces, and collapse multiple spaces into one.
+        let words = pressEnterInput.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        let normalized = words.joined(separator: " ").lowercased()
+        
+        guard !normalized.isEmpty, !appState.customPressEnterCommands.contains(normalized) else {
+            pressEnterInput = ""
+            return
+        }
+        withAnimation {
+            appState.customPressEnterCommands.append(normalized)
+        }
+        pressEnterInput = ""
     }
 
     // MARK: Microphone
@@ -2733,6 +2861,98 @@ struct VoiceMacroEditorView: View {
             if let m = macro {
                 command = m.command
                 payload = m.payload
+            }
+        }
+    }
+}
+
+/// A macOS HIG compliant capsule view representing an active "Press Enter" variation.
+/// It features a subtle translucent glass effect in its idle state.
+/// When hovered, the text transitions into an "X" button smoothly without shifting the layout.
+///
+/// **Why is this extracted at the bottom of the file?**
+/// By separating this into its own `struct`, the local `@State private var isHovering` 
+/// belongs only to this specific tag. If this code were placed directly inside the `ForEach` 
+/// loop of `SettingsView`, managing hover states individually would require complex 
+/// dictionaries and cause the entire Settings screen to re-render pointlessly on every hover.
+struct PressEnterActiveTagView: View {
+    /// The active variation text displayed inside the capsule.
+    let command: String
+    /// Invoked when the user clicks the "X" to remove this variation.
+    let onRemove: () -> Void
+    
+    /// Tracks pointer hover so the label can cross-fade into the remove button.
+    @State private var isHovering = false
+    
+    /// Renders the capsule tag, swapping the label for an "X" remove button on hover.
+    var body: some View {
+        Text(command)
+            .font(.callout)
+            .fontWeight(.medium)
+            // Hide the text itself when hovering so the 'xmark' button takes focus
+            .opacity(isHovering ? 0 : 1)
+            .overlay {
+                Button(action: onRemove) {
+                    Image(systemName: "xmark")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .opacity(isHovering ? 1 : 0)
+            }
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            // Subtle fill matching macOS standard tag styling
+            .background(Color.accentColor.opacity(0.15))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.accentColor.opacity(0.4), lineWidth: 1)
+            )
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.1)) {
+                    isHovering = hovering
+                }
+            }
+    }
+}
+
+/// A simple, pill-shaped view for suggested "Press Enter" variations.
+/// Displays a plus icon and text in a muted secondary color.
+/// On hover, it deepens the background color slightly to indicate clickability.
+///
+/// **Why is this extracted at the bottom of the file?**
+/// Like `PressEnterActiveTagView`, this MUST be a separated `struct`. If embedded 
+/// inside the `SettingsView` loop, its `@State` hover animation would be impossible to 
+/// handle cleanly per-item and would drastically degrade UI performance during interactions.
+struct PressEnterSuggestedTagView: View {
+    /// The suggested variation text displayed next to the plus icon.
+    let command: String
+    /// Invoked when the user taps the pill to add this suggestion to their active variations.
+    let onAdd: () -> Void
+    
+    /// Tracks pointer hover so the background can deepen to signal clickability.
+    @State private var isHovering = false
+    
+    /// Renders the tappable "+" pill that adds the suggested variation when clicked.
+    var body: some View {
+        Button(action: onAdd) {
+            HStack(spacing: 4) {
+                Image(systemName: "plus")
+                Text(command)
+            }
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(isHovering ? Color.secondary.opacity(0.2) : Color.secondary.opacity(0.1))
+            .foregroundColor(.secondary)
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.07)) {
+                isHovering = hovering
             }
         }
     }

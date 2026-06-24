@@ -225,6 +225,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let preserveClipboardStorageKey = "preserve_clipboard"
     private let keepDictationInClipboardHistoryStorageKey = "keep_dictation_in_clipboard_history"
     private let pressEnterVoiceCommandStorageKey = "press_enter_voice_command_enabled"
+    /// UserDefaults key under which the user's custom "Press Enter" command variations are persisted.
+    private let customPressEnterCommandsStorageKey = "custom_press_enter_commands"
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
     private let soundVolumeStorageKey = "sound_volume"
     private let voiceMacrosStorageKey = "voice_macros"
@@ -277,9 +279,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     static let defaultPostProcessingModel = "openai/gpt-oss-20b"
     static let defaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     static let defaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
-    private static let trailingPressEnterCommandPattern = try! NSRegularExpression(
-        pattern: #"(?i)(?:^|[ \t\r\n,;:\-]+)press[ \t\r\n]+enter[\s\p{P}]*$"#
-    )
 
     @Published var hasCompletedSetup: Bool {
         didSet {
@@ -516,6 +515,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
             UserDefaults.standard.set(isPressEnterVoiceCommandEnabled, forKey: pressEnterVoiceCommandStorageKey)
         }
     }
+    
+    /// Holds the user-defined variations for the "Press Enter" voice command.
+    /// A `didSet` observer immediately recompiles the regex into `compiledPressEnterRegex`
+    /// whenever the user edits their tags in Settings — so the transcription pipeline
+    /// always reads a pre-built regex and never compiles on the fly during dictation.
+    @Published var customPressEnterCommands: [String] {
+        didSet {
+            UserDefaults.standard.set(customPressEnterCommands, forKey: customPressEnterCommandsStorageKey)
+            compiledPressEnterRegex = MultilanguagePressEnter.compileRegex(for: customPressEnterCommands)
+        }
+    }
+    
+    /// The pre-compiled Regular Expression used to extract the "Press Enter" command
+    /// from the end of the dictated text. It is updated only when `customPressEnterCommands` changes.
+    private(set) var compiledPressEnterRegex: NSRegularExpression?
 
     @Published var alertSoundsEnabled: Bool {
         didSet {
@@ -685,6 +699,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let isPressEnterVoiceCommandEnabled = UserDefaults.standard.object(forKey: pressEnterVoiceCommandStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: pressEnterVoiceCommandStorageKey)
+        let customPressEnterCommands = UserDefaults.standard.stringArray(forKey: customPressEnterCommandsStorageKey) ?? ["press enter", "pressione enter", "hit enter", "回车"]
         let soundVolume: Float = UserDefaults.standard.object(forKey: soundVolumeStorageKey) != nil
             ? UserDefaults.standard.float(forKey: soundVolumeStorageKey) : 1.0
         let alertSoundsEnabled = UserDefaults.standard.object(forKey: alertSoundsEnabledStorageKey) != nil
@@ -755,6 +770,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.realtimeStreamingModel = realtimeStreamingModel
         self.dictationAudioInterruptionEnabled = dictationAudioInterruptionEnabled
         self.isPressEnterVoiceCommandEnabled = isPressEnterVoiceCommandEnabled
+        self.customPressEnterCommands = customPressEnterCommands
+        self.compiledPressEnterRegex = MultilanguagePressEnter.compileRegex(for: customPressEnterCommands)
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
         self.voiceMacros = initialMacros
@@ -2365,7 +2382,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private static func parseTranscriptCommands(
         from transcript: String,
-        pressEnterCommandEnabled: Bool
+        pressEnterCommandEnabled: Bool,
+        compiledRegex: NSRegularExpression? = nil
     ) -> TranscriptCommandParsingResult {
         guard pressEnterCommandEnabled else {
             return TranscriptCommandParsingResult(
@@ -2374,23 +2392,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
             )
         }
 
-        let fullRange = NSRange(transcript.startIndex..<transcript.endIndex, in: transcript)
-        guard
-            let match = trailingPressEnterCommandPattern.firstMatch(in: transcript, range: fullRange),
-            let commandRange = Range(match.range, in: transcript)
-        else {
-            return TranscriptCommandParsingResult(
-                transcript: transcript.trimmingCharacters(in: .whitespacesAndNewlines),
-                shouldPressEnterAfterPaste: false
-            )
-        }
-
-        var strippedTranscript = transcript
-        strippedTranscript.removeSubrange(commandRange)
-
+        let (strippedTranscript, didMatch) = MultilanguagePressEnter.extractCommand(from: transcript, withRegex: compiledRegex)
+        
         return TranscriptCommandParsingResult(
-            transcript: strippedTranscript.trimmingCharacters(in: .whitespacesAndNewlines),
-            shouldPressEnterAfterPaste: true
+            transcript: strippedTranscript,
+            shouldPressEnterAfterPaste: didMatch
         )
     }
 
@@ -2620,7 +2626,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let rawTranscript = try await transcript
                     let parsedTranscript = Self.parseTranscriptCommands(
                         from: rawTranscript,
-                        pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
+                        pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled,
+                        compiledRegex: self.compiledPressEnterRegex
                     )
                     try Task.checkCancellation()
                     // Capture the parsed raw transcript as lastTranscript before
