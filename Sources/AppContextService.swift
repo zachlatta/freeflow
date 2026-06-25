@@ -53,14 +53,14 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         customContextPrompt: String = "",
-        contextModel: String = "meta-llama/llama-4-scout-17b-16e-instruct",
+        contextModel: String = "llama-3.3-70b-versatile",
         screenshotMaxDimension: CGFloat = AppContextService.defaultScreenshotMaxDimension
     ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.customContextPrompt = customContextPrompt
         let trimmedModel = contextModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.contextModel = trimmedModel.isEmpty ? "meta-llama/llama-4-scout-17b-16e-instruct" : trimmedModel
+        self.contextModel = trimmedModel.isEmpty ? "llama-3.3-70b-versatile" : trimmedModel
         self.screenshotMaxDimension = screenshotMaxDimension > 0
             ? screenshotMaxDimension
             : AppContextService.defaultScreenshotMaxDimension

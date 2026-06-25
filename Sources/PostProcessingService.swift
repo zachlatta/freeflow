@@ -133,7 +133,7 @@ Behavior:
     private let preferredFallbackModel: String
     private let instructionExecutionGuardEnabled: Bool
     private let defaultModel = "openai/gpt-oss-20b"
-    private let defaultFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    private let defaultFallbackModel = "llama-3.3-70b-versatile"
     private let defaultModelReasoningEffort = "low"
     private let postProcessingMaxCompletionTokens = 4096
     private var postProcessingTimeoutSeconds: TimeInterval {

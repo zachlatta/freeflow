@@ -275,8 +275,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         ("ca", "Catalan")
     ]
     static let defaultPostProcessingModel = "openai/gpt-oss-20b"
-    static let defaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
-    static let defaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    static let defaultPostProcessingFallbackModel = "llama-3.3-70b-versatile"
+    static let defaultContextModel = "llama-3.3-70b-versatile"
     private static let trailingPressEnterCommandPattern = try! NSRegularExpression(
         pattern: #"(?i)(?:^|[ \t\r\n,;:\-]+)press[ \t\r\n]+enter[\s\p{P}]*$"#
     )

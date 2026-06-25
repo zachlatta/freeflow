@@ -11,7 +11,6 @@ public struct ModelConfiguration {
     public static let llmModels = [
         "llama-3.3-70b-versatile",
         "llama-3.1-8b-instant",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
         "openai/gpt-oss-20b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-safeguard-20b",
@@ -76,13 +75,6 @@ public struct ModelConfiguration {
                 shouldStripThinkTags: false
             )
         } else if cleanModel == "llama-3.3-70b-versatile" {
-            return ModelConfig(
-                maxCompletionTokens: nil,
-                reasoningEffort: nil,
-                includeReasoning: nil,
-                shouldStripThinkTags: false
-            )
-        } else if cleanModel == "meta-llama/llama-4-scout-17b-16e-instruct" {
             return ModelConfig(
                 maxCompletionTokens: nil,
                 reasoningEffort: nil,
