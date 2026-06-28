@@ -2,6 +2,9 @@ import Foundation
 
 enum PostProcessingError: LocalizedError {
     case requestFailed(Int, String)
+    /// The model rejected the request because its rate limit was exceeded.
+    /// Carries the model name and the number of seconds until the limit resets.
+    case rateLimited(model: String, retryAfter: TimeInterval)
     case invalidResponse(String)
     case invalidInput(String)
     case emptyOutput
@@ -12,6 +15,8 @@ enum PostProcessingError: LocalizedError {
         switch self {
         case .requestFailed(let statusCode, let details):
             "Post-processing failed with status \(statusCode): \(details)"
+        case .rateLimited(let model, let retryAfter):
+            "Model \(model) rate-limited — retry in \(Int(retryAfter))s"
         case .invalidResponse(let details):
             "Invalid post-processing response: \(details)"
         case .invalidInput(let details):
@@ -254,8 +259,13 @@ Behavior:
         customSystemPrompt: String = "",
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        let primaryModel = resolvedPrimaryModel()
+        var primaryModel = resolvedPrimaryModel()
         let retryModel = resolvedRetryModel(for: primaryModel)
+
+        // Circuit breaker: swap to the fallback up-front if the primary is cooling down.
+        // Reassigning primaryModel keeps the call site below byte-identical to upstream.
+        primaryModel = await LLMCooldownManager.shared.effectivePrimary(primaryModel, fallback: retryModel)
+
         do {
             return try await process(
                 transcript: transcript,
@@ -266,11 +276,17 @@ Behavior:
                 outputLanguage: outputLanguage
             )
         } catch let error as PostProcessingError {
+            // Unified fallback policy: decide whether to retry on the other model.
             let shouldFallback: Bool
             switch error {
+            case .rateLimited:
+                // The cooldown was already registered inside process() when the 429 was
+                // detected — for the fallback attempt too — so here we only switch models.
+                shouldFallback = true
             case .requestFailed(let statusCode, _):
                 shouldFallback = statusCode == 429
             case .emptyOutput:
+                // Empty output is a soft failure; try the other model once before giving up.
                 shouldFallback = true
             case .suspectedInstructionExecution:
                 shouldFallback = true
@@ -282,7 +298,8 @@ Behavior:
                 throw error
             }
 
-            guard let retryModel else {
+            // Guard against re-trying the same model when primaryModel is already the fallback.
+            guard let retryModel, primaryModel != retryModel else {
                 throw error
             }
 
@@ -311,8 +328,12 @@ Behavior:
         customVocabulary: [String],
         outputLanguage: String = ""
     ) async throws -> PostProcessingResult {
-        let primaryModel = resolvedPrimaryModel()
+        var primaryModel = resolvedPrimaryModel()
         let retryModel = resolvedRetryModel(for: primaryModel)
+
+        // Circuit breaker: swap to the fallback up-front if the primary is cooling down.
+        primaryModel = await LLMCooldownManager.shared.effectivePrimary(primaryModel, fallback: retryModel)
+
         do {
             return try await processCommandTransform(
                 selectedText: selectedText,
@@ -323,11 +344,15 @@ Behavior:
                 outputLanguage: outputLanguage
             )
         } catch let error as PostProcessingError {
+            // Unified fallback policy: decide whether to retry on the other model.
             let shouldFallback: Bool
             switch error {
-            case .requestFailed(let statusCode, _):
-                shouldFallback = statusCode == 429
+            case .rateLimited:
+                // The cooldown was already registered inside processCommandTransform() when the
+                // 429 was detected — for the fallback attempt too — so here we only switch models.
+                shouldFallback = true
             case .emptyOutput:
+                // Empty output is a soft failure; try the other model once before giving up.
                 shouldFallback = true
             default:
                 shouldFallback = false
@@ -337,7 +362,8 @@ Behavior:
                 throw error
             }
 
-            guard let retryModel else {
+            // Guard against re-trying the same model when primaryModel is already the fallback.
+            guard let retryModel, primaryModel != retryModel else {
                 throw error
             }
 
@@ -465,6 +491,15 @@ Model: \(model)
         }
 
         guard httpResponse.statusCode == 200 else {
+            // For 429 responses, read how long the model is rate-limited from the headers so
+            // the circuit breaker knows exactly when it becomes available again.
+            if httpResponse.statusCode == 429 {
+                // Register the cooldown here so BOTH the primary and the fallback attempt feed
+                // the breaker (the retry calls this same method), then surface the error.
+                let retryAfter = LLMCooldownManager.retryAfterSeconds(from: httpResponse)
+                await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: retryAfter)
+                throw PostProcessingError.rateLimited(model: model, retryAfter: retryAfter)
+            }
             let message = String(data: data, encoding: .utf8) ?? ""
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
@@ -476,7 +511,7 @@ Model: \(model)
               let rawContent = message["content"] as? String else {
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
-        
+
         var content = rawContent
         if config.shouldStripThinkTags {
             content = ModelConfiguration.stripThinkTags(content)
@@ -596,6 +631,13 @@ Model: \(model)
         }
 
         guard httpResponse.statusCode == 200 else {
+            // Same 429 handling as process(): register the cooldown for whichever model
+            // (primary or fallback) hit the limit, then surface the error.
+            if httpResponse.statusCode == 429 {
+                let retryAfter = LLMCooldownManager.retryAfterSeconds(from: httpResponse)
+                await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: retryAfter)
+                throw PostProcessingError.rateLimited(model: model, retryAfter: retryAfter)
+            }
             let message = String(data: data, encoding: .utf8) ?? ""
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
         }
@@ -607,7 +649,7 @@ Model: \(model)
               let rawContent = message["content"] as? String else {
             throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
         }
-        
+
         var content = rawContent
         if config.shouldStripThinkTags {
             content = ModelConfiguration.stripThinkTags(content)
