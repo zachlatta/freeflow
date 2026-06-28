@@ -47,9 +47,11 @@ actor LLMCooldownManager {
 
     /// Registers a cooldown for a model using the retry-after duration from the API 429 response.
     /// Minute-level durations stay in memory; daily-level durations are also written to UserDefaults.
-    func setCooldown(_ model: String, retryAfterSeconds: TimeInterval) {
+    /// Pass `persist: true` for a daily-limit signal (the RPD reset header) so a daily quota that
+    /// happens to reset in under an hour is still persisted and shown in Settings, not kept in memory.
+    func setCooldown(_ model: String, retryAfterSeconds: TimeInterval, persist: Bool = false) {
         let expiryDate = Date().addingTimeInterval(retryAfterSeconds)
-        if retryAfterSeconds >= dailyLimitThreshold {
+        if persist || retryAfterSeconds >= dailyLimitThreshold {
             // Daily limit: persist to UserDefaults so it survives app restarts.
             persistExpiry(expiryDate, for: model)
         } else {
@@ -101,27 +103,28 @@ actor LLMCooldownManager {
 
     // MARK: - Rate-limit header parsing
 
-    /// Reads how long a rate-limited model must cool down from a Groq 429 response.
+    /// Reads from a Groq 429 response how long the model must cool down AND whether the limit is a
+    /// daily one (so the caller persists it even when the remaining time is short).
     /// Priority: `retry-after` (delta-seconds) → `x-ratelimit-reset-requests` (the daily /
     /// Requests-Per-Day reset) → `x-ratelimit-reset-tokens` (the per-minute / Tokens-Per-Minute
-    /// reset) → a 60s fallback when no timing header is present. Reading reset-requests is what
-    /// lets a genuine daily limit cross the persistence threshold and surface in Settings.
-    /// nonisolated static so the HTTP call site computes it synchronously without an actor hop.
-    nonisolated static func retryAfterSeconds(from httpResponse: HTTPURLResponse) -> TimeInterval {
+    /// reset) → a short re-probe fallback when no timing header is present. Only the RPD header
+    /// marks the limit daily; `retry-after` is ambiguous, so its daily-ness is left to the duration
+    /// threshold in `setCooldown`. nonisolated static so the call site computes it without an actor hop.
+    nonisolated static func rateLimitCooldown(from httpResponse: HTTPURLResponse) -> (seconds: TimeInterval, isDaily: Bool) {
         // retry-after is the authoritative wait Groq sets specifically on a 429.
         if let value = httpResponse.value(forHTTPHeaderField: "retry-after").flatMap(parseGroqDuration) {
-            return value
+            return (value, false)
         }
         // x-ratelimit-reset-requests carries the daily (RPD) reset, e.g. "2m59.56s" or hours.
         if let value = httpResponse.value(forHTTPHeaderField: "x-ratelimit-reset-requests").flatMap(parseGroqDuration) {
-            return value
+            return (value, true)
         }
         // x-ratelimit-reset-tokens carries the per-minute (TPM) reset, e.g. "7.66s".
         if let value = httpResponse.value(forHTTPHeaderField: "x-ratelimit-reset-tokens").flatMap(parseGroqDuration) {
-            return value
+            return (value, false)
         }
         // No timing header present (rare): cool down briefly so the next call can re-probe.
-        return Self.defaultReprobeCooldownSeconds
+        return (Self.defaultReprobeCooldownSeconds, false)
     }
 
     /// Parses a Groq duration string into a TimeInterval. Accepts bare seconds ("2", "7.66"),

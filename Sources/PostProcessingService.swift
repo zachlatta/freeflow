@@ -298,8 +298,18 @@ Behavior:
                 throw error
             }
 
-            // Guard against re-trying the same model when primaryModel is already the fallback.
-            guard let retryModel, primaryModel != retryModel else {
+            // No distinct fallback left to try. Still honor the raw-transcript safe-exit for a
+            // suspected-instruction-execution so an up-front cooldown swap doesn't lose it.
+            guard let retryModel else {
+                throw error
+            }
+            guard primaryModel != retryModel else {
+                if case .suspectedInstructionExecution = error {
+                    return PostProcessingResult(
+                        transcript: transcript.trimmingCharacters(in: .whitespacesAndNewlines),
+                        prompt: ""
+                    )
+                }
                 throw error
             }
 
@@ -496,9 +506,9 @@ Model: \(model)
             if httpResponse.statusCode == 429 {
                 // Register the cooldown here so BOTH the primary and the fallback attempt feed
                 // the breaker (the retry calls this same method), then surface the error.
-                let retryAfter = LLMCooldownManager.retryAfterSeconds(from: httpResponse)
-                await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: retryAfter)
-                throw PostProcessingError.rateLimited(model: model, retryAfter: retryAfter)
+                let cooldown = LLMCooldownManager.rateLimitCooldown(from: httpResponse)
+                await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: cooldown.seconds, persist: cooldown.isDaily)
+                throw PostProcessingError.rateLimited(model: model, retryAfter: cooldown.seconds)
             }
             let message = String(data: data, encoding: .utf8) ?? ""
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
@@ -634,9 +644,9 @@ Model: \(model)
             // Same 429 handling as process(): register the cooldown for whichever model
             // (primary or fallback) hit the limit, then surface the error.
             if httpResponse.statusCode == 429 {
-                let retryAfter = LLMCooldownManager.retryAfterSeconds(from: httpResponse)
-                await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: retryAfter)
-                throw PostProcessingError.rateLimited(model: model, retryAfter: retryAfter)
+                let cooldown = LLMCooldownManager.rateLimitCooldown(from: httpResponse)
+                await LLMCooldownManager.shared.setCooldown(model, retryAfterSeconds: cooldown.seconds, persist: cooldown.isDaily)
+                throw PostProcessingError.rateLimited(model: model, retryAfter: cooldown.seconds)
             }
             let message = String(data: data, encoding: .utf8) ?? ""
             throw PostProcessingError.requestFailed(httpResponse.statusCode, message)

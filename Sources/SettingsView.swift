@@ -119,6 +119,16 @@ struct ProviderSettingsFields: View {
         return date > now ? date : nil
     }
 
+    /// Formats a cooldown reset time, including the date only when the reset falls on a later day,
+    /// so a daily limit that resets after midnight is not shown as an ambiguous bare time.
+    private func formattedCooldownReset(_ expiry: Date) -> String {
+        // Calendar.isDate(_:inSameDayAs:) is a macOS-native calendar-aware same-day comparison.
+        if Calendar.current.isDate(expiry, inSameDayAs: now) {
+            return expiry.formatted(date: .omitted, time: .shortened)
+        }
+        return expiry.formatted(date: .abbreviated, time: .shortened)
+    }
+
     private func commitContextModel() {
         let trimmed = contextModelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         contextModelDraft = trimmed
@@ -193,7 +203,7 @@ struct ProviderSettingsFields: View {
             // Disappears automatically once the limit window resets.
             if let expiry = dailyCooldownExpiry(for: appState.postProcessingModel) {
                 Label {
-                    Text("Daily limit reached — resets at \(expiry.formatted(date: .omitted, time: .shortened))")
+                    Text("Daily limit reached — resets at \(formattedCooldownReset(expiry))")
                 } icon: {
                     Image(systemName: "exclamationmark.triangle.fill")
                 }
@@ -218,7 +228,7 @@ struct ProviderSettingsFields: View {
             // In this state, both models are unavailable until their limits reset.
             if let expiry = dailyCooldownExpiry(for: appState.postProcessingFallbackModel) {
                 Label {
-                    Text("Fallback daily limit reached — resets at \(expiry.formatted(date: .omitted, time: .shortened))")
+                    Text("Fallback daily limit reached — resets at \(formattedCooldownReset(expiry))")
                 } icon: {
                     Image(systemName: "exclamationmark.triangle.fill")
                 }
