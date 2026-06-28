@@ -60,14 +60,17 @@ actor LLMCooldownManager {
         }
     }
 
-    /// Returns the model to use up-front: the fallback when the primary is in a rate-limit
-    /// cooldown and a fallback exists, otherwise the primary. Lets a caller route around a
-    /// cooling-down model in a single call. Behaviorally identical to the inline swap it replaces.
-    func effectivePrimary(_ primary: String, fallback: String?) -> String {
-        if isInCooldown(primary), let fallback {
-            return fallback
+    /// Returns an available model to use up-front, or nil when none is: the primary if it is not
+    /// cooling down; otherwise the fallback if it exists and is itself not cooling down; otherwise
+    /// nil, so the caller can skip a doomed request when BOTH models are rate-limited.
+    func effectivePrimary(_ primary: String, fallback: String?) -> String? {
+        if !isInCooldown(primary) {
+            return primary
         }
-        return primary
+        guard let fallback, !isInCooldown(fallback) else {
+            return nil
+        }
+        return fallback
     }
 
     // MARK: - UserDefaults (daily-limit persistence)
@@ -105,19 +108,24 @@ actor LLMCooldownManager {
 
     /// Reads from a Groq 429 response how long the model must cool down AND whether the limit is a
     /// daily one (so the caller persists it even when the remaining time is short).
-    /// Priority: `retry-after` (delta-seconds) → `x-ratelimit-reset-requests` (the daily /
-    /// Requests-Per-Day reset) → `x-ratelimit-reset-tokens` (the per-minute / Tokens-Per-Minute
-    /// reset) → a short re-probe fallback when no timing header is present. Only the RPD header
-    /// marks the limit daily; `retry-after` is ambiguous, so its daily-ness is left to the duration
-    /// threshold in `setCooldown`. nonisolated static so the call site computes it without an actor hop.
+    /// Priority: an exhausted daily request quota (`x-ratelimit-remaining-requests` <= 0, using the
+    /// `x-ratelimit-reset-requests` RPD reset) → `retry-after` (delta-seconds) →
+    /// `x-ratelimit-reset-tokens` (the per-minute / Tokens-Per-Minute reset) → a short re-probe
+    /// fallback. The RPD check runs FIRST because Groq usually also sends `retry-after`; honoring
+    /// that first would hide a short, near-reset daily window and stop it from persisting.
+    /// nonisolated static so the call site computes it without an actor hop.
     nonisolated static func rateLimitCooldown(from httpResponse: HTTPURLResponse) -> (seconds: TimeInterval, isDaily: Bool) {
+        // Daily (RPD) quota spent: classify as daily and use its reset even when retry-after is also
+        // present, so a short near-reset daily window still persists and surfaces in Settings.
+        let remainingRequests = httpResponse.value(forHTTPHeaderField: "x-ratelimit-remaining-requests")
+            .flatMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        if let remainingRequests, remainingRequests <= 0,
+           let dailyReset = httpResponse.value(forHTTPHeaderField: "x-ratelimit-reset-requests").flatMap(parseGroqDuration) {
+            return (dailyReset, true)
+        }
         // retry-after is the authoritative wait Groq sets specifically on a 429.
         if let value = httpResponse.value(forHTTPHeaderField: "retry-after").flatMap(parseGroqDuration) {
             return (value, false)
-        }
-        // x-ratelimit-reset-requests carries the daily (RPD) reset, e.g. "2m59.56s" or hours.
-        if let value = httpResponse.value(forHTTPHeaderField: "x-ratelimit-reset-requests").flatMap(parseGroqDuration) {
-            return (value, true)
         }
         // x-ratelimit-reset-tokens carries the per-minute (TPM) reset, e.g. "7.66s".
         if let value = httpResponse.value(forHTTPHeaderField: "x-ratelimit-reset-tokens").flatMap(parseGroqDuration) {

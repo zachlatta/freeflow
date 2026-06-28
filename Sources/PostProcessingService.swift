@@ -262,9 +262,13 @@ Behavior:
         var primaryModel = resolvedPrimaryModel()
         let retryModel = resolvedRetryModel(for: primaryModel)
 
-        // Circuit breaker: swap to the fallback up-front if the primary is cooling down.
-        // Reassigning primaryModel keeps the call site below byte-identical to upstream.
-        primaryModel = await LLMCooldownManager.shared.effectivePrimary(primaryModel, fallback: retryModel)
+        // Circuit breaker: pick a model that isn't cooling down. If BOTH are cooling, skip cleanup
+        // and return the raw transcript rather than send a doomed request. Reassigning primaryModel
+        // keeps the call site below byte-identical to upstream.
+        guard let availableModel = await LLMCooldownManager.shared.effectivePrimary(primaryModel, fallback: retryModel) else {
+            return PostProcessingResult(transcript: transcript.trimmingCharacters(in: .whitespacesAndNewlines), prompt: "")
+        }
+        primaryModel = availableModel
 
         do {
             return try await process(
@@ -341,8 +345,12 @@ Behavior:
         var primaryModel = resolvedPrimaryModel()
         let retryModel = resolvedRetryModel(for: primaryModel)
 
-        // Circuit breaker: swap to the fallback up-front if the primary is cooling down.
-        primaryModel = await LLMCooldownManager.shared.effectivePrimary(primaryModel, fallback: retryModel)
+        // Circuit breaker: pick a model that isn't cooling down. If BOTH are cooling, skip the
+        // transform and return the selection unchanged rather than send a doomed request.
+        guard let availableModel = await LLMCooldownManager.shared.effectivePrimary(primaryModel, fallback: retryModel) else {
+            return PostProcessingResult(transcript: selectedText, prompt: "")
+        }
+        primaryModel = availableModel
 
         do {
             return try await processCommandTransform(
