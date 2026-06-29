@@ -1,6 +1,9 @@
 import Foundation
 import ApplicationServices
 import AppKit
+import OSLog
+
+private let ctxLog = Logger(subsystem: "com.zachlatta.freeflow", category: "AppContext")
 
 struct AppSelectionSnapshot {
     let appName: String?
@@ -14,12 +17,21 @@ struct AppContext {
     let bundleIdentifier: String?
     let windowTitle: String?
     let selectedText: String?
+    // Text and caret around the insertion point, captured by AccessibilityTextReader at recording time.
+    // Default to nil so callers that don't carry surrounding text (e.g. the retry path) still compile.
+    var precedingText: String? = nil
+    var followingText: String? = nil
+    var cursorPosition: String? = nil
     let currentActivity: String
     let contextSystemPrompt: String?
     let contextPrompt: String?
     let screenshotDataURL: String?
     let screenshotMimeType: String?
     let screenshotError: String?
+    /// Which read method resolved the surrounding text (e.g. axAPI, axWebTextMarker, keyboardSimulation); for diagnostics, not logic.
+    var contextExtractionMethod: String? = nil
+    // App kind ("native" / "webView" / "unknown") for diagnostics, not logic.
+    var appKind: String? = nil
 
     var contextSummary: String {
         currentActivity
@@ -73,15 +85,17 @@ Return only two sentences, no labels, no markdown, no extra commentary.
 
     func collectSelectionSnapshot() -> AppSelectionSnapshot {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            ctxLog.warning("collectSelectionSnapshot: no frontmost application")
             return AppSelectionSnapshot(
-                appName: nil,
-                bundleIdentifier: nil,
-                windowTitle: nil,
+                appName: nil, bundleIdentifier: nil, windowTitle: nil,
                 selectedText: nil
             )
         }
 
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        let bundleID   = frontmostApp.bundleIdentifier ?? "unknown"
+        ctxLog.info("collectSelectionSnapshot: app=\(frontmostApp.localizedName ?? "?", privacy: .public) bundle=\(bundleID, privacy: .public)")
+
         return AppSelectionSnapshot(
             appName: frontmostApp.localizedName,
             bundleIdentifier: frontmostApp.bundleIdentifier,
@@ -90,35 +104,49 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         )
     }
 
-    func collectContext() async -> AppContext {
+    func collectContext(selectionSnapshot: AppSelectionSnapshot? = nil) async -> AppContext {
+        let collectStart       = ContinuousClock.now
         let contextSystemPrompt = resolveContextPrompt()
 
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+            ctxLog.error("collectContext: no frontmost application")
             return AppContext(
-                appName: nil,
-                bundleIdentifier: nil,
-                windowTitle: nil,
-                selectedText: nil,
+                appName: nil, bundleIdentifier: nil, windowTitle: nil, selectedText: nil,
+                precedingText: nil, followingText: nil, cursorPosition: nil,
                 currentActivity: "You are dictating in an unrecognized context.",
-                contextSystemPrompt: contextSystemPrompt,
-                contextPrompt: nil,
-                screenshotDataURL: nil,
-                screenshotMimeType: nil,
+                contextSystemPrompt: contextSystemPrompt, contextPrompt: nil,
+                screenshotDataURL: nil, screenshotMimeType: nil,
                 screenshotError: "No frontmost application"
             )
         }
 
-        let appName = frontmostApp.localizedName
+        let appName          = frontmostApp.localizedName
         let bundleIdentifier = frontmostApp.bundleIdentifier
-        let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        let appElement       = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        ctxLog.info("collectContext: app=\(appName ?? "?", privacy: .public) bundle=\(bundleIdentifier ?? "?", privacy: .public)")
 
-        let windowTitle = focusedWindowTitle(from: appElement) ?? appName
-        let selectedText = selectedText(from: appElement)
+        let windowTitle  = focusedWindowTitle(from: appElement) ?? appName
+        // Use the RAW selected text (untrimmed) so the formatter's space restoration on
+        // replacement (Phase 4C) keeps the selection's edge spaces.
+        let selectedText = selectionSnapshot?.selectedText ?? self.rawSelectedText(from: appElement)
+
+        // Async AX read. Non-destructive: NO keyboard simulation here. If the AX/TextMarker
+        // read can't resolve context, the caller falls back to the start-of-recording snapshot
+        // (and, only as a true last resort in web/Electron, a keyboard read) — so the live
+        // context capture never moves the caret.
+        ctxLog.info("collectContext: starting async AX read")
+        let surrounding = await AccessibilityTextReader.readSurroundingTextWithSync(
+            from: appElement,
+            allowKeyboardSelection: false
+        )
+        ctxLog.info("collectContext: AX read done — hasContext=\(surrounding.hasContext, privacy: .public) method=\(surrounding.extractionMethod.rawValue, privacy: .public)")
+
         let screenshot = captureActiveWindowScreenshot(
             processIdentifier: frontmostApp.processIdentifier,
             appElement: appElement,
             focusedWindowTitle: windowTitle
         )
+
         let currentActivity: String
         let contextPrompt: String?
         if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -153,17 +181,19 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             contextPrompt = nil
         }
 
+        let elapsed = ContinuousClock.now - collectStart
+        ctxLog.info("collectContext: complete in \(elapsed.formatted(), privacy: .public) — prec=\(surrounding.precedingText?.count ?? -1)ch foll=\(surrounding.followingText?.count ?? -1)ch")
+
         return AppContext(
-            appName: appName,
-            bundleIdentifier: bundleIdentifier,
-            windowTitle: windowTitle,
+            appName: appName, bundleIdentifier: bundleIdentifier, windowTitle: windowTitle,
             selectedText: selectedText,
-            currentActivity: currentActivity,
-            contextSystemPrompt: contextSystemPrompt,
-            contextPrompt: contextPrompt,
-            screenshotDataURL: screenshot.dataURL,
-            screenshotMimeType: screenshot.mimeType,
-            screenshotError: screenshot.error
+            precedingText: surrounding.precedingText, followingText: surrounding.followingText,
+            cursorPosition: surrounding.cursorPosition.rawValue,
+            currentActivity: currentActivity, contextSystemPrompt: contextSystemPrompt,
+            contextPrompt: contextPrompt, screenshotDataURL: screenshot.dataURL,
+            screenshotMimeType: screenshot.mimeType, screenshotError: screenshot.error,
+            contextExtractionMethod: surrounding.extractionMethod.rawValue,
+            appKind: surrounding.appKind.rawValue
         )
     }
 
@@ -321,19 +351,6 @@ Selected text: \(selectedText ?? "None")
 
         if let windowTitle = accessibilityString(from: focusedWindow, attribute: kAXTitleAttribute as CFString) {
             return trimmedText(windowTitle)
-        }
-
-        return nil
-    }
-
-    private func selectedText(from appElement: AXUIElement) -> String? {
-        if let focusedElement = accessibilityElement(from: appElement, attribute: kAXFocusedUIElementAttribute as CFString),
-           let selectedText = accessibilityString(from: focusedElement, attribute: kAXSelectedTextAttribute as CFString) {
-            return trimmedText(selectedText)
-        }
-
-        if let selectedText = accessibilityString(from: appElement, attribute: kAXSelectedTextAttribute as CFString) {
-            return trimmedText(selectedText)
         }
 
         return nil

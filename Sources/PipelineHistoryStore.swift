@@ -101,6 +101,14 @@ final class PipelineHistoryStore {
                 entity.contextAppName = item.contextAppName
                 entity.contextBundleIdentifier = item.contextBundleIdentifier
                 entity.contextWindowTitle = item.contextWindowTitle
+                entity.precedingText = item.precedingText
+                entity.followingText = item.followingText
+                entity.formattedTranscript = item.formattedTranscript
+                entity.cursorPosition = item.cursorPosition
+                entity.contextFormatRule = item.contextFormatRule
+                entity.isBlindApp = NSNumber(value: item.isBlindApp ?? false)
+                entity.extractionMethod = item.extractionMethod
+                entity.appKind = item.appKind
                 try saveContext()
             } catch {
                 thrownError = error
@@ -210,6 +218,14 @@ final class PipelineHistoryStore {
                 entity.contextAppName = item.contextAppName
                 entity.contextBundleIdentifier = item.contextBundleIdentifier
                 entity.contextWindowTitle = item.contextWindowTitle
+                entity.precedingText = item.precedingText
+                entity.followingText = item.followingText
+                entity.formattedTranscript = item.formattedTranscript
+                entity.cursorPosition = item.cursorPosition
+                entity.contextFormatRule = item.contextFormatRule
+                entity.isBlindApp = NSNumber(value: item.isBlindApp ?? false)
+                entity.extractionMethod = item.extractionMethod
+                entity.appKind = item.appKind
                 try saveContext()
             } catch {
                 thrownError = error
@@ -287,7 +303,15 @@ final class PipelineHistoryStore {
             audioFileName: entity.audioFileName,
             contextAppName: entity.contextAppName,
             contextBundleIdentifier: entity.contextBundleIdentifier,
-            contextWindowTitle: entity.contextWindowTitle
+            contextWindowTitle: entity.contextWindowTitle,
+            precedingText: entity.precedingText,
+            followingText: entity.followingText,
+            formattedTranscript: entity.formattedTranscript,
+            cursorPosition: entity.cursorPosition,
+            contextFormatRule: entity.contextFormatRule,
+            isBlindApp: entity.isBlindApp?.boolValue ?? false,
+            extractionMethod: entity.extractionMethod,
+            appKind: entity.appKind
         )
     }
 
@@ -319,7 +343,15 @@ final class PipelineHistoryStore {
             makeAttribute(name: "audioFileName", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextAppName", type: .stringAttributeType, isOptional: true),
             makeAttribute(name: "contextBundleIdentifier", type: .stringAttributeType, isOptional: true),
-            makeAttribute(name: "contextWindowTitle", type: .stringAttributeType, isOptional: true)
+            makeAttribute(name: "contextWindowTitle", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "precedingText", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "followingText", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "formattedTranscript", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "cursorPosition", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "contextFormatRule", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "isBlindApp", type: .booleanAttributeType, isOptional: true, defaultValue: false),
+            makeAttribute(name: "extractionMethod", type: .stringAttributeType, isOptional: true),
+            makeAttribute(name: "appKind", type: .stringAttributeType, isOptional: true)
         ]
 
         model.entities = [entity]
@@ -364,4 +396,20 @@ final class PipelineHistoryEntry: NSManagedObject {
     @NSManaged var contextAppName: String?
     @NSManaged var contextBundleIdentifier: String?
     @NSManaged var contextWindowTitle: String?
+    /// Stored text just before the cursor for this saved dictation.
+    @NSManaged var precedingText: String?
+    /// Stored text just after the cursor for this saved dictation.
+    @NSManaged var followingText: String?
+    /// Stored transcript after smart-paste formatting was applied.
+    @NSManaged var formattedTranscript: String?
+    /// Stored cursor position in the field (e.g. start/middle/end/unknown).
+    @NSManaged var cursorPosition: String?
+    /// Stored smart-paste formatting rule applied to this dictation.
+    @NSManaged var contextFormatRule: String?
+    /// Stored flag: true when no surrounding text could be read (the app was "blind"). NSNumber-boxed Bool for Core Data.
+    @NSManaged var isBlindApp: NSNumber?
+    /// Stored read method that produced the surrounding text (e.g. axAPI, keyboardSimulation).
+    @NSManaged var extractionMethod: String?
+    /// Stored app kind of the target field: "native", "webView", or "unknown".
+    @NSManaged var appKind: String?
 }

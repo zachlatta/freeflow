@@ -1674,6 +1674,9 @@ struct PromptsSettingsView: View {
             bundleIdentifier: "com.zachlatta.freeflow",
             windowTitle: "System Prompt Test",
             selectedText: nil,
+            precedingText: nil,
+            followingText: nil,
+            cursorPosition: nil,
             currentActivity: "User is testing the system prompt in \(AppName.displayName) settings.",
             contextSystemPrompt: nil,
             contextPrompt: nil,
@@ -2328,6 +2331,89 @@ struct RunLogEntryView: View {
                             }
                         )
                     }
+
+                    // Step 4: Contextual Formatting (Smart Paste)
+                    PipelineStepView(
+                        number: 4,
+                        title: "Smart Paste Formatting",
+                        content: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                // Distinguish nil (the read failed) from "" (read succeeded but empty).
+                                // "Has text" needs a real character; a stray space/newline does not count.
+                                let hasText = (item.precedingText?.contains(where: { !$0.isWhitespace }) ?? false)
+                                    || (item.followingText?.contains(where: { !$0.isWhitespace }) ?? false)
+                                let readFailed = item.precedingText == nil && item.followingText == nil
+
+                                Text("App Type: \(ContextDebugLabels.appType(item.appKind))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("How text was read: \(ContextDebugLabels.howTextWasRead(item.extractionMethod))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("Text around cursor: \(ContextDebugLabels.surroundingText(hasText: hasText, readFailed: readFailed))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                if let pText = item.precedingText {
+                                    Text("Preceding Text:")
+                                        .font(.caption.bold())
+                                    Text("\"\(pText)\"")
+                                        .font(.system(.caption, design: .monospaced))
+                                        .textSelection(.enabled)
+                                } else {
+                                    Text("Preceding Text: nil")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(.red)
+                                }
+
+                                Text("Raw LLM Output:")
+                                    .font(.caption.bold())
+                                Text("\"\(item.postProcessedTranscript)\"")
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+
+                                if let fText = item.formattedTranscript {
+                                    Text("Formatted Output:")
+                                        .font(.caption.bold())
+                                    Text("\"\(fText)\"")
+                                        .font(.system(.caption, design: .monospaced))
+                                        .textSelection(.enabled)
+                                } else {
+                                    Text("Formatted Output: nil")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(.red)
+                                }
+
+                                if let flText = item.followingText {
+                                    Text("Following Text:")
+                                        .font(.caption.bold())
+                                    Text("\"\(flText)\"")
+                                        .font(.system(.caption, design: .monospaced))
+                                        .textSelection(.enabled)
+                                } else {
+                                    Text("Following Text: nil")
+                                        .font(.caption.bold())
+                                        .foregroundStyle(.red)
+                                }
+
+                                let finalResult = "\(item.precedingText ?? "")\(item.formattedTranscript ?? item.postProcessedTranscript)\(item.followingText ?? "")"
+                                Text("Resulting Text:")
+                                    .font(.caption.bold())
+                                Text("\"\(finalResult)\"")
+                                    .font(.system(.caption, design: .monospaced))
+                                    .textSelection(.enabled)
+
+                                Text("Smart paste: \(ContextDebugLabels.ruleSummary(item.contextFormatRule))")
+                                    .font(.caption)
+                                    .foregroundStyle(.blue)
+                                    .padding(.top, 4)
+                            }
+                            .padding(8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(nsColor: .controlBackgroundColor))
+                            .cornerRadius(4)
+                        }
+                    )
 
                 }
                 .padding(12)
