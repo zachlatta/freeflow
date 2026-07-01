@@ -197,6 +197,59 @@ Behavior:
         }
     }
 
+    /// Translate a raw transcript into the target language without
+    /// performing any of the polishing normally applied by the cleanup
+    /// pipeline. Preserves original phrasing 1:1 — no filler removal,
+    /// no reformatting, no rewording, no punctuation additions beyond
+    /// what's grammatically required by the target language.
+    ///
+    /// Used by the "Preserve exact wording" path when the user has
+    /// also configured an Output Language: skipping the LLM entirely
+    /// there would silently drop translation, so we route through a
+    /// minimal translate-only prompt instead.
+    func translateVerbatim(
+        transcript: String,
+        targetLanguage: String
+    ) async throws -> PostProcessingResult {
+        let trimmedTranscript = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTranscript.isEmpty else {
+            throw PostProcessingError.invalidInput("Transcript must not be empty")
+        }
+        let trimmedLanguage = targetLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedLanguage.isEmpty else {
+            throw PostProcessingError.invalidInput("Target language must not be empty")
+        }
+
+        let timeoutSeconds = postProcessingTimeoutSeconds
+        return try await withThrowingTaskGroup(of: PostProcessingResult.self) { group in
+            group.addTask { [weak self] in
+                guard let self else {
+                    throw PostProcessingError.invalidResponse("Post-processing service deallocated")
+                }
+                return try await self.translateVerbatimWithFallback(
+                    transcript: trimmedTranscript,
+                    targetLanguage: trimmedLanguage
+                )
+            }
+
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                throw PostProcessingError.requestTimedOut(timeoutSeconds)
+            }
+
+            do {
+                guard let result = try await group.next() else {
+                    throw PostProcessingError.invalidResponse("No translation result")
+                }
+                group.cancelAll()
+                return result
+            } catch {
+                group.cancelAll()
+                throw error
+            }
+        }
+    }
+
     func commandTransform(
         selectedText: String,
         voiceCommand: String,
@@ -626,6 +679,143 @@ Model: \(model)
 
     static func applyOutputLanguage(_ prompt: String, language: String) -> String {
         prompt + "\n\nIMPORTANT: Translate the final cleaned text into \(language). Output ONLY in \(language), regardless of the original spoken language."
+    }
+
+    /// System prompt used for verbatim translation. Deliberately
+    /// minimal — the whole point of this path is to translate word-
+    /// for-word without cleanup, so we avoid every rewrite / formatting
+    /// instruction from `defaultSystemPrompt`.
+    static func verbatimTranslationSystemPrompt(targetLanguage: String) -> String {
+        """
+        You are a literal translator.
+
+        Translate the user's transcript into \(targetLanguage) as literally as possible.
+
+        Rules:
+        - Preserve every word the user spoke, including filler words such as "um", "uh", "like", "you know", false starts, and repetitions. Translate these into the closest natural equivalent in \(targetLanguage) rather than deleting them.
+        - Do NOT reword, summarize, restructure, or improve the sentence.
+        - Do NOT correct grammar mistakes, awkward phrasing, or informal wording. Keep the same register and flow.
+        - Do NOT add punctuation beyond what the target language grammatically requires. If the source has no punctuation, add only the minimum needed to make the sentence readable in \(targetLanguage).
+        - Do NOT wrap the output in quotes or explain your translation. Return only the translated text.
+        - Keep profanity, slang, and explicit language intact.
+        - Output ONLY in \(targetLanguage), regardless of the source language.
+        """
+    }
+
+    private func translateVerbatimWithFallback(
+        transcript: String,
+        targetLanguage: String
+    ) async throws -> PostProcessingResult {
+        let primaryModel = resolvedPrimaryModel()
+        let retryModel = resolvedRetryModel(for: primaryModel)
+        do {
+            return try await translateVerbatim(
+                transcript: transcript,
+                targetLanguage: targetLanguage,
+                model: primaryModel
+            )
+        } catch let error as PostProcessingError {
+            let shouldFallback: Bool
+            switch error {
+            case .requestFailed(let statusCode, _):
+                shouldFallback = statusCode == 429
+            case .emptyOutput:
+                shouldFallback = true
+            default:
+                shouldFallback = false
+            }
+            guard shouldFallback, let retryModel else { throw error }
+            return try await translateVerbatim(
+                transcript: transcript,
+                targetLanguage: targetLanguage,
+                model: retryModel
+            )
+        }
+    }
+
+    private func translateVerbatim(
+        transcript: String,
+        targetLanguage: String,
+        model: String
+    ) async throws -> PostProcessingResult {
+        var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = postProcessingTimeoutSeconds
+
+        let systemPrompt = Self.verbatimTranslationSystemPrompt(targetLanguage: targetLanguage)
+        let userMessage = """
+        Translate the transcript below into \(targetLanguage), keeping the wording literal.
+
+        TRANSCRIPT:
+        <<<TRANSCRIPT
+        \(transcript)
+        TRANSCRIPT
+        """
+
+        let promptForDisplay = """
+        Model: \(model)
+
+        [System]
+        \(systemPrompt)
+
+        [User]
+        \(userMessage)
+        """
+
+        var payload: [String: Any] = [
+            "model": model,
+            "temperature": 0.0,
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": userMessage],
+            ],
+        ]
+        let config = ModelConfiguration.config(for: model)
+        if let maxTokens = config.maxCompletionTokens {
+            payload["max_completion_tokens"] = maxTokens
+        } else if model == defaultModel {
+            payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
+        }
+        if let effort = config.reasoningEffort {
+            payload["reasoning_effort"] = effort
+        } else if model == defaultModel {
+            payload["reasoning_effort"] = defaultModelReasoningEffort
+        }
+        if let include = config.includeReasoning {
+            payload["include_reasoning"] = include
+        } else if model == defaultModel {
+            payload["include_reasoning"] = false
+        }
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
+
+        let (data, response) = try await LLMAPITransport.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw PostProcessingError.invalidResponse("No HTTP response")
+        }
+        guard httpResponse.statusCode == 200 else {
+            let message = String(data: data, encoding: .utf8) ?? ""
+            throw PostProcessingError.requestFailed(httpResponse.statusCode, message)
+        }
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let rawContent = message["content"] as? String else {
+            throw PostProcessingError.invalidResponse("Missing choices[0].message.content")
+        }
+
+        var content = rawContent
+        if config.shouldStripThinkTags {
+            content = ModelConfiguration.stripThinkTags(content)
+        }
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PostProcessingError.emptyOutput
+        }
+        let sanitized = sanitizePostProcessedTranscript(content)
+        return PostProcessingResult(transcript: sanitized, prompt: promptForDisplay)
     }
 
     private func sanitizePostProcessedTranscript(_ value: String) -> String {
