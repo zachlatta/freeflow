@@ -223,6 +223,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let preserveClipboardStorageKey = "preserve_clipboard"
+    private let preserveExactWordingStorageKey = "preserve_exact_wording"
     private let keepDictationInClipboardHistoryStorageKey = "keep_dictation_in_clipboard_history"
     private let pressEnterVoiceCommandStorageKey = "press_enter_voice_command_enabled"
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
@@ -505,6 +506,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var preserveExactWording: Bool {
+        didSet {
+            UserDefaults.standard.set(preserveExactWording, forKey: preserveExactWordingStorageKey)
+        }
+    }
+
     @Published var keepDictationInClipboardHistory: Bool {
         didSet {
             UserDefaults.standard.set(keepDictationInClipboardHistory, forKey: keepDictationInClipboardHistoryStorageKey)
@@ -676,6 +683,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let preserveClipboard = UserDefaults.standard.object(forKey: preserveClipboardStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
+        let preserveExactWording = UserDefaults.standard.bool(forKey: preserveExactWordingStorageKey)
         let keepDictationInClipboardHistory = UserDefaults.standard.bool(forKey: keepDictationInClipboardHistoryStorageKey)
         let realtimeStreamingEnabled = UserDefaults.standard.bool(forKey: realtimeStreamingEnabledStorageKey)
         let realtimeStreamingModel = UserDefaults.standard.string(forKey: realtimeStreamingModelStorageKey) ?? ""
@@ -750,6 +758,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.outputLanguage = outputLanguage
         self.shortcutStartDelay = shortcutStartDelay
         self.preserveClipboard = preserveClipboard
+        self.preserveExactWording = preserveExactWording
         self.keepDictationInClipboardHistory = keepDictationInClipboardHistory
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
@@ -2426,6 +2435,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         case voiceMacro(command: String)
         case postProcessingSucceeded
         case postProcessingFailedFallback
+        case preservedExactWording
         case commandModeSucceeded(invocation: CommandInvocation)
         case commandModeFailedFallback(invocation: CommandInvocation)
 
@@ -2441,6 +2451,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return isRetry
                     ? "Post-processing failed on retry, using raw transcript"
                     : "Post-processing failed, using raw transcript"
+            case .preservedExactWording:
+                return "Preserved exact wording, skipped post-processing"
             case .commandModeSucceeded(let invocation):
                 return "Edit mode succeeded (\(invocation.rawValue))"
             case .commandModeFailedFallback(let invocation):
@@ -2484,7 +2496,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
             os_log(.info, log: recordingLog, "Voice macro triggered: %{public}@", macro.command)
             return (macro.payload, .voiceMacro(command: macro.command), "")
         }
-        
+
+        // Preserve-exact-wording mode: skip the LLM cleanup step so the
+        // raw transcript from the transcription service is used verbatim,
+        // including profanity and informal wording.
+        if preserveExactWording {
+            return (trimmedRawTranscript, .preservedExactWording, "")
+        }
+
         do {
             let result = try await postProcessingService.postProcess(
                 transcript: trimmedRawTranscript,

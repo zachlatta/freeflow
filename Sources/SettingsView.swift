@@ -663,6 +663,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Edit Mode", icon: "pencil") {
                     commandModeSection
                 }
+                SettingsCard("Cleanup", icon: "sparkles") {
+                    cleanupSection
+                }
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
                     clipboardSection
                 }
@@ -1184,6 +1187,18 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             }
+        }
+    }
+
+    // MARK: Cleanup
+
+    private var cleanupSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Preserve exact wording", isOn: $appState.preserveExactWording)
+
+            Text("When on, \(AppName.displayName) skips the LLM cleanup step and pastes the raw transcript from the transcription service verbatim, including informal or explicit words. Voice macros and Edit Mode still run.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
