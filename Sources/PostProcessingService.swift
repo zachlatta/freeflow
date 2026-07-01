@@ -814,8 +814,26 @@ Model: \(model)
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw PostProcessingError.emptyOutput
         }
-        let sanitized = sanitizePostProcessedTranscript(content)
+        let sanitized = sanitizeVerbatimTranslation(content)
         return PostProcessingResult(transcript: sanitized, prompt: promptForDisplay)
+    }
+
+    /// Sanitizer for the verbatim translation path. Deliberately
+    /// omits the `"EMPTY"` sentinel that `sanitizePostProcessedTranscript`
+    /// uses — that sentinel is reserved by the cleanup prompt (which
+    /// asks the LLM to return `EMPTY` when there's nothing to paste).
+    /// The verbatim prompt has no such instruction, so a legitimate
+    /// literal translation of the word "empty" must reach the user
+    /// instead of being silently dropped.
+    private func sanitizeVerbatimTranslation(_ value: String) -> String {
+        var result = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !result.isEmpty else { return "" }
+        if result.hasPrefix("\"") && result.hasSuffix("\"") && result.count > 1 {
+            result.removeFirst()
+            result.removeLast()
+            result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return result
     }
 
     private func sanitizePostProcessedTranscript(_ value: String) -> String {
