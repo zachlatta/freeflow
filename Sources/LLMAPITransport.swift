@@ -9,8 +9,8 @@ enum LLMAPITransport {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
-        configuration.timeoutIntervalForRequest = 20
-        configuration.timeoutIntervalForResource = 30
+        configuration.timeoutIntervalForRequest = 120   // 2 min to start receiving each packet
+        configuration.timeoutIntervalForResource = 300  // 5 min total per request (local LLMs are slow)
         return URLSession(configuration: configuration)
     }
 
@@ -24,9 +24,14 @@ enum LLMAPITransport {
         for request: URLRequest,
         from bodyData: Data
     ) async throws -> (Data, URLResponse) {
-        // Use a fresh session for each upload so a bad reused connection cannot
-        // poison subsequent transcription uploads.
-        let session = makeEphemeralSession()
+        // Fresh session per upload — no poisoned connection re-use.
+        // Use generous timeouts: local ASR + chunking can take minutes.
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.timeoutIntervalForRequest = 300   // 5 min to start receiving response
+        configuration.timeoutIntervalForResource = .infinity  // no cap on total transfer
+        let session = URLSession(configuration: configuration)
         defer { session.finishTasksAndInvalidate() }
         return try await session.upload(for: request, from: bodyData)
     }
