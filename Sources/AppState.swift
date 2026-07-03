@@ -3330,8 +3330,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
+        let recordingDuration: String? = {
+            guard let url = URL(string: "file://" + audioPath.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)!),
+                  let file = try? AVAudioFile(forReading: url) else { return nil }
+            let seconds = Int(Double(file.length) / file.fileFormat.sampleRate)
+            guard seconds > 0 else { return nil }
+            return seconds >= 60 ? "\(seconds / 60)m \(seconds % 60)s" : "\(seconds)s"
+        }()
+
         let hostingView = NSHostingView(rootView: TranscriptionProgressPanel(
             audioPath: audioPath,
+            recordingDuration: recordingDuration,
             onDismiss: { [weak panel] in panel?.orderOut(nil) },
             onCancel: { [weak self, weak panel] in
                 panel?.orderOut(nil)
