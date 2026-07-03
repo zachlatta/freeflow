@@ -233,6 +233,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let outputLanguageStorageKey = "output_language"
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
+    private let prefetchTranscriptionEnabledStorageKey = "prefetch_transcription_enabled"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
@@ -480,6 +481,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// When true, audio is transcribed in 28-second background chunks while
+    /// recording so only the tail needs processing after the user stops.
+    /// Ignored when ``realtimeStreamingEnabled`` is also true (realtime takes
+    /// priority). Works with any HTTP transcription provider.
+    @Published var prefetchTranscriptionEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(
+                prefetchTranscriptionEnabled,
+                forKey: prefetchTranscriptionEnabledStorageKey
+            )
+        }
+    }
+
     @Published var dictationAudioInterruptionEnabled: Bool {
         didSet {
             UserDefaults.standard.set(
@@ -601,6 +615,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
     private var realtimeService: RealtimeTranscriptionService?
+    private var prefetchTranscriber: PrefetchTranscriber?
     private var automaticTerminationDisabled = false
     private var activeAudioInterruption: ActiveAudioInterruption?
     private var pendingOverlayDismissToken: UUID?
@@ -668,6 +683,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
         let realtimeStreamingEnabled = UserDefaults.standard.bool(forKey: realtimeStreamingEnabledStorageKey)
         let realtimeStreamingModel = UserDefaults.standard.string(forKey: realtimeStreamingModelStorageKey) ?? ""
+        let prefetchTranscriptionEnabled = UserDefaults.standard.bool(forKey: prefetchTranscriptionEnabledStorageKey)
         let dictationAudioInterruptionEnabled = UserDefaults.standard.bool(
             forKey: dictationAudioInterruptionEnabledStorageKey
         )
@@ -740,6 +756,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.preserveClipboard = preserveClipboard
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
+        self.prefetchTranscriptionEnabled = prefetchTranscriptionEnabled
         self.dictationAudioInterruptionEnabled = dictationAudioInterruptionEnabled
         self.isPressEnterVoiceCommandEnabled = isPressEnterVoiceCommandEnabled
         self.alertSoundsEnabled = alertSoundsEnabled
@@ -2176,6 +2193,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         startRealtimeStreamingIfEnabled()
+        startPrefetchTranscriberIfEnabled()
 
         // Start engine on background thread so UI isn't blocked
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -2431,12 +2449,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// Await the realtime WebSocket's final transcript. If it errors out (or
-    /// was never started) fall back to the file-based POST so the user still
-    /// gets a transcript. Runs the realtime commit and file upload in that
-    /// strict order to avoid paying for both when realtime succeeds.
+    /// Resolve the final transcript, trying sources in priority order:
+    ///   1. realtime WebSocket (`realtimeService`) — lowest latency when available
+    ///   2. HTTP pre-fetch (`prefetchTranscriber`) — background chunks already done
+    ///   3. plain file upload (`fileService`) — universal fallback
     private static func resolveRawTranscript(
         realtimeService: RealtimeTranscriptionService?,
+        prefetchTranscriber: PrefetchTranscriber?,
         fileService: TranscriptionService,
         fileURL: URL
     ) async throws -> String {
@@ -2452,8 +2471,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 throw CancellationError()
             } catch {
                 try Task.checkCancellation()
-                return try await fileService.transcribe(fileURL: fileURL)
+                // Realtime failed; fall through to prefetch or file upload.
             }
+        }
+        if let prefetchTranscriber {
+            try Task.checkCancellation()
+            let merged = await prefetchTranscriber.commitAndAwaitFinal()
+            if !merged.isEmpty { return merged }
+            // Empty result: fall through to file upload.
         }
         return try await fileService.transcribe(fileURL: fileURL)
     }
@@ -2539,6 +2564,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
             let activeRealtime = self.realtimeService
             self.realtimeService = nil
+            let activePrefetch = self.prefetchTranscriber
+            self.prefetchTranscriber = nil
             self.audioRecorder.onPCM16Samples = nil
             self.transcriptionTask?.cancel()
             guard self.isTranscribing else {
@@ -2559,6 +2586,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     let transcriptionService = try self.makeTranscriptionService()
                     async let transcript = Self.resolveRawTranscript(
                         realtimeService: activeRealtime,
+                        prefetchTranscriber: activePrefetch,
                         fileService: transcriptionService,
                         fileURL: transcriptionFileURL
                     )
@@ -2817,6 +2845,26 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioRecorder.onPCM16Samples = nil
         realtimeService?.cancel()
         realtimeService = nil
+        prefetchTranscriber = nil   // discard any in-progress accumulation
+    }
+
+    /// Start background HTTP pre-transcription if enabled and realtime is off.
+    /// PCM16 samples (24 kHz mono) are accumulated and transcribed in 28-second
+    /// chunks in the background, so the majority of a long recording is already
+    /// processed by the time the user presses stop.
+    private func startPrefetchTranscriberIfEnabled() {
+        guard prefetchTranscriptionEnabled, !realtimeStreamingEnabled else { return }
+        guard let service = try? makeTranscriptionService() else { return }
+        let transcriber = PrefetchTranscriber(service: service)
+        prefetchTranscriber = transcriber
+        audioRecorder.onPCM16Samples = { [weak transcriber] data in
+            transcriber?.appendPCM16(data)
+        }
+    }
+
+    private func tearDownPrefetchTranscriber() {
+        audioRecorder.onPCM16Samples = nil
+        prefetchTranscriber = nil
     }
 
     private func startContextCapture() {

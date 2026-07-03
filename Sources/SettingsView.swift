@@ -273,10 +273,20 @@ struct ProviderSettingsFields: View {
             Divider()
 
             Toggle(
-                "Stream audio while recording (realtime)",
+                "Begin transcribing while recording",
+                isOn: $appState.prefetchTranscriptionEnabled
+            )
+            Text("Submits audio to the transcription provider in 28-second background chunks while you speak. By the time you press stop, most of the transcript is already ready. Works with any HTTP transcription provider — no special server required.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
+            Toggle(
+                "Stream audio while recording (realtime, requires WebSocket)",
                 isOn: $appState.realtimeStreamingEnabled
             )
-            Text("Streams audio through the provider's OpenAI-compatible /v1/realtime WebSocket so transcription runs while you speak.")
+            Text("Streams audio through the provider's OpenAI-compatible /v1/realtime WebSocket. Takes priority over background transcription when both are enabled.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
