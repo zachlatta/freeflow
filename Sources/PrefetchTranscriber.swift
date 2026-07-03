@@ -8,6 +8,10 @@ import Foundation
 /// transcription service.  Chunks are processed *serially* so upstream
 /// API rate limits are respected.
 ///
+/// If `saveURL` is provided, each completed chunk's transcript is appended
+/// to that file immediately after transcription — so a crash loses at most
+/// one in-flight chunk rather than the entire session.
+///
 /// Call `appendPCM16(_:)` from any thread while recording, then
 /// `commitAndAwaitFinal()` from an async context when recording stops.
 /// The full merged transcript is returned; individual chunk results are
@@ -23,6 +27,11 @@ final class PrefetchTranscriber: @unchecked Sendable {
     private static let bytesPerSample: Int = 2     // PCM16
     private static let chunkBytes: Int = chunkSeconds * sampleRate * bytesPerSample
 
+    /// Optional file that receives each chunk's transcript as it completes.
+    /// Created (or truncated) at init time; appended after every chunk so
+    /// partial transcripts survive an app crash.
+    private let saveURL: URL?
+
     // MARK: State (guarded by lock)
 
     private let lock = NSLock()
@@ -35,8 +44,12 @@ final class PrefetchTranscriber: @unchecked Sendable {
 
     // MARK: Init
 
-    init(service: TranscriptionService) {
+    init(service: TranscriptionService, saveURL: URL? = nil) {
         self.service = service
+        self.saveURL = saveURL
+        if let url = saveURL {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
     }
 
     // MARK: Public API
@@ -69,6 +82,7 @@ final class PrefetchTranscriber: @unchecked Sendable {
         if !tail.isEmpty {
             if let text = await transcribeWAV(Self.buildWAV(from: tail)), !text.isEmpty {
                 lock.withLock { segments.append(text) }
+                appendToSaveFile(text)
             }
         }
 
@@ -88,12 +102,26 @@ final class PrefetchTranscriber: @unchecked Sendable {
         }
         chainTail = newTask
 
-        // Collect the result into `segments` once done.
+        // Collect the result into `segments` once done and persist to disk.
         Task { [weak self] in
             guard let self else { return }
             if let text = await newTask.value, !text.isEmpty {
                 self.lock.withLock { self.segments.append(text) }
+                self.appendToSaveFile(text)
             }
+        }
+    }
+
+    /// Appends one chunk's text to the durable save file.
+    /// Uses `FileHandle` for atomic append without reading the whole file.
+    private func appendToSaveFile(_ text: String) {
+        guard let url = saveURL else { return }
+        let line = text + "\n\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            handle.write(data)
         }
     }
 
