@@ -53,6 +53,8 @@ Core behavior:
 - Preserve mixed-language text exactly as mixed.
 - Preserve commands, file paths, flags, identifiers, acronyms, and vocabulary terms exactly.
 - Use context only as a formatting hint and spelling reference for words already spoken.
+- If the context includes "Text immediately before the cursor", the cleaned text will be inserted at exactly that position. Match the sentence flow: when the preceding text ends mid-sentence, continue in lowercase without a leading capital, and do not repeat words that already appear before the cursor.
+- If the context includes "Text immediately after the cursor" and it continues the same sentence, do not end the cleaned text with sentence-ending punctuation.
 - If the context clearly shows email recipients or participants, use those visible names as a strong spelling reference for close phonetic or near-miss versions of names that were actually spoken.
 - In email greetings or body text, correct a near-match like "Aisha" to the visible recipient spelling "Aysha" when it is clearly the same intended person.
 - Do not introduce a recipient or participant name that was not spoken at all.
@@ -105,7 +107,7 @@ Output hygiene:
 - Never prepend boilerplate such as "Here is the clean transcript".
 - If the transcript is empty or only filler, return exactly: EMPTY
 """
-    static let defaultSystemPromptDate = "2026-05-13"
+    static let defaultSystemPromptDate = "2026-07-05"
     static let commandModeSystemPrompt = """
 You transform highlighted text according to a spoken editing command.
 
