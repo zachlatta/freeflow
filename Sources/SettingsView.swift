@@ -348,28 +348,43 @@ struct ProviderSettingsFields: View {
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
 
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(SettingsTab.visibleCases) { tab in
-                    Button {
-                        appState.selectedSettingsTab = tab
-                    } label: {
-                        SettingsSidebarRow(title: tab.title, icon: tab.icon)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(appState.selectedSettingsTab == tab
-                                          ? Color.accentColor.opacity(0.15)
-                                          : Color.clear)
-                            )
+                HStack(spacing: 8) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(AppName.displayName)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Version \(appVersion)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 12)
+
+                ForEach(SettingsTab.visibleCases) { tab in
+                    SettingsSidebarRow(
+                        title: tab.title,
+                        icon: tab.icon,
+                        isSelected: appState.selectedSettingsTab == tab
+                    ) {
+                        appState.selectedSettingsTab = tab
+                    }
                 }
 
                 Spacer()
             }
             .padding(10)
-            .frame(width: 180)
+            .frame(width: 190)
             .background(Color(nsColor: .windowBackgroundColor))
 
             Divider()
@@ -396,22 +411,39 @@ struct SettingsView: View {
 private struct SettingsSidebarRow: View {
     let title: String
     let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .regular))
-                .frame(width: 16, height: 16, alignment: .center)
-                .foregroundStyle(.primary)
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .regular))
+                    .frame(width: 16, height: 16, alignment: .center)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
 
-            Text(title)
-                .font(.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(title)
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Color.accentColor.opacity(0.15)
+                            : Color.primary.opacity(isHovered ? 0.06 : 0)
+                    )
+            )
+            .contentShape(Rectangle())
         }
-        .frame(height: 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -1274,7 +1306,7 @@ struct GeneralSettingsView: View {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showMutedHint = muted || (volume ?? 1) < 0.10
                     }
-                    appState.playAlertSound(named: "Tink")
+                    appState.playStartSound()
                 }
                 .font(.caption)
                 .disabled(!appState.alertSoundsEnabled)
@@ -1290,9 +1322,55 @@ struct GeneralSettingsView: View {
                     .transition(.opacity)
                 }
             }
+
+            Divider()
+
+            VStack(spacing: 8) {
+                soundPickerRow("Recording start", selection: $appState.startSoundName)
+                soundPickerRow("Recording stop", selection: $appState.stopSoundName)
+                soundPickerRow("Error", selection: $appState.errorSoundName)
+            }
+            .disabled(!appState.alertSoundsEnabled)
+            .opacity(appState.alertSoundsEnabled ? 1 : 0.5)
         }
         .onChange(of: appState.alertSoundsEnabled) { enabled in
             if !enabled { showMutedHint = false }
+        }
+    }
+
+    /// The stock macOS alert sounds in /System/Library/Sounds, all loadable
+    /// by name with NSSound(named:).
+    private static let systemSoundNames = [
+        "Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero",
+        "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink",
+    ]
+
+    private func soundPickerRow(_ label: String, selection: Binding<String>) -> some View {
+        // Include an off-catalog value (e.g. set via `defaults write`) so the
+        // picker shows it instead of rendering blank.
+        var options = Self.systemSoundNames
+        if !options.contains(selection.wrappedValue) {
+            options.append(selection.wrappedValue)
+        }
+        return HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+            Spacer()
+            Picker("", selection: selection) {
+                ForEach(options, id: \.self) { name in
+                    Text(name).tag(name)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 130)
+            Button {
+                appState.playAlertSound(named: selection.wrappedValue)
+            } label: {
+                Image(systemName: "play.circle")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Preview this sound")
         }
     }
 
@@ -1315,9 +1393,12 @@ struct GeneralSettingsView: View {
                     appState.customVocabulary = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
 
-            Text("Separate entries with commas, new lines, or semicolons.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Separate entries with commas, new lines, or semicolons.")
+                Text("Teach specific mishearings with an arrow: \"cloud code -> Claude Code\". Separate multiple heard forms with \"|\": \"cloud code | clod code -> Claude Code\".")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 

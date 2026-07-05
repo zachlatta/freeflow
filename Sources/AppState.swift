@@ -227,6 +227,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let pressEnterVoiceCommandStorageKey = "press_enter_voice_command_enabled"
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
     private let soundVolumeStorageKey = "sound_volume"
+    private let startSoundNameStorageKey = "start_sound_name"
+    private let stopSoundNameStorageKey = "stop_sound_name"
+    private let errorSoundNameStorageKey = "error_sound_name"
     private let voiceMacrosStorageKey = "voice_macros"
     private let commandModeEnabledStorageKey = "command_mode_enabled"
     private let commandModeStyleStorageKey = "command_mode_style"
@@ -529,6 +532,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var startSoundName: String {
+        didSet {
+            UserDefaults.standard.set(startSoundName, forKey: startSoundNameStorageKey)
+        }
+    }
+
+    @Published var stopSoundName: String {
+        didSet {
+            UserDefaults.standard.set(stopSoundName, forKey: stopSoundNameStorageKey)
+        }
+    }
+
+    @Published var errorSoundName: String {
+        didSet {
+            UserDefaults.standard.set(errorSoundName, forKey: errorSoundNameStorageKey)
+        }
+    }
+
     private var precomputedMacros: [PrecomputedMacro] = []
 
     @Published var voiceMacros: [VoiceMacro] = [] {
@@ -557,6 +578,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var selectedSettingsTab: SettingsTab? = .general
     @Published var pipelineHistory: [PipelineHistoryItem] = []
     @Published var debugStatusMessage = "Idle"
+    /// Live input level mirrored to the menu bar icon while recording.
+    @Published var menuBarAudioLevel: Float = 0
     @Published var debugShowsUpdateReminderAfterDictation = false
     @Published var lastRawTranscript = ""
     @Published var lastPostProcessedTranscript = ""
@@ -690,6 +713,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let alertSoundsEnabled = UserDefaults.standard.object(forKey: alertSoundsEnabledStorageKey) != nil
             ? UserDefaults.standard.bool(forKey: alertSoundsEnabledStorageKey)
             : soundVolume > 0
+        let startSoundName = UserDefaults.standard.string(forKey: startSoundNameStorageKey) ?? "Tink"
+        let stopSoundName = UserDefaults.standard.string(forKey: stopSoundNameStorageKey) ?? "Pop"
+        let errorSoundName = UserDefaults.standard.string(forKey: errorSoundNameStorageKey) ?? "Basso"
         
         let initialMacros: [VoiceMacro]
         if let data = UserDefaults.standard.data(forKey: "voice_macros"),
@@ -757,6 +783,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.isPressEnterVoiceCommandEnabled = isPressEnterVoiceCommandEnabled
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
+        self.startSoundName = startSoundName
+        self.stopSoundName = stopSoundName
+        self.errorSoundName = errorSoundName
         self.voiceMacros = initialMacros
         self.pipelineHistory = savedHistory
         self.hasAccessibility = initialAccessibility
@@ -1902,7 +1931,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if triggerMode == .toggle {
             cancelPendingShortcutStart()
         }
-        playAlertSound(named: "Basso")
+        playErrorSound()
         scheduleReadyStatusReset(after: 2, matching: ["Select text to transform first"])
     }
 
@@ -1918,7 +1947,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if triggerMode == .toggle {
             cancelPendingShortcutStart()
         }
-        playAlertSound(named: "Basso")
+        playErrorSound()
         scheduleReadyStatusReset(after: 2, matching: ["Fix Edit Mode modifier"])
     }
 
@@ -1999,7 +2028,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             activeRecordingTriggerMode = nil
             currentSessionIntent = .dictation
             shortcutSessionController.reset()
-            playAlertSound(named: "Basso")
+            playErrorSound()
             showScreenshotPermissionAlert(message: message)
             return false
         }
@@ -2180,7 +2209,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     )
                 }
                 overlayShown = true
-                self.playAlertSound(named: "Tink")
+                self.playStartSound()
             }
         }
         audioRecorder.onRecordingFailure = { [weak self] error in
@@ -2207,6 +2236,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         .receive(on: DispatchQueue.main)
                         .sink { [weak self] level in
                             self?.overlayManager.updateAudioLevel(level)
+                            self?.menuBarAudioLevel = level
                         }
                 }
             } catch {
@@ -2412,6 +2442,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         sound?.play()
     }
 
+    func playStartSound() { playAlertSound(named: startSoundName) }
+    func playStopSound() { playAlertSound(named: stopSoundName) }
+    func playErrorSound() { playAlertSound(named: errorSoundName) }
+
     private func findMatchingMacro(for transcript: String) -> VoiceMacro? {
         let normalizedTranscript = normalize(transcript)
         guard !normalizedTranscript.isEmpty else { return nil }
@@ -2555,7 +2589,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         isTranscribing = true
         statusText = "Preparing audio..."
         errorMessage = nil
-        playAlertSound(named: "Pop")
+        playStopSound()
         overlayManager.showTranscribing()
         audioRecorder.stopRecording { [weak self] fileURL in
             guard let self else { return }
@@ -2999,7 +3033,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             statusText = "Screenshot Required"
             overlayManager.dismiss()
 
-            playAlertSound(named: "Basso")
+            playErrorSound()
             showScreenshotPermissionAlert(message: message)
         }
         // Non-permission errors (transient failures) — continue recording without context

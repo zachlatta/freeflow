@@ -14,6 +14,7 @@ struct FreeFlowApp: App {
             MenuBarLabel()
                 .environmentObject(appDelegate.appState)
         }
+        .menuBarExtraStyle(.window)
     }
 }
 
@@ -22,25 +23,68 @@ struct MenuBarLabel: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject var notificationManager = VocabularyNotificationManager.shared
 
-    private var iconName: String {
-        if appState.isRecording { return "record.circle" }
-        if appState.isTranscribing { return "ellipsis.circle" }
-        return "waveform"
-    }
+    /// Rolling window of recent input levels rendered as the live
+    /// menu bar waveform while recording.
+    @State private var levelHistory: [Float] = Array(repeating: 0, count: 5)
 
     var body: some View {
         HStack(spacing: 4) {
             if notificationManager.showCheckmark {
                 Image(systemName: "checkmark")
             }
-            if AppBuild.isDevBundle && !appState.isRecording && !appState.isTranscribing {
+            if appState.isRecording {
+                Image(nsImage: LiveWaveMenuBarIcon.image(levels: levelHistory))
+                    .renderingMode(.template)
+            } else if appState.isTranscribing {
+                Image(systemName: "ellipsis.circle")
+            } else if AppBuild.isDevBundle {
                 Image(nsImage: StampedMenuBarIcon.templateImage)
                     .renderingMode(.template)
             } else {
-                Image(systemName: iconName)
+                Image(systemName: "waveform")
+            }
+        }
+        .onChange(of: appState.menuBarAudioLevel) { level in
+            guard appState.isRecording else { return }
+            levelHistory.removeFirst()
+            levelHistory.append(level)
+        }
+        .onChange(of: appState.isRecording) { recording in
+            if !recording {
+                levelHistory = Array(repeating: 0, count: 5)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: notificationManager.showCheckmark)
+    }
+}
+
+/// Renders the recording-state menu bar icon: a bar per recent level
+/// sample, so the icon itself moves with the user's voice. Template
+/// image, so it stays legible in light and dark menu bars.
+enum LiveWaveMenuBarIcon {
+    static func image(levels: [Float]) -> NSImage {
+        let size = NSSize(width: 18, height: 16)
+        let barWidth: CGFloat = 2
+        let spacing: CGFloat = 1.5
+        let image = NSImage(size: size, flipped: false) { rect in
+            let count = CGFloat(levels.count)
+            let totalWidth = count * barWidth + (count - 1) * spacing
+            var x = (rect.width - totalWidth) / 2
+            NSColor.black.setFill()
+            for level in levels {
+                let clamped = CGFloat(min(max(level, 0), 1))
+                let height = 3 + clamped * 10
+                let y = (rect.height - height) / 2
+                NSBezierPath(
+                    roundedRect: NSRect(x: x, y: y, width: barWidth, height: height),
+                    xRadius: barWidth / 2, yRadius: barWidth / 2
+                ).fill()
+                x += barWidth + spacing
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 }
 
