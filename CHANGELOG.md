@@ -18,6 +18,7 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 
 ### Added
 
+- Dictation is now aware of the text surrounding the cursor: cleanup matches the sentence flow when inserting mid-sentence (no stray leading capitals or trailing periods), a separating space is added automatically when inserting directly after a word, and the trailing space after sentence punctuation is skipped when the following text already provides one.
 - Custom vocabulary entries can now map specific mishearings to the intended term with an arrow (`cloud code -> Claude Code`), and multiple heard forms can share one correction (`cloud code | clod code -> Claude Code`). Plain entries behave exactly as before.
 - The recording start, stop, and error feedback sounds are now configurable in Settings, with a picker and preview button for each event across the full set of built-in macOS alert sounds.
 

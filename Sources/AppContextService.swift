@@ -20,9 +20,21 @@ struct AppContext {
     let screenshotDataURL: String?
     let screenshotMimeType: String?
     let screenshotError: String?
+    /// Text immediately surrounding the insertion point in the focused
+    /// element, so cleanup can match capitalization, punctuation, and
+    /// sentence flow when dictating into the middle of existing text.
+    var textBeforeCursor: String? = nil
+    var textAfterCursor: String? = nil
 
     var contextSummary: String {
-        currentActivity
+        var summary = currentActivity
+        if let textBeforeCursor, !textBeforeCursor.isEmpty {
+            summary += "\nText immediately before the cursor: \"\(textBeforeCursor)\""
+        }
+        if let textAfterCursor, !textAfterCursor.isEmpty {
+            summary += "\nText immediately after the cursor: \"\(textAfterCursor)\""
+        }
+        return summary
     }
 }
 
@@ -175,6 +187,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
 
         let windowTitle = focusedWindowTitle(from: appElement) ?? appName
         let selectedText = selectedText(from: appElement)
+        let cursorContext = cursorTextContext(from: appElement)
         let screenshot = captureActiveWindowScreenshot(
             processIdentifier: frontmostApp.processIdentifier,
             appElement: appElement,
@@ -224,7 +237,9 @@ Return only two sentences, no labels, no markdown, no extra commentary.
             contextPrompt: contextPrompt,
             screenshotDataURL: screenshot.dataURL,
             screenshotMimeType: screenshot.mimeType,
-            screenshotError: screenshot.error
+            screenshotError: screenshot.error,
+            textBeforeCursor: cursorContext?.before,
+            textAfterCursor: cursorContext?.after
         )
     }
 
@@ -385,6 +400,110 @@ Selected text: \(selectedText ?? "None")
         }
 
         return nil
+    }
+
+    // MARK: - Cursor text context (issue #200)
+
+    struct CursorTextContext {
+        let before: String
+        let after: String
+    }
+
+    private static let cursorContextBeforeLimit = 200
+    private static let cursorContextAfterLimit = 80
+    /// Skip the whole-value fallback for huge documents; the parameterized
+    /// range read does not have this problem.
+    private static let cursorContextMaxFallbackLength = 1_000_000
+
+    /// Reads the text immediately surrounding the insertion point of the
+    /// focused element. Returns nil when the element does not expose a
+    /// selection range (or is a secure field, which is never read).
+    func cursorTextContext(from appElement: AXUIElement) -> CursorTextContext? {
+        guard let focused = accessibilityElement(from: appElement, attribute: kAXFocusedUIElementAttribute as CFString) else {
+            return nil
+        }
+        if let role = accessibilityRawString(from: focused, attribute: kAXRoleAttribute as CFString),
+           role == "AXSecureTextField" {
+            return nil
+        }
+        guard let selectedRange = accessibilityRange(from: focused, attribute: kAXSelectedTextRangeAttribute as CFString),
+              selectedRange.location != kCFNotFound,
+              selectedRange.location >= 0 else {
+            return nil
+        }
+
+        let caret = selectedRange.location
+        let beforeStart = max(0, caret - Self.cursorContextBeforeLimit)
+        let beforeRange = CFRange(location: beforeStart, length: caret - beforeStart)
+
+        let afterStart = caret + selectedRange.length
+        var afterLength = Self.cursorContextAfterLimit
+        if let totalLength = accessibilityInt(from: focused, attribute: "AXNumberOfCharacters" as CFString) {
+            afterLength = max(0, min(afterLength, totalLength - afterStart))
+        }
+        let afterRange = CFRange(location: afterStart, length: afterLength)
+
+        let before = accessibilityString(from: focused, range: beforeRange)
+            ?? fallbackSlice(from: focused, range: beforeRange)
+        let after = accessibilityString(from: focused, range: afterRange)
+            ?? fallbackSlice(from: focused, range: afterRange)
+
+        guard before != nil || after != nil else { return nil }
+        return CursorTextContext(before: before ?? "", after: after ?? "")
+    }
+
+    private func accessibilityString(from element: AXUIElement, range: CFRange) -> String? {
+        guard range.length > 0 else { return "" }
+        var mutableRange = range
+        guard let rangeValue = AXValueCreate(.cfRange, &mutableRange) else { return nil }
+        var value: CFTypeRef?
+        let result = AXUIElementCopyParameterizedAttributeValue(
+            element,
+            kAXStringForRangeParameterizedAttribute as CFString,
+            rangeValue,
+            &value
+        )
+        guard result == .success, let stringValue = value as? String else { return nil }
+        return stringValue
+    }
+
+    /// Some elements do not implement AXStringForRange; slice the full value
+    /// instead, using UTF-16 offsets to match accessibility range semantics.
+    private func fallbackSlice(from element: AXUIElement, range: CFRange) -> String? {
+        guard range.length > 0 else { return "" }
+        guard let fullValue = accessibilityRawString(from: element, attribute: kAXValueAttribute as CFString),
+              fullValue.utf16.count <= Self.cursorContextMaxFallbackLength else {
+            return nil
+        }
+        let utf16 = fullValue.utf16
+        guard range.location <= utf16.count else { return nil }
+        let start = utf16.index(utf16.startIndex, offsetBy: range.location)
+        let end = utf16.index(start, offsetBy: min(range.length, utf16.count - range.location))
+        return String(fullValue[start..<end])
+    }
+
+    private func accessibilityRange(from element: AXUIElement, attribute: CFString) -> CFRange? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let rawValue = value,
+              CFGetTypeID(rawValue) == AXValueGetTypeID() else {
+            return nil
+        }
+        let axValue = unsafeBitCast(rawValue, to: AXValue.self)
+        var range = CFRange()
+        guard AXValueGetType(axValue) == .cfRange, AXValueGetValue(axValue, .cfRange, &range) else {
+            return nil
+        }
+        return range
+    }
+
+    private func accessibilityInt(from element: AXUIElement, attribute: CFString) -> Int? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success,
+              let number = value as? NSNumber else {
+            return nil
+        }
+        return number.intValue
     }
 
     private func selectedText(from appElement: AXUIElement) -> String? {

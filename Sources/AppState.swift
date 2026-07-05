@@ -2778,7 +2778,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
                                 }
                             }
 
-                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
+                            let pasteText = Self.applyingSmartLeadingSpace(
+                                to: trimmedFinalTranscript,
+                                textBeforeCursor: appContext.textBeforeCursor,
+                                isCommandMode: sessionIntent.isCommandMode
+                            )
+                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(
+                                pasteText,
+                                textAfterCursor: appContext.textAfterCursor
+                            )
                             self.pasteAtCursorWhenShortcutReleased {
                                 if shouldPressEnterAfterPaste {
                                     self.pressEnterAfterPaste {
@@ -3250,19 +3258,45 @@ final class AppState: ObservableObject, @unchecked Sendable {
         keyUp?.post(tap: .cgSessionEventTap)
     }
 
+    /// Prepends a space when the dictation is inserted directly after a
+    /// word character or closing punctuation, so mid-text insertions do not
+    /// jam against the existing text (issue #200). Skipped for Edit Mode,
+    /// where the pasted text replaces the selection in place.
+    static func applyingSmartLeadingSpace(
+        to transcript: String,
+        textBeforeCursor: String?,
+        isCommandMode: Bool
+    ) -> String {
+        guard !isCommandMode,
+              let before = textBeforeCursor,
+              let lastChar = before.last,
+              let firstChar = transcript.first else {
+            return transcript
+        }
+        guard !lastChar.isWhitespace else { return transcript }
+        let joinable = lastChar.isLetter || lastChar.isNumber || ".!?,:;)]}\"'".contains(lastChar)
+        guard joinable, firstChar.isLetter || firstChar.isNumber else { return transcript }
+        return " " + transcript
+    }
+
     /// Writes the final transcript to the system pasteboard.
     /// Also handles appending necessary trailing spaces, declaring transient
     /// types for clipboard managers, and saving the clipboard state for later restoration.
     /// - Parameter transcript: The text to be pasted.
     /// - Returns: A `PendingClipboardRestore` object if clipboard preservation is enabled, otherwise nil.
-    private func writeTranscriptToPasteboard(_ transcript: String) -> PendingClipboardRestore? {
+    private func writeTranscriptToPasteboard(
+        _ transcript: String,
+        textAfterCursor: String? = nil
+    ) -> PendingClipboardRestore? {
         let pasteboard = NSPasteboard.general
         let snapshot = preserveClipboard ? PreservedPasteboardSnapshot(pasteboard: pasteboard) : nil
 
         // Append a space when ending with sentence-ending punctuation so the
-        // next dictation does not jam against the prior period.
+        // next dictation does not jam against the prior period — unless the
+        // text already at the cursor provides that separation.
         let textToWrite: String
-        if let last = transcript.last, ".!?".contains(last) {
+        if let last = transcript.last, ".!?".contains(last),
+           !(textAfterCursor?.first.map { $0.isWhitespace || ".,;:!?)".contains($0) } ?? false) {
             textToWrite = transcript + " "
         } else {
             textToWrite = transcript
