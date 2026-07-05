@@ -2160,6 +2160,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
         automaticTerminationDisabled = false
     }
 
+    /// Opens connections to the transcription and post-processing hosts
+    /// while the user is speaking, so the stop-to-paste path starts on warm
+    /// TLS connections instead of paying handshake latency after release.
+    private func prewarmAPIConnections() {
+        if let url = URL(string: resolvedTranscriptionBaseURL), url.host != nil {
+            LLMAPITransport.prewarmUploadConnection(
+                to: url,
+                expectedRequestTimeout: TranscriptionService.configuredTimeoutSeconds
+            )
+        }
+        if let url = URL(string: apiBaseURL), url.host != nil {
+            LLMAPITransport.prewarmSharedConnection(
+                to: url,
+                expectedRequestTimeout: PostProcessingService.configuredTimeoutSeconds
+            )
+        }
+    }
+
     private func beginRecording(triggerMode: RecordingTriggerMode) {
         os_log(.info, log: recordingLog, "beginRecording() entered")
         beginCriticalDictationActivity()
@@ -2221,6 +2239,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         startRealtimeStreamingIfEnabled()
+        prewarmAPIConnections()
 
         // Start engine on background thread so UI isn't blocked
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in

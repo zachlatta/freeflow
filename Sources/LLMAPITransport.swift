@@ -40,6 +40,59 @@ enum LLMAPITransport {
         return session
     }
 
+    // MARK: - Connection Pre-warming
+
+    /// One-shot session opened while the user is still speaking so the
+    /// transcription upload does not pay DNS + TCP + TLS setup on the
+    /// critical stop-to-paste path. Guarded by sessionsLock.
+    private static var prewarmedUploadSession: (session: URLSession, host: String, resourceTimeout: TimeInterval)?
+
+    /// Opens a connection to `baseURL`'s host on a fresh session and holds
+    /// that session for the next upload to the same host. Safe to call on
+    /// every recording start; failures are ignored — the response is
+    /// irrelevant (401/404 are fine), only the handshake matters.
+    static func prewarmUploadConnection(to baseURL: URL, expectedRequestTimeout: TimeInterval) {
+        let timeout = max(expectedRequestTimeout, minimumResourceTimeout)
+        let session = makeEphemeralSession(resourceTimeout: timeout)
+
+        sessionsLock.lock()
+        let previous = prewarmedUploadSession?.session
+        prewarmedUploadSession = (session, baseURL.host ?? "", timeout)
+        sessionsLock.unlock()
+        previous?.finishTasksAndInvalidate()
+
+        var request = URLRequest(url: baseURL)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 10
+        Task {
+            _ = try? await session.data(for: request)
+        }
+    }
+
+    /// Warms the shared data session for `baseURL`'s host so the first
+    /// post-processing call after idle reuses an open connection. The
+    /// timeout must match the real requests' so the same session is used.
+    static func prewarmSharedConnection(to baseURL: URL, expectedRequestTimeout: TimeInterval) {
+        var request = URLRequest(url: baseURL)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = expectedRequestTimeout
+        Task {
+            _ = try? await data(for: request)
+        }
+    }
+
+    private static func takePrewarmedUploadSession(for request: URLRequest) -> URLSession? {
+        sessionsLock.lock()
+        defer { sessionsLock.unlock() }
+        guard let candidate = prewarmedUploadSession,
+              candidate.host == request.url?.host,
+              candidate.resourceTimeout == resourceTimeout(for: request) else {
+            return nil
+        }
+        prewarmedUploadSession = nil
+        return candidate.session
+    }
+
     static func data(
         for request: URLRequest
     ) async throws -> (Data, URLResponse) {
@@ -50,9 +103,12 @@ enum LLMAPITransport {
         for request: URLRequest,
         from bodyData: Data
     ) async throws -> (Data, URLResponse) {
-        // Use a fresh session for each upload so a bad reused connection cannot
+        // Prefer the session prewarmed at recording start (skips the TLS
+        // handshake); otherwise use a fresh session. Either way the session
+        // serves exactly one upload, so a bad reused connection cannot
         // poison subsequent transcription uploads.
-        let session = makeEphemeralSession(resourceTimeout: resourceTimeout(for: request))
+        let session = takePrewarmedUploadSession(for: request)
+            ?? makeEphemeralSession(resourceTimeout: resourceTimeout(for: request))
         defer { session.finishTasksAndInvalidate() }
         return try await session.upload(for: request, from: bodyData)
     }

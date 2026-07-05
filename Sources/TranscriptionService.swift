@@ -9,9 +9,13 @@ class TranscriptionService {
     private let transcriptionModel: String
     private let language: String?
     private let transcriptionResponseFormat = "verbose_json"
-    private var transcriptionTimeoutSeconds: TimeInterval {
+    static var configuredTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
         return override > 0 ? override : 20
+    }
+
+    private var transcriptionTimeoutSeconds: TimeInterval {
+        Self.configuredTimeoutSeconds
     }
 
     init(
@@ -119,7 +123,15 @@ class TranscriptionService {
         )
 
         do {
+            let t0 = CFAbsoluteTimeGetCurrent()
             let (data, response) = try await LLMAPITransport.upload(for: request, from: body)
+            os_log(
+                .info,
+                log: transcriptionLog,
+                "upload+transcription completed in %.0fms (%lld bytes)",
+                (CFAbsoluteTimeGetCurrent() - t0) * 1000,
+                Int64(body.count)
+            )
             return try validateTranscriptionResponse(data: data, response: response, fileURL: fileURL)
         } catch {
             let nsError = error as NSError
