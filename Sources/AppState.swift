@@ -56,6 +56,17 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// How Prompt Mode decides whether to condense dictation into a tight
+/// prompt before pasting (issue #196).
+enum PromptModeSetting: String, CaseIterable {
+    /// Paste the cleaned transcript verbatim (default).
+    case off
+    /// Condense every dictation.
+    case always
+    /// Condense only when dictating into a recognized AI tool.
+    case auto
+}
+
 enum AppBuild {
     static var isDevBundle: Bool {
         (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) == "FreeFlow Dev"
@@ -227,6 +238,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let pressEnterVoiceCommandStorageKey = "press_enter_voice_command_enabled"
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
     private let soundVolumeStorageKey = "sound_volume"
+    private let promptModeStorageKey = "prompt_mode"
     private let startSoundNameStorageKey = "start_sound_name"
     private let stopSoundNameStorageKey = "stop_sound_name"
     private let errorSoundNameStorageKey = "error_sound_name"
@@ -532,6 +544,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Prompt Mode condenses rambling dictation into a tight,
+    /// intent-preserving prompt before pasting (issue #196).
+    @Published var promptMode: PromptModeSetting {
+        didSet {
+            UserDefaults.standard.set(promptMode.rawValue, forKey: promptModeStorageKey)
+        }
+    }
+
     @Published var startSoundName: String {
         didSet {
             UserDefaults.standard.set(startSoundName, forKey: startSoundNameStorageKey)
@@ -713,6 +733,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let alertSoundsEnabled = UserDefaults.standard.object(forKey: alertSoundsEnabledStorageKey) != nil
             ? UserDefaults.standard.bool(forKey: alertSoundsEnabledStorageKey)
             : soundVolume > 0
+        let promptMode = PromptModeSetting(
+            rawValue: UserDefaults.standard.string(forKey: promptModeStorageKey) ?? ""
+        ) ?? .off
         let startSoundName = UserDefaults.standard.string(forKey: startSoundNameStorageKey) ?? "Tink"
         let stopSoundName = UserDefaults.standard.string(forKey: stopSoundNameStorageKey) ?? "Pop"
         let errorSoundName = UserDefaults.standard.string(forKey: errorSoundNameStorageKey) ?? "Basso"
@@ -783,6 +806,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.isPressEnterVoiceCommandEnabled = isPressEnterVoiceCommandEnabled
         self.alertSoundsEnabled = alertSoundsEnabled
         self.soundVolume = soundVolume
+        self.promptMode = promptMode
         self.startSoundName = startSoundName
         self.stopSoundName = stopSoundName
         self.errorSoundName = errorSoundName
@@ -2502,6 +2526,38 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private func shouldCondenseForPrompt(context: AppContext) -> Bool {
+        switch promptMode {
+        case .off:
+            return false
+        case .always:
+            return true
+        case .auto:
+            return Self.isAITargetContext(
+                bundleIdentifier: context.bundleIdentifier,
+                windowTitle: context.windowTitle
+            )
+        }
+    }
+
+    /// Heuristic for "the user is dictating a prompt into an AI tool":
+    /// known AI desktop app bundle IDs, or a window title mentioning a
+    /// major AI product (covers browser tabs and terminal sessions).
+    static func isAITargetContext(bundleIdentifier: String?, windowTitle: String?) -> Bool {
+        let aiBundleIdentifiers: Set<String> = [
+            "com.anthropic.claudefordesktop",
+            "com.openai.chat",
+            "com.todesktop.230313mzl4w4u92", // Cursor
+            "com.exafunction.windsurf",
+        ]
+        if let bundleIdentifier, aiBundleIdentifiers.contains(bundleIdentifier) {
+            return true
+        }
+        let title = (windowTitle ?? "").lowercased()
+        let markers = ["claude", "chatgpt", "chat gpt", "gemini", "copilot", "perplexity"]
+        return markers.contains { title.contains($0) }
+    }
+
     private func processTranscript(
         _ rawTranscript: String,
         intent: SessionIntent,
@@ -2544,7 +2600,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 context: context,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt,
-                outputLanguage: outputLanguage
+                outputLanguage: outputLanguage,
+                condenseToPrompt: shouldCondenseForPrompt(context: context)
             )
             return (result.transcript, .postProcessingSucceeded, result.prompt)
         } catch {

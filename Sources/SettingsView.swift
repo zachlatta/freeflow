@@ -695,6 +695,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Edit Mode", icon: "pencil") {
                     commandModeSection
                 }
+                SettingsCard("Prompt Mode", icon: "wand.and.stars") {
+                    promptModeSection
+                }
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
                     clipboardSection
                 }
@@ -1371,6 +1374,36 @@ struct GeneralSettingsView: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .help("Preview this sound")
+        }
+    }
+
+    // MARK: Prompt Mode
+
+    private var promptModeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Condense rambling dictation into a tight prompt that preserves your full intent — useful when dictating into AI tools like Claude, ChatGPT, or Cursor.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("Condense dictation")
+                    .font(.system(size: 13))
+                Spacer()
+                Picker("", selection: $appState.promptMode) {
+                    Text("Off").tag(PromptModeSetting.off)
+                    Text("Always").tag(PromptModeSetting.always)
+                    Text("Only in AI apps").tag(PromptModeSetting.auto)
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: 240)
+            }
+
+            if appState.promptMode == .auto {
+                Text("Detects Claude, ChatGPT, Cursor, and similar tools from the active app and window title.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

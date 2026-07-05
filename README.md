@@ -38,6 +38,7 @@ FreeFlow is a free Mac dictation app inspired by [Wispr Flow](https://wisprflow.
 - **Custom shortcuts:** Customize both hold-to-talk and toggle dictation shortcuts. If your toggle shortcut extends your hold shortcut, you can start in hold mode and press the extra modifier keys to latch into tap mode without stopping the recording.
 - **Context-aware cleanup:** FreeFlow can read nearby app context so names, terms, and phrases are spelled correctly when you dictate into email, terminals, docs, and other apps. It also reads the text around your cursor, so dictating into the middle of a sentence continues the sentence naturally with correct capitalization, punctuation, and spacing.
 - **Custom vocabulary:** Add names, jargon, and project-specific words that FreeFlow should preserve during cleanup. Entries can also map specific mishearings to the intended term with an arrow — `cloud code -> Claude Code` — and multiple heard forms can share one correction: `cloud code | clod code -> Claude Code`.
+- **Prompt Mode:** Optionally condense rambling dictation into a tight prompt that preserves your full intent — always, or automatically when dictating into AI tools like Claude, ChatGPT, and Cursor.
 - **OpenAI-compatible providers:** Use Groq by default, or configure a custom model and API URL in settings.
 
 ## Edit Mode
