@@ -10,6 +10,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 
 ## [Unreleased]
 
+### Improved
+
+- Faster stop-to-paste latency: API connections to the transcription and post-processing hosts are now opened while you are still speaking, so the upload no longer pays DNS + TLS handshake time after you release the shortcut.
+- Faster stop-to-paste latency: the transcription upload now starts immediately when recording stops, instead of waiting for the audio capture session to finish tearing down.
+- Transcription uploads and post-processing requests now log their durations, making pipeline latency visible in Console.
+
 ### Added
 
 - Custom vocabulary entries can now map specific mishearings to the intended term with an arrow (`cloud code -> Claude Code`), and multiple heard forms can share one correction (`cloud code | clod code -> Claude Code`). Plain entries behave exactly as before.
