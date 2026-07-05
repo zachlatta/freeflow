@@ -680,7 +680,12 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
 
         sessionQueue.async {
             self.cancelWatchdog()
-            self.teardownSessionLocked()
+            // Removing the delegate is the audio cut-off point (same as the
+            // full teardown used to be); the queued tail buffers are then
+            // drained into the file. The slow AVCaptureSession.stopRunning()
+            // is deferred until after the completion fires, so transcription
+            // starts without waiting on capture teardown.
+            self.audioDataOutput?.setSampleBufferDelegate(nil, queue: nil)
             let outputURL = self.finishAudioFileLocked(discard: false)
             self._recording.withLock { $0 = false }
             self.liveLevelNormalizerLock.withLock { $0.reset() }
@@ -689,6 +694,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
                 self.audioLevel = 0.0
                 completion(outputURL)
             }
+            self.teardownSessionLocked()
         }
     }
 
