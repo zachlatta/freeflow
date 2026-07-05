@@ -10,6 +10,11 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 
 ## [Unreleased]
 
+### Improved
+
+- Faster stop-to-paste latency: API connections to the transcription and post-processing hosts are now opened while you are still speaking, so the upload no longer pays DNS + TLS handshake time after you release the shortcut.
+- Transcription uploads and post-processing requests now log their durations, making pipeline latency visible in Console.
+
 ### Fixed
 
 - Fixed the configured transcription, post-processing, and context timeouts being silently capped at 30 seconds by a session-level resource timeout, which broke long transfers to slow local models.
