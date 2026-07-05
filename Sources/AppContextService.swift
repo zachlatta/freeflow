@@ -82,12 +82,68 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         }
 
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        let firstActivation = activateAccessibilityTreeIfNeeded(
+            appElement: appElement,
+            processIdentifier: frontmostApp.processIdentifier,
+            bundleIdentifier: frontmostApp.bundleIdentifier
+        )
+        var selectedText = rawSelectedText(from: appElement)
+        if selectedText == nil && firstActivation {
+            // The app builds its accessibility tree asynchronously after
+            // activation; give it one brief chance on the first read so
+            // Edit Mode works on the very first dictation too.
+            usleep(100_000)
+            selectedText = rawSelectedText(from: appElement)
+        }
         return AppSelectionSnapshot(
             appName: frontmostApp.localizedName,
             bundleIdentifier: frontmostApp.bundleIdentifier,
             windowTitle: focusedWindowTitle(from: appElement) ?? frontmostApp.localizedName,
-            selectedText: rawSelectedText(from: appElement)
+            selectedText: selectedText
         )
+    }
+
+    // MARK: - Chromium/Electron accessibility activation
+
+    /// PIDs whose lazy accessibility trees we have already asked to
+    /// activate. Guarded by activatedAccessibilityPIDsLock.
+    private var activatedAccessibilityPIDs = Set<pid_t>()
+    private let activatedAccessibilityPIDsLock = NSLock()
+
+    private static let chromiumBrowserBundleIDPrefixes = [
+        "com.google.Chrome",
+        "com.microsoft.edgemac",
+        "com.brave.Browser",
+        "com.vivaldi.Vivaldi",
+        "org.chromium.Chromium",
+        "company.thebrowser.Browser",
+    ]
+
+    /// Chromium-based apps build their accessibility tree lazily: until a
+    /// client opts in, AXSelectedText reads fail, which made Edit Mode fall
+    /// back to dictation and overwrite selections in VS Code, Gmail-in-Chrome,
+    /// and other Electron apps (issue #237). AXManualAccessibility is
+    /// Electron's opt-in switch (unknown-attribute errors are harmless
+    /// elsewhere); AXEnhancedUserInterface is Chromium's, set only for known
+    /// browsers because it can interact badly with window-manager utilities.
+    /// Returns true the first time activation is attempted for this process.
+    @discardableResult
+    private func activateAccessibilityTreeIfNeeded(
+        appElement: AXUIElement,
+        processIdentifier: pid_t,
+        bundleIdentifier: String?
+    ) -> Bool {
+        activatedAccessibilityPIDsLock.lock()
+        let firstActivation = activatedAccessibilityPIDs.insert(processIdentifier).inserted
+        activatedAccessibilityPIDsLock.unlock()
+        guard firstActivation else { return false }
+
+        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        if let bundleIdentifier,
+           Self.chromiumBrowserBundleIDPrefixes.contains(where: bundleIdentifier.hasPrefix) {
+            AXUIElementSetAttributeValue(appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
+        return true
     }
 
     func collectContext() async -> AppContext {
@@ -111,6 +167,11 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         let appName = frontmostApp.localizedName
         let bundleIdentifier = frontmostApp.bundleIdentifier
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        activateAccessibilityTreeIfNeeded(
+            appElement: appElement,
+            processIdentifier: frontmostApp.processIdentifier,
+            bundleIdentifier: bundleIdentifier
+        )
 
         let windowTitle = focusedWindowTitle(from: appElement) ?? appName
         let selectedText = selectedText(from: appElement)

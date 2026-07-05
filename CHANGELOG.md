@@ -23,6 +23,7 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 
 ### Fixed
 
+- Fixed Edit Mode silently falling back to dictation (overwriting the selection) in VS Code, Gmail-in-Chrome, and other Electron/Chromium apps. Those apps build their accessibility tree lazily, so FreeFlow now asks them to activate it before reading the selection.
 - Fixed the configured transcription, post-processing, and context timeouts being silently capped at 30 seconds by a session-level resource timeout, which broke long transfers to slow local models.
 
 ## [1.1.0] - 2026-06-03
