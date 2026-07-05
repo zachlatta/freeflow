@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Added
+
+- Prompt Mode: optionally condense rambling dictation into a tight, intent-preserving prompt before pasting — set to Always, or Only in AI apps (auto-detects Claude, ChatGPT, Cursor, and similar tools from the active app and window title). Runs in the same cleanup pass, so it adds no latency.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added
