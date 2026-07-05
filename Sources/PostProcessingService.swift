@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let postProcessingLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "PostProcessing")
 
 enum PostProcessingError: LocalizedError {
     case requestFailed(Int, String)
@@ -136,9 +139,13 @@ Behavior:
     private let defaultFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private let defaultModelReasoningEffort = "low"
     private let postProcessingMaxCompletionTokens = 4096
-    private var postProcessingTimeoutSeconds: TimeInterval {
+    static var configuredTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "post_processing_timeout_seconds")
         return override > 0 ? override : 20
+    }
+
+    private var postProcessingTimeoutSeconds: TimeInterval {
+        Self.configuredTimeoutSeconds
     }
 
     init(
@@ -459,7 +466,15 @@ Model: \(model)
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
 
+        let t0 = CFAbsoluteTimeGetCurrent()
         let (data, response) = try await LLMAPITransport.data(for: request)
+        os_log(
+            .info,
+            log: postProcessingLog,
+            "LLM request completed in %.0fms (model=%{public}@)",
+            (CFAbsoluteTimeGetCurrent() - t0) * 1000,
+            model
+        )
         guard let httpResponse = response as? HTTPURLResponse else {
             throw PostProcessingError.invalidResponse("No HTTP response")
         }
@@ -590,7 +605,15 @@ Model: \(model)
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
 
+        let t0 = CFAbsoluteTimeGetCurrent()
         let (data, response) = try await LLMAPITransport.data(for: request)
+        os_log(
+            .info,
+            log: postProcessingLog,
+            "LLM request completed in %.0fms (model=%{public}@)",
+            (CFAbsoluteTimeGetCurrent() - t0) * 1000,
+            model
+        )
         guard let httpResponse = response as? HTTPURLResponse else {
             throw PostProcessingError.invalidResponse("No HTTP response")
         }
