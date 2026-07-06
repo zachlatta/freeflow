@@ -51,13 +51,22 @@ struct ProviderSettingsFields: View {
     @FocusState private var isEditingContextModel: Bool
     @FocusState private var transcriptionAPIURLFocused: Bool
     @FocusState private var transcriptionAPIKeyFocused: Bool
+    @FocusState private var elevenLabsAPIKeyFocused: Bool
     @State private var transcriptionModelDraft: String = ""
     @State private var realtimeStreamingModelDraft: String = ""
     @State private var postProcessingModelDraft: String = ""
     @State private var postProcessingFallbackModelDraft: String = ""
     @State private var contextModelDraft: String = ""
+    @State private var elevenLabsAPIKeyInput: String = ""
+    @State private var isValidatingTranscriptionAPIKey = false
+    @State private var transcriptionAPIKeyValidationError: String?
+    @State private var transcriptionAPIKeyValidationSuccess = false
 
     let showsModelDescription: Bool
+
+    private var selectedTranscriptionProvider: TranscriptionProvider {
+        appState.transcriptionProvider
+    }
 
     private func commitAPIBaseURL() {
         let trimmed = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -115,12 +124,44 @@ struct ProviderSettingsFields: View {
         appState.transcriptionAPIKey = trimmed
     }
 
+    private func commitElevenLabsAPIKey() {
+        let trimmed = elevenLabsAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        elevenLabsAPIKeyInput = trimmed
+        guard appState.elevenLabsAPIKey != trimmed else { return }
+        appState.elevenLabsAPIKey = trimmed
+    }
+
+    private func validateElevenLabsTranscriptionAPIKey() {
+        commitElevenLabsAPIKey()
+        let key = elevenLabsAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return }
+        isValidatingTranscriptionAPIKey = true
+        transcriptionAPIKeyValidationError = nil
+        transcriptionAPIKeyValidationSuccess = false
+
+        Task {
+            let valid = await TranscriptionService.validateAPIKey(
+                key,
+                baseURL: TranscriptionService.defaultElevenLabsBaseURL,
+                provider: .elevenLabs
+            )
+            await MainActor.run {
+                isValidatingTranscriptionAPIKey = false
+                if valid {
+                    transcriptionAPIKeyValidationSuccess = true
+                } else {
+                    transcriptionAPIKeyValidationError = "Validation failed. Check your ElevenLabs API key and try again."
+                }
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("API Base URL")
+            Text("Cleanup API Base URL")
                 .font(.caption.weight(.semibold))
 
-            Text("Change this to use a different OpenAI-compatible API provider.")
+            Text("Used for transcript cleanup, Edit Mode, and context. Change this to use a different OpenAI-compatible provider.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -190,18 +231,48 @@ struct ProviderSettingsFields: View {
                 }
             )
 
-            ModelDropdownView(
-                title: "Transcription Model",
-                subtitle: "Used for speech-to-text transcription.",
-                predefinedModels: ModelConfiguration.transcriptionModels,
-                defaultModel: AppState.defaultTranscriptionModel,
-                textDraft: $transcriptionModelDraft,
-                onCommit: commitTranscriptionModel,
-                onReset: {
-                    transcriptionModelDraft = AppState.defaultTranscriptionModel
-                    appState.transcriptionModel = AppState.defaultTranscriptionModel
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcription Provider")
+                    .font(.caption.weight(.semibold))
+                Picker("", selection: $appState.transcriptionProvider) {
+                    ForEach(TranscriptionProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
                 }
-            )
+                .labelsHidden()
+                Text(selectedTranscriptionProvider == .elevenLabs
+                     ? "Uses ElevenLabs Scribe for speech-to-text. Cleanup and context still use the API Base URL above."
+                     : "Uses an OpenAI-compatible audio transcription endpoint.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if selectedTranscriptionProvider == .openAICompatible {
+                ModelDropdownView(
+                    title: "Transcription Model",
+                    subtitle: "Used for speech-to-text transcription.",
+                    predefinedModels: ModelConfiguration.transcriptionModels,
+                    defaultModel: AppState.defaultTranscriptionModel,
+                    textDraft: $transcriptionModelDraft,
+                    onCommit: commitTranscriptionModel,
+                    onReset: {
+                        transcriptionModelDraft = AppState.defaultTranscriptionModel
+                        appState.transcriptionModel = AppState.defaultTranscriptionModel
+                    }
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transcription Model")
+                        .font(.caption.weight(.semibold))
+                    Text(TranscriptionService.defaultElevenLabsModel)
+                        .font(.system(.body, design: .monospaced))
+                    Text("ElevenLabs Scribe v2 is used for upload transcription.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Transcription Language")
@@ -218,55 +289,112 @@ struct ProviderSettingsFields: View {
                     .foregroundStyle(.secondary)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Transcription API URL")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField("Uses API Base URL when empty", text: $transcriptionAPIURLInput)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                        .focused($transcriptionAPIURLFocused)
-                        .onSubmit {
-                            commitTranscriptionAPIURL()
-                        }
-                        .onChange(of: transcriptionAPIURLFocused) { isFocused in
-                            if !isFocused {
+            if selectedTranscriptionProvider == .openAICompatible {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Transcription API URL")
+                        .font(.caption.weight(.semibold))
+                    HStack(spacing: 8) {
+                        TextField("Uses Cleanup API Base URL when empty", text: $transcriptionAPIURLInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(.body, design: .monospaced))
+                            .focused($transcriptionAPIURLFocused)
+                            .onSubmit {
                                 commitTranscriptionAPIURL()
                             }
+                            .onChange(of: transcriptionAPIURLFocused) { isFocused in
+                                if !isFocused {
+                                    commitTranscriptionAPIURL()
+                                }
+                            }
+                        if !transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Button("Clear") {
+                                transcriptionAPIURLInput = ""
+                                appState.transcriptionAPIURL = ""
+                            }
+                            .font(.caption)
                         }
-                    if !transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Button("Clear") {
-                            transcriptionAPIURLInput = ""
-                            appState.transcriptionAPIURL = ""
-                        }
-                        .font(.caption)
                     }
                 }
             }
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Transcription API Key")
+                Text(selectedTranscriptionProvider == .elevenLabs ? "ElevenLabs API Key" : "Transcription API Key")
                     .font(.caption.weight(.semibold))
                 HStack(spacing: 8) {
-                    SecureField("Uses API Key when empty", text: $transcriptionAPIKeyInput)
+                    SecureField(
+                        selectedTranscriptionProvider == .elevenLabs
+                            ? "Required for Scribe"
+                            : "Uses API Key when empty",
+                        text: selectedTranscriptionProvider == .elevenLabs
+                            ? $elevenLabsAPIKeyInput
+                            : $transcriptionAPIKeyInput
+                    )
                         .textFieldStyle(.roundedBorder)
                         .font(.system(.body, design: .monospaced))
-                        .focused($transcriptionAPIKeyFocused)
+                        .focused(
+                            selectedTranscriptionProvider == .elevenLabs
+                                ? $elevenLabsAPIKeyFocused
+                                : $transcriptionAPIKeyFocused
+                        )
                         .onSubmit {
-                            commitTranscriptionAPIKey()
+                            selectedTranscriptionProvider == .elevenLabs
+                                ? commitElevenLabsAPIKey()
+                                : commitTranscriptionAPIKey()
                         }
                         .onChange(of: transcriptionAPIKeyFocused) { isFocused in
                             if !isFocused {
                                 commitTranscriptionAPIKey()
                             }
                         }
-                    if !transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        .onChange(of: elevenLabsAPIKeyFocused) { isFocused in
+                            if !isFocused {
+                                commitElevenLabsAPIKey()
+                            }
+                        }
+                        .onChange(of: transcriptionAPIKeyInput) { _ in
+                            transcriptionAPIKeyValidationError = nil
+                            transcriptionAPIKeyValidationSuccess = false
+                        }
+                        .onChange(of: elevenLabsAPIKeyInput) { _ in
+                            transcriptionAPIKeyValidationError = nil
+                            transcriptionAPIKeyValidationSuccess = false
+                        }
+                    if selectedTranscriptionProvider == .elevenLabs {
+                        Button(isValidatingTranscriptionAPIKey ? "Validating..." : "Validate") {
+                            validateElevenLabsTranscriptionAPIKey()
+                        }
+                        .font(.caption)
+                        .disabled(
+                            elevenLabsAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || isValidatingTranscriptionAPIKey
+                        )
+                    }
+                    if !(selectedTranscriptionProvider == .elevenLabs
+                         ? elevenLabsAPIKeyInput
+                         : transcriptionAPIKeyInput
+                    ).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button("Clear") {
-                            transcriptionAPIKeyInput = ""
-                            appState.transcriptionAPIKey = ""
+                            if selectedTranscriptionProvider == .elevenLabs {
+                                elevenLabsAPIKeyInput = ""
+                                appState.elevenLabsAPIKey = ""
+                            } else {
+                                transcriptionAPIKeyInput = ""
+                                appState.transcriptionAPIKey = ""
+                            }
+                            transcriptionAPIKeyValidationError = nil
+                            transcriptionAPIKeyValidationSuccess = false
                         }
                         .font(.caption)
                     }
+                }
+                if let error = transcriptionAPIKeyValidationError {
+                    Label(error, systemImage: "xmark.circle.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                } else if transcriptionAPIKeyValidationSuccess {
+                    Label("ElevenLabs API key is valid", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.caption)
                 }
             }
 
@@ -276,36 +404,50 @@ struct ProviderSettingsFields: View {
                 "Stream audio while recording (realtime)",
                 isOn: $appState.realtimeStreamingEnabled
             )
-            Text("Streams audio through the provider's OpenAI-compatible /v1/realtime WebSocket so transcription runs while you speak.")
+            Text(selectedTranscriptionProvider == .elevenLabs
+                 ? "Streams audio through ElevenLabs Scribe v2 Realtime."
+                 : "Streams audio through the provider's OpenAI-compatible /v1/realtime WebSocket.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Realtime Transcription Model")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    TextField("Required by some providers, e.g. gpt-4o-transcribe", text: $realtimeStreamingModelDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($isEditingRealtimeStreamingModel)
-                        .onSubmit {
-                            commitRealtimeStreamingModel()
-                        }
-                        .onChange(of: isEditingRealtimeStreamingModel) { isEditing in
-                            if !isEditing {
+            if selectedTranscriptionProvider == .openAICompatible {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Realtime Transcription Model")
+                        .font(.caption.weight(.semibold))
+                    HStack(spacing: 8) {
+                        TextField("Required by some providers, e.g. gpt-4o-transcribe", text: $realtimeStreamingModelDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($isEditingRealtimeStreamingModel)
+                            .onSubmit {
                                 commitRealtimeStreamingModel()
                             }
+                            .onChange(of: isEditingRealtimeStreamingModel) { isEditing in
+                                if !isEditing {
+                                    commitRealtimeStreamingModel()
+                                }
+                            }
+                        if !realtimeStreamingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Button("Reset") {
+                                realtimeStreamingModelDraft = ""
+                                appState.realtimeStreamingModel = ""
+                            }
+                            .font(.caption)
                         }
-                    if !realtimeStreamingModelDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Button("Reset") {
-                            realtimeStreamingModelDraft = ""
-                            appState.realtimeStreamingModel = ""
-                        }
-                        .font(.caption)
                     }
+                    Text("Used only for realtime streaming. Leave empty for providers that supply a server default.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                Text("Used only for realtime streaming. Leave empty for providers that supply a server default.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Realtime Transcription Model")
+                        .font(.caption.weight(.semibold))
+                    Text(TranscriptionService.defaultElevenLabsRealtimeModel)
+                        .font(.system(.body, design: .monospaced))
+                    Text("ElevenLabs Scribe v2 Realtime is used when streaming is enabled.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .onAppear {
@@ -314,6 +456,7 @@ struct ProviderSettingsFields: View {
             postProcessingModelDraft = appState.postProcessingModel
             postProcessingFallbackModelDraft = appState.postProcessingFallbackModel
             contextModelDraft = appState.contextModel
+            elevenLabsAPIKeyInput = appState.elevenLabsAPIKey
         }
         .onChange(of: appState.transcriptionModel) { value in
             if !isEditingTranscriptionModel {
@@ -323,6 +466,15 @@ struct ProviderSettingsFields: View {
         .onChange(of: appState.realtimeStreamingModel) { value in
             if !isEditingRealtimeStreamingModel {
                 realtimeStreamingModelDraft = value
+            }
+        }
+        .onChange(of: appState.transcriptionProvider) { _ in
+            transcriptionAPIKeyValidationError = nil
+            transcriptionAPIKeyValidationSuccess = false
+        }
+        .onChange(of: appState.elevenLabsAPIKey) { value in
+            if !elevenLabsAPIKeyFocused {
+                elevenLabsAPIKeyInput = value
             }
         }
         .onChange(of: appState.postProcessingModel) { value in
@@ -645,7 +797,7 @@ struct GeneralSettingsView: View {
                 SettingsCard("Updates", icon: "arrow.triangle.2.circlepath") {
                     updatesSection
                 }
-                SettingsCard("API Key", icon: "key.fill") {
+                SettingsCard("Providers", icon: "key.fill") {
                     apiKeySection
                 }
                 SettingsCard("Output Language", icon: "globe") {
@@ -902,12 +1054,12 @@ struct GeneralSettingsView: View {
 
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(AppName.displayName) uses the configured transcription model with your selected OpenAI-compatible provider.")
+            Text("\(AppName.displayName) uses this OpenAI-compatible provider for transcript cleanup, Edit Mode, and context.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
+                SecureField("Enter your Groq or OpenAI-compatible API key", text: $apiKeyInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .disabled(isValidatingKey)
@@ -944,7 +1096,7 @@ struct GeneralSettingsView: View {
                 }
             } label: {
                 HStack {
-                    Text("Advanced Provider Settings")
+                    Text("Provider Settings")
                     Spacer()
                 }
                 .contentShape(Rectangle())
@@ -974,7 +1126,7 @@ struct GeneralSettingsView: View {
                     appState.apiKey = key
                     keyValidationSuccess = true
                 } else {
-                    keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
+                    keyValidationError = "Validation failed. Please check your cleanup provider key and settings, then try again."
                 }
             }
         }
