@@ -95,12 +95,18 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
 
     var onRecordingReady: (() -> Void)?
     var onRecordingFailure: ((Error) -> Void)?
-    /// Fires on the sample-buffer queue with a 24 kHz mono PCM16 chunk for
-    /// each incoming audio buffer (matching OpenAI Realtime's default PCM
-    /// input rate). Set before ``startRecording`` to stream audio out-of-band
-    /// to a realtime transcription socket. The recorder writes a normalized
-    /// 16 kHz mono PCM16 WAV file independently for upload-based transcription.
+    /// Fires on the sample-buffer queue with mono PCM16 chunks for each
+    /// incoming audio buffer. Set before ``startRecording`` to stream audio
+    /// out-of-band to a realtime transcription socket. The recorder writes a
+    /// normalized 16 kHz mono PCM16 WAV file independently for upload-based
+    /// transcription.
     var onPCM16Samples: ((Data) -> Void)?
+    var realtimePCM16SampleRate: Double = 24_000 {
+        didSet {
+            guard realtimePCM16SampleRate != oldValue else { return }
+            pcm16ConverterLock.withLock { $0 = nil }
+        }
+    }
     private let recordingConverterLock = OSAllocatedUnfairLock<AVAudioConverter?>(initialState: nil)
     private let pcm16ConverterLock = OSAllocatedUnfairLock<AVAudioConverter?>(initialState: nil)
     private let recordingTargetFormat: AVAudioFormat = {
@@ -111,14 +117,14 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             interleaved: true
         )!
     }()
-    private let pcm16TargetFormat: AVAudioFormat = {
+    private var pcm16TargetFormat: AVAudioFormat {
         AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: 24_000,
+            sampleRate: realtimePCM16SampleRate,
             channels: 1,
             interleaved: true
         )!
-    }()
+    }
     private var readyFired = false
     private var failureReported = false
     private static let watchdogTimeout: TimeInterval = 2.0
@@ -187,7 +193,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         removeSessionObservers()
 
         let runtimeObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureSession.runtimeErrorNotification,
+            forName: NSNotification.Name.AVCaptureSessionRuntimeError,
             object: session,
             queue: nil
         ) { [weak self] notification in
@@ -199,7 +205,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         sessionObservers.append(runtimeObserver)
 
         let interruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureSession.wasInterruptedNotification,
+            forName: NSNotification.Name.AVCaptureSessionWasInterrupted,
             object: session,
             queue: nil
         ) { [weak self] notification in
@@ -208,7 +214,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         sessionObservers.append(interruptionObserver)
 
         let interruptionEndedObserver = NotificationCenter.default.addObserver(
-            forName: AVCaptureSession.interruptionEndedNotification,
+            forName: NSNotification.Name.AVCaptureSessionInterruptionEnded,
             object: session,
             queue: nil
         ) { [weak self] notification in

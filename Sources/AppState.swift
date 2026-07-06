@@ -201,8 +201,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let apiKeyStorageKey = "groq_api_key"
     private let apiBaseURLStorageKey = "api_base_url"
     private let transcriptionModelStorageKey = "transcription_model"
+    private let transcriptionProviderStorageKey = "transcription_provider"
     private let transcriptionAPIURLStorageKey = "transcription_api_url"
     private let transcriptionAPIKeyStorageKey = "transcription_api_key"
+    private let elevenLabsAPIKeyStorageKey = "elevenlabs_api_key"
     private let postProcessingModelStorageKey = "post_processing_model"
     private let postProcessingFallbackModelStorageKey = "post_processing_fallback_model"
     private let contextModelStorageKey = "context_model"
@@ -301,6 +303,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var transcriptionProvider: TranscriptionProvider {
+        didSet {
+            UserDefaults.standard.set(transcriptionProvider.rawValue, forKey: transcriptionProviderStorageKey)
+        }
+    }
+
     @Published var transcriptionAPIURL: String {
         didSet {
             persistOptionalAPIValue(transcriptionAPIURL, account: transcriptionAPIURLStorageKey)
@@ -310,6 +318,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var transcriptionAPIKey: String {
         didSet {
             persistOptionalAPIValue(transcriptionAPIKey, account: transcriptionAPIKeyStorageKey)
+        }
+    }
+
+    @Published var elevenLabsAPIKey: String {
+        didSet {
+            persistOptionalAPIValue(elevenLabsAPIKey, account: elevenLabsAPIKeyStorageKey)
         }
     }
 
@@ -605,7 +619,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingManualCommandInvocation = false
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
-    private var realtimeService: RealtimeTranscriptionService?
+    private var realtimeService: RealtimeTranscriptionClient?
     private var automaticTerminationDisabled = false
     private var activeAudioInterruption: ActiveAudioInterruption?
     private var pendingOverlayDismissToken: UUID?
@@ -622,9 +636,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let hasCompletedSetup = UserDefaults.standard.bool(forKey: "hasCompletedSetup")
         let apiKey = Self.loadStoredAPIKey(account: apiKeyStorageKey)
         let apiBaseURL = Self.loadStoredAPIBaseURL(account: "api_base_url")
+        let transcriptionProvider = TranscriptionProvider(
+            rawValue: UserDefaults.standard.string(forKey: transcriptionProviderStorageKey) ?? ""
+        ) ?? .openAICompatible
         let transcriptionModel = UserDefaults.standard.string(forKey: transcriptionModelStorageKey) ?? Self.defaultTranscriptionModel
         let transcriptionAPIURL = Self.loadOptionalStoredAPIValue(account: transcriptionAPIURLStorageKey)
         let transcriptionAPIKey = Self.loadStoredAPIKey(account: transcriptionAPIKeyStorageKey)
+        let elevenLabsAPIKey = Self.loadStoredAPIKey(account: elevenLabsAPIKeyStorageKey)
         let postProcessingModel = UserDefaults.standard.string(forKey: postProcessingModelStorageKey) ?? Self.defaultPostProcessingModel
         let postProcessingFallbackModel = UserDefaults.standard.string(forKey: postProcessingFallbackModelStorageKey) ?? Self.defaultPostProcessingFallbackModel
         let contextModel = UserDefaults.standard.string(forKey: contextModelStorageKey) ?? Self.defaultContextModel
@@ -724,8 +742,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.hasCompletedSetup = hasCompletedSetup
         self.apiKey = apiKey
         self.apiBaseURL = apiBaseURL
+        self.transcriptionProvider = transcriptionProvider
         self.transcriptionAPIURL = transcriptionAPIURL
         self.transcriptionAPIKey = transcriptionAPIKey
+        self.elevenLabsAPIKey = elevenLabsAPIKey
         self.transcriptionModel = transcriptionModel
         self.postProcessingModel = postProcessingModel
         self.postProcessingFallbackModel = postProcessingFallbackModel
@@ -831,7 +851,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
-    static let defaultAPIBaseURL = "https://api.groq.com/openai/v1"
+    static let defaultAPIBaseURL = TranscriptionService.defaultOpenAICompatibleBaseURL
 
     private struct StoredShortcutConfiguration {
         let hold: ShortcutBinding
@@ -981,22 +1001,41 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private var resolvedTranscriptionBaseURL: String {
+        if transcriptionProvider == .elevenLabs {
+            return TranscriptionService.defaultElevenLabsBaseURL
+        }
         let trimmed = transcriptionAPIURL.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? apiBaseURL : trimmed
     }
 
     private var resolvedTranscriptionAPIKey: String {
         let trimmed = transcriptionAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if transcriptionProvider == .elevenLabs {
+            return elevenLabsAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         return trimmed.isEmpty ? apiKey : trimmed
     }
 
     func makeTranscriptionService() throws -> TranscriptionService {
         try TranscriptionService(
+            provider: transcriptionProvider,
             apiKey: resolvedTranscriptionAPIKey,
             baseURL: resolvedTranscriptionBaseURL,
             transcriptionModel: transcriptionModel,
             language: resolvedTranscriptionLanguage
         )
+    }
+
+    private func transcriptionConfigurationErrorMessage() -> String? {
+        if resolvedTranscriptionAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            switch transcriptionProvider {
+            case .openAICompatible:
+                return "Enter an API key in Settings."
+            case .elevenLabs:
+                return "Enter an ElevenLabs API key in Settings."
+            }
+        }
+        return nil
     }
 
     private var resolvedTranscriptionLanguage: String? {
@@ -1937,6 +1976,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 : scheduledManualCommandInvocation,
             startedAt: t0
         ) else { return }
+        if let configurationError = transcriptionConfigurationErrorMessage() {
+            errorMessage = configurationError
+            statusText = "Missing API Key"
+            activeRecordingTriggerMode = nil
+            currentSessionIntent = .dictation
+            shortcutSessionController.reset()
+            playAlertSound(named: "Basso")
+            scheduleReadyStatusReset(after: 2, matching: ["Missing API Key"])
+            return
+        }
         guard ensureMicrophoneAccess() else { return }
         os_log(.info, log: recordingLog, "mic access check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
         applyAudioInterruptionIfNeeded()
@@ -2043,6 +2092,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
                                 selectionSnapshot: pendingSelectionSnapshot,
                                 manualCommandRequested: pendingManualCommandRequested
                             ) else { return }
+                            if let configurationError = strongSelf.transcriptionConfigurationErrorMessage() {
+                                strongSelf.errorMessage = configurationError
+                                strongSelf.statusText = "Missing API Key"
+                                strongSelf.activeRecordingTriggerMode = nil
+                                strongSelf.currentSessionIntent = .dictation
+                                strongSelf.shortcutSessionController.reset()
+                                strongSelf.playAlertSound(named: "Basso")
+                                strongSelf.scheduleReadyStatusReset(after: 2, matching: ["Missing API Key"])
+                                return
+                            }
                             strongSelf.shortcutSessionController.beginManual(mode: .toggle)
                             strongSelf.applyAudioInterruptionIfNeeded()
                             strongSelf.beginRecording(triggerMode: .toggle)
@@ -2505,7 +2564,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     /// gets a transcript. Runs the realtime commit and file upload in that
     /// strict order to avoid paying for both when realtime succeeds.
     private static func resolveRawTranscript(
-        realtimeService: RealtimeTranscriptionService?,
+        realtimeService: RealtimeTranscriptionClient?,
         fileService: TranscriptionService,
         fileURL: URL
     ) async throws -> String {
@@ -2849,14 +2908,28 @@ final class AppState: ObservableObject, @unchecked Sendable {
             os_log(.info, log: recordingLog, "realtime streaming requested but base URL is empty — skipping")
             return
         }
-        let model = realtimeStreamingModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        let config = RealtimeTranscriptionService.Configuration(
-            baseURL: trimmedBase,
-            apiKey: resolvedTranscriptionAPIKey,
-            model: model,
-            language: resolvedTranscriptionLanguage
-        )
-        let service = RealtimeTranscriptionService(config: config)
+
+        let service: RealtimeTranscriptionClient
+        switch transcriptionProvider {
+        case .openAICompatible:
+            let model = realtimeStreamingModel.trimmingCharacters(in: .whitespacesAndNewlines)
+            let config = RealtimeTranscriptionService.Configuration(
+                baseURL: trimmedBase,
+                apiKey: resolvedTranscriptionAPIKey,
+                model: model,
+                language: resolvedTranscriptionLanguage
+            )
+            service = RealtimeTranscriptionService(config: config)
+        case .elevenLabs:
+            let config = ElevenLabsRealtimeTranscriptionService.Configuration(
+                baseURL: trimmedBase,
+                apiKey: resolvedTranscriptionAPIKey,
+                model: TranscriptionService.defaultElevenLabsRealtimeModel,
+                language: resolvedTranscriptionLanguage
+            )
+            service = ElevenLabsRealtimeTranscriptionService(config: config)
+        }
+
         do {
             try service.start()
         } catch {
@@ -2864,6 +2937,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
         realtimeService = service
+        audioRecorder.realtimePCM16SampleRate = service.pcmSampleRate
         audioRecorder.onPCM16Samples = { [weak service] data in
             service?.appendPCM16(data)
         }
@@ -2871,6 +2945,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func tearDownRealtimeService() {
         audioRecorder.onPCM16Samples = nil
+        audioRecorder.realtimePCM16SampleRate = 24_000
         realtimeService?.cancel()
         realtimeService = nil
     }
