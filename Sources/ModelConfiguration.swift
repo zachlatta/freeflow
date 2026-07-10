@@ -16,6 +16,7 @@ public struct ModelConfiguration {
         "openai/gpt-oss-120b",
         "openai/gpt-oss-safeguard-20b",
         "qwen/qwen3-32b",
+        "qwen/qwen3.6-27b",
         "allam-2-7b",
         "groq/compound",
         "groq/compound-mini",
@@ -35,6 +36,7 @@ public struct ModelConfiguration {
         
         // Normalize providerless aliases
         if cleanModel == "qwen3-32b" { cleanModel = "qwen/qwen3-32b" }
+        else if cleanModel == "qwen3.6-27b" { cleanModel = "qwen/qwen3.6-27b" }
         else if cleanModel == "gpt-oss-20b" { cleanModel = "openai/gpt-oss-20b" }
         else if cleanModel == "gpt-oss-120b" { cleanModel = "openai/gpt-oss-120b" }
         else if cleanModel == "gpt-oss-safeguard-20b" { cleanModel = "openai/gpt-oss-safeguard-20b" }
@@ -62,6 +64,13 @@ public struct ModelConfiguration {
             )
         } else if cleanModel == "qwen/qwen3-32b" {
  // Model that requires sanitization of thought tags
+            return ModelConfig(
+                maxCompletionTokens: nil,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
+            )
+        } else if cleanModel == "qwen/qwen3.6-27b" {
             return ModelConfig(
                 maxCompletionTokens: nil,
                 reasoningEffort: nil,
