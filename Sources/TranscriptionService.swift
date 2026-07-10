@@ -28,23 +28,141 @@ class TranscriptionService {
         self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
     }
 
-    // Validate API key by hitting a lightweight endpoint
+    // Validate API key by hitting a lightweight endpoint.
     static func validateAPIKey(_ key: String, baseURL: String = "https://api.groq.com/openai/v1") async -> Bool {
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        guard let baseURL = try? normalizedBaseURL(from: baseURL) else { return false }
+        return await validateAPIKeyDetailed(key, baseURL: baseURL) == nil
+    }
 
-        var request = URLRequest(url: baseURL.appendingPathComponent("models"))
+    /// Returns nil on success, or a specific error message on failure. Used
+    /// when the caller needs to distinguish transient failures from "key is
+    /// wrong for this provider."
+    static func validateAPIKeyDetailed(_ key: String, baseURL: String = "https://api.groq.com/openai/v1") async -> String? {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "API key is empty." }
+        guard let url = try? normalizedBaseURL(from: baseURL) else {
+            return "Base URL is not a valid URL: \(baseURL)"
+        }
+
+        var request = URLRequest(url: url.appendingPathComponent("models"))
         request.timeoutInterval = 10
         request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
 
         do {
-            let (_, response) = try await LLMAPITransport.data(for: request)
+            let (data, response) = try await LLMAPITransport.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            return status == 200
+            if status == 200 { return nil }
+
+            let bodyText = String(data: data, encoding: .utf8) ?? ""
+            let snippet = String(bodyText.prefix(200))
+            switch status {
+            case 401: return "Invalid API key for \(url.host ?? "this provider")."
+            case 403: return "Key lacks permission for this endpoint (HTTP 403)."
+            case 404: return "Endpoint not found at \(url.absoluteString) (HTTP 404)."
+            case 429: return "Rate limit reached (HTTP 429). \(snippet)"
+            case 500..<600: return "Provider server error (HTTP \(status))."
+            default: return "Validation failed (HTTP \(status)). \(snippet)"
+            }
+        } catch let urlError as URLError {
+            switch urlError.code {
+            case .cannotFindHost, .dnsLookupFailed:
+                return "Cannot reach \(url.host ?? "the host"). Check the Base URL."
+            case .timedOut:
+                return "Request timed out reaching \(url.host ?? "the provider")."
+            case .notConnectedToInternet:
+                return "No internet connection."
+            default:
+                return "Network error: \(urlError.localizedDescription)"
+            }
         } catch {
-            return false
+            return "Validation failed: \(error.localizedDescription)"
         }
+    }
+
+    /// One-click switch presets — only providers that ship a transcription
+    /// endpoint matching the app's expected /audio/transcriptions shape.
+    struct ProviderPreset {
+        let displayName: String
+        let baseURL: String
+        let transcriptionModel: String
+        let postProcessingModel: String
+        let postProcessingFallbackModel: String
+        let contextModel: String
+    }
+
+    static func providerPreset(forName name: String) -> ProviderPreset? {
+        switch name {
+        case "Groq":
+            return ProviderPreset(
+                displayName: "Groq",
+                baseURL: "https://api.groq.com/openai/v1",
+                transcriptionModel: "whisper-large-v3",
+                postProcessingModel: "openai/gpt-oss-20b",
+                postProcessingFallbackModel: "meta-llama/llama-4-scout-17b-16e-instruct",
+                contextModel: "meta-llama/llama-4-scout-17b-16e-instruct"
+            )
+        case "OpenAI", "OpenAI-compatible":
+            return ProviderPreset(
+                displayName: "OpenAI",
+                baseURL: "https://api.openai.com/v1",
+                transcriptionModel: "whisper-1",
+                postProcessingModel: "gpt-4o-mini",
+                postProcessingFallbackModel: "gpt-4o",
+                contextModel: "gpt-4o-mini"
+            )
+        default:
+            return nil
+        }
+    }
+
+    private static let providerHostMap: [(host: String, name: String)] = [
+        ("api.groq.com", "Groq"),
+        ("api.openai.com", "OpenAI"),
+        ("api.x.ai", "xAI (Grok)"),
+        ("api.anthropic.com", "Anthropic"),
+        ("api.cerebras.ai", "Cerebras"),
+        ("api.together.xyz", "Together AI"),
+        ("api.deepseek.com", "DeepSeek"),
+        ("api.mistral.ai", "Mistral"),
+        ("generativelanguage.googleapis.com", "Google AI (Gemini)"),
+        ("api.fireworks.ai", "Fireworks"),
+        ("api.perplexity.ai", "Perplexity"),
+        ("openrouter.ai", "OpenRouter"),
+        ("api.lemonfox.ai", "Lemonfox"),
+    ]
+
+    /// Provider name inferred from the base URL host. Most reliable signal
+    /// because the host is the actual endpoint the request will hit.
+    static func detectProviderFromHost(baseURL: String) -> String? {
+        let host = (try? normalizedBaseURL(from: baseURL))?.host?.lowercased() ?? ""
+        for (h, name) in providerHostMap where host.contains(h) {
+            return name
+        }
+        if host == "localhost" || host == "127.0.0.1" || host.hasSuffix(".local") {
+            return "Local server"
+        }
+        return nil
+    }
+
+    /// Provider name inferred from the API key's prefix. Distinct prefixes
+    /// only — generic `sk-` falls back to OpenAI-compatible since multiple
+    /// providers ship that shape.
+    static func detectProviderFromKey(key: String) -> String? {
+        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedKey.hasPrefix("gsk_") { return "Groq" }
+        if trimmedKey.hasPrefix("sk-ant-") { return "Anthropic" }
+        if trimmedKey.hasPrefix("xai-") { return "xAI (Grok)" }
+        if trimmedKey.hasPrefix("hf_") { return "Hugging Face" }
+        if trimmedKey.hasPrefix("csk-") { return "Cerebras" }
+        if trimmedKey.hasPrefix("sk-proj-") { return "OpenAI" }
+        if trimmedKey.hasPrefix("sk-") { return "OpenAI-compatible" }
+        return nil
+    }
+
+    /// Combined detection: prefer the host (definitive endpoint), fall back
+    /// to the key prefix when the host is unknown. Returns nil for unknown.
+    static func detectProvider(baseURL: String, key: String) -> String? {
+        if let host = detectProviderFromHost(baseURL: baseURL) { return host }
+        return detectProviderFromKey(key: key)
     }
 
     // Upload audio file, submit for transcription, poll until done, return text
