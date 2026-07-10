@@ -279,15 +279,25 @@ Selected text: \(selectedText ?? "None")
                 return nil
             }
 
-            let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !cleaned.isEmpty else { return nil }
-            return (activity: normalizedActivitySummary(cleaned), prompt: fullPrompt)
+            guard let activity = Self.activitySummary(from: content, model: model) else { return nil }
+            return (activity: activity, prompt: fullPrompt)
         } catch {
             return nil
         }
     }
 
-    private func normalizedActivitySummary(_ value: String) -> String {
+    static func activitySummary(from rawContent: String, model: String) -> String? {
+        var content = rawContent
+        if ModelConfiguration.config(for: model).shouldStripThinkTags {
+            content = ModelConfiguration.stripThinkTags(content)
+        }
+
+        let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        return normalizedActivitySummary(cleaned)
+    }
+
+    private static func normalizedActivitySummary(_ value: String) -> String {
         let sentences = value
             .split(whereSeparator: { $0 == "." || $0 == "。" || $0 == "!" || $0 == "?" })
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
