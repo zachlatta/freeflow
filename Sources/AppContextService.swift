@@ -27,6 +27,7 @@ struct AppContext {
 }
 
 final class AppContextService {
+    static let defaultContextModel = "qwen/qwen3.6-27b"
     static let defaultContextPrompt = """
 You are a context synthesis assistant for a speech-to-text pipeline.
 Given app/window metadata and an optional screenshot, output exactly two sentences that describe what the user is doing right now and the likely writing intent in the current window.
@@ -53,14 +54,14 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         customContextPrompt: String = "",
-        contextModel: String = "meta-llama/llama-4-scout-17b-16e-instruct",
+        contextModel: String = AppContextService.defaultContextModel,
         screenshotMaxDimension: CGFloat = AppContextService.defaultScreenshotMaxDimension
     ) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.customContextPrompt = customContextPrompt
         let trimmedModel = contextModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.contextModel = trimmedModel.isEmpty ? "meta-llama/llama-4-scout-17b-16e-instruct" : trimmedModel
+        self.contextModel = trimmedModel.isEmpty ? Self.defaultContextModel : trimmedModel
         self.screenshotMaxDimension = screenshotMaxDimension > 0
             ? screenshotMaxDimension
             : AppContextService.defaultScreenshotMaxDimension
@@ -278,15 +279,25 @@ Selected text: \(selectedText ?? "None")
                 return nil
             }
 
-            let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !cleaned.isEmpty else { return nil }
-            return (activity: normalizedActivitySummary(cleaned), prompt: fullPrompt)
+            guard let activity = Self.activitySummary(from: content, model: model) else { return nil }
+            return (activity: activity, prompt: fullPrompt)
         } catch {
             return nil
         }
     }
 
-    private func normalizedActivitySummary(_ value: String) -> String {
+    static func activitySummary(from rawContent: String, model: String) -> String? {
+        var content = rawContent
+        if ModelConfiguration.config(for: model).shouldStripThinkTags {
+            content = ModelConfiguration.stripThinkTags(content)
+        }
+
+        let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        return normalizedActivitySummary(cleaned)
+    }
+
+    private static func normalizedActivitySummary(_ value: String) -> String {
         let sentences = value
             .split(whereSeparator: { $0 == "." || $0 == "。" || $0 == "!" || $0 == "?" })
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }

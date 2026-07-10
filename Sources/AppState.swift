@@ -276,7 +276,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     ]
     static let defaultPostProcessingModel = "openai/gpt-oss-20b"
     static let defaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
-    static let defaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    static let defaultContextModel = "qwen/qwen3.6-27b"
+    private static let deprecatedDefaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private static let trailingPressEnterCommandPattern = try! NSRegularExpression(
         pattern: #"(?i)(?:^|[ \t\r\n,;:\-]+)press[ \t\r\n]+enter[\s\p{P}]*$"#
     )
@@ -627,7 +628,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let transcriptionAPIKey = Self.loadStoredAPIKey(account: transcriptionAPIKeyStorageKey)
         let postProcessingModel = UserDefaults.standard.string(forKey: postProcessingModelStorageKey) ?? Self.defaultPostProcessingModel
         let postProcessingFallbackModel = UserDefaults.standard.string(forKey: postProcessingFallbackModelStorageKey) ?? Self.defaultPostProcessingFallbackModel
-        let contextModel = UserDefaults.standard.string(forKey: contextModelStorageKey) ?? Self.defaultContextModel
+        let contextModel = Self.loadStoredContextModel(key: contextModelStorageKey)
         let shortcuts = Self.loadShortcutConfiguration(
             holdKey: holdShortcutStorageKey,
             toggleKey: toggleShortcutStorageKey,
@@ -858,6 +859,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return stored
         }
         return defaultAPIBaseURL
+    }
+
+    private static func loadStoredContextModel(key: String) -> String {
+        guard let stored = UserDefaults.standard.string(forKey: key) else {
+            return defaultContextModel
+        }
+
+        let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == deprecatedDefaultContextModel {
+            UserDefaults.standard.set(defaultContextModel, forKey: key)
+            return defaultContextModel
+        }
+
+        return trimmed.isEmpty ? defaultContextModel : trimmed
     }
 
     private static func loadShortcutConfiguration(
