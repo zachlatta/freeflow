@@ -223,6 +223,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let preserveClipboardStorageKey = "preserve_clipboard"
+    private let preserveExactWordingStorageKey = "preserve_exact_wording"
     private let keepDictationInClipboardHistoryStorageKey = "keep_dictation_in_clipboard_history"
     private let pressEnterVoiceCommandStorageKey = "press_enter_voice_command_enabled"
     private let alertSoundsEnabledStorageKey = "alert_sounds_enabled"
@@ -506,6 +507,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var preserveExactWording: Bool {
+        didSet {
+            UserDefaults.standard.set(preserveExactWording, forKey: preserveExactWordingStorageKey)
+        }
+    }
+
     @Published var keepDictationInClipboardHistory: Bool {
         didSet {
             UserDefaults.standard.set(keepDictationInClipboardHistory, forKey: keepDictationInClipboardHistoryStorageKey)
@@ -677,6 +684,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let preserveClipboard = UserDefaults.standard.object(forKey: preserveClipboardStorageKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
+        let preserveExactWording = UserDefaults.standard.bool(forKey: preserveExactWordingStorageKey)
         let keepDictationInClipboardHistory = UserDefaults.standard.bool(forKey: keepDictationInClipboardHistoryStorageKey)
         let realtimeStreamingEnabled = UserDefaults.standard.bool(forKey: realtimeStreamingEnabledStorageKey)
         let realtimeStreamingModel = UserDefaults.standard.string(forKey: realtimeStreamingModelStorageKey) ?? ""
@@ -751,6 +759,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.outputLanguage = outputLanguage
         self.shortcutStartDelay = shortcutStartDelay
         self.preserveClipboard = preserveClipboard
+        self.preserveExactWording = preserveExactWording
         self.keepDictationInClipboardHistory = keepDictationInClipboardHistory
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
@@ -1197,7 +1206,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     postProcessingService: postProcessingService,
                     customVocabulary: capturedCustomVocabulary,
                     customSystemPrompt: capturedCustomSystemPrompt,
-                    outputLanguage: self.outputLanguage
+                    outputLanguage: self.outputLanguage,
+                    preserveExactWording: self.preserveExactWording
                 )
                 finalTranscript = result.finalTranscript
                 processingStatus = Self.statusMessage(
@@ -2441,6 +2451,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         case voiceMacro(command: String)
         case postProcessingSucceeded
         case postProcessingFailedFallback
+        case preservedExactWording
+        case preservedExactWordingTranslated
+        case preservedExactWordingTranslationFailedFallback
         case commandModeSucceeded(invocation: CommandInvocation)
         case commandModeFailedFallback(invocation: CommandInvocation)
 
@@ -2456,6 +2469,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return isRetry
                     ? "Post-processing failed on retry, using raw transcript"
                     : "Post-processing failed, using raw transcript"
+            case .preservedExactWording:
+                return "Preserved exact wording, skipped post-processing"
+            case .preservedExactWordingTranslated:
+                return "Preserved exact wording, translated to output language"
+            case .preservedExactWordingTranslationFailedFallback:
+                return "Verbatim translation failed, using untranslated raw transcript"
             case .commandModeSucceeded(let invocation):
                 return "Edit mode succeeded (\(invocation.rawValue))"
             case .commandModeFailedFallback(let invocation):
@@ -2471,7 +2490,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         postProcessingService: PostProcessingService,
         customVocabulary: String,
         customSystemPrompt: String,
-        outputLanguage: String = ""
+        outputLanguage: String = "",
+        preserveExactWording: Bool
     ) async -> (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String) {
         let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -2499,7 +2519,37 @@ final class AppState: ObservableObject, @unchecked Sendable {
             os_log(.info, log: recordingLog, "Voice macro triggered: %{public}@", macro.command)
             return (macro.payload, .voiceMacro(command: macro.command), "")
         }
-        
+
+        // Preserve-exact-wording mode. Two sub-cases so translation
+        // stays honored:
+        //
+        //   1. No Output Language set — skip the LLM entirely and
+        //      return the raw transcript verbatim.
+        //   2. Output Language IS set — route through a stripped-down
+        //      translate-only prompt. The user asked for another
+        //      language; silently dropping translation defeats their
+        //      settings. The translate-only path preserves filler,
+        //      informal wording, and profanity 1:1 while still hitting
+        //      the target language.
+        if preserveExactWording {
+            let targetLanguage = outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+            if targetLanguage.isEmpty {
+                return (trimmedRawTranscript, .preservedExactWording, "")
+            }
+            do {
+                let result = try await postProcessingService.translateVerbatim(
+                    transcript: trimmedRawTranscript,
+                    targetLanguage: targetLanguage
+                )
+                return (result.transcript, .preservedExactWordingTranslated, result.prompt)
+            } catch {
+                os_log(.error, log: recordingLog,
+                       "Verbatim translation failed: %{public}@",
+                       error.localizedDescription)
+                return (trimmedRawTranscript, .preservedExactWordingTranslationFailedFallback, "")
+            }
+        }
+
         do {
             let result = try await postProcessingService.postProcess(
                 transcript: trimmedRawTranscript,
@@ -2667,7 +2717,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         postProcessingService: postProcessingService,
                         customVocabulary: self.customVocabulary,
                         customSystemPrompt: self.customSystemPrompt,
-                        outputLanguage: self.outputLanguage
+                        outputLanguage: self.outputLanguage,
+                        preserveExactWording: self.preserveExactWording
                     )
                     try Task.checkCancellation()
 
@@ -2714,7 +2765,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
                         let shouldPersistRawDictationFallback: Bool
                         switch result.outcome {
-                        case .postProcessingFailedFallback:
+                        case .postProcessingFailedFallback,
+                             .preservedExactWordingTranslationFailedFallback:
                             shouldPersistRawDictationFallback = !trimmedFinalTranscript.isEmpty
                         default:
                             shouldPersistRawDictationFallback = false
