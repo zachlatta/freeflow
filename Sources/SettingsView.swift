@@ -1064,6 +1064,10 @@ struct GeneralSettingsView: View {
         "Korean",
         "German",
         "Portuguese",
+        "Hindi",
+        "Hinglish",
+        "Gujarati",
+        "Gujlish",
     ]
 
     private var outputLanguageSection: some View {
