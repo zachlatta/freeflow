@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed the configured transcription, post-processing, and context timeouts being silently capped at 30 seconds by a session-level resource timeout, which broke long transfers to slow local models.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added
