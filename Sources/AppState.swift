@@ -565,6 +565,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var selectedSettingsTab: SettingsTab? = .general
     @Published var pipelineHistory: [PipelineHistoryItem] = []
     @Published var debugStatusMessage = "Idle"
+    /// Live input level mirrored to the menu bar icon while recording.
+    @Published var menuBarAudioLevel: Float = 0
     @Published var debugShowsUpdateReminderAfterDictation = false
     @Published var lastRawTranscript = ""
     @Published var lastPostProcessedTranscript = ""
@@ -2232,6 +2234,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         .receive(on: DispatchQueue.main)
                         .sink { [weak self] level in
                             self?.overlayManager.updateAudioLevel(level)
+                            self?.menuBarAudioLevel = level
                         }
                 }
             } catch {
