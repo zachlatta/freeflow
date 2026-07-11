@@ -416,28 +416,43 @@ struct ProviderSettingsFields: View {
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
 
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(SettingsTab.visibleCases) { tab in
-                    Button {
-                        appState.selectedSettingsTab = tab
-                    } label: {
-                        SettingsSidebarRow(title: tab.title, icon: tab.icon)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(appState.selectedSettingsTab == tab
-                                          ? Color.accentColor.opacity(0.15)
-                                          : Color.clear)
-                            )
+                HStack(spacing: 8) {
+                    Image(nsImage: NSApp.applicationIconImage)
+                        .resizable()
+                        .frame(width: 28, height: 28)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(AppName.displayName)
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Version \(appVersion)")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 12)
+
+                ForEach(SettingsTab.visibleCases) { tab in
+                    SettingsSidebarRow(
+                        title: tab.title,
+                        icon: tab.icon,
+                        isSelected: appState.selectedSettingsTab == tab
+                    ) {
+                        appState.selectedSettingsTab = tab
+                    }
                 }
 
                 Spacer()
             }
             .padding(10)
-            .frame(width: 180)
+            .frame(width: 190)
             .background(Color(nsColor: .windowBackgroundColor))
 
             Divider()
@@ -464,22 +479,39 @@ struct SettingsView: View {
 private struct SettingsSidebarRow: View {
     let title: String
     let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 13, weight: .regular))
-                .frame(width: 16, height: 16, alignment: .center)
-                .foregroundStyle(.primary)
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .regular))
+                    .frame(width: 16, height: 16, alignment: .center)
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
 
-            Text(title)
-                .font(.body)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(title)
+                    .font(.system(size: 13, weight: isSelected ? .medium : .regular))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(height: 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Color.accentColor.opacity(0.15)
+                            : Color.primary.opacity(isHovered ? 0.06 : 0)
+                    )
+            )
+            .contentShape(Rectangle())
         }
-        .frame(height: 16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 

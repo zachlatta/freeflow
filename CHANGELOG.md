@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Improved
+
+- Redesigned the Settings sidebar with an app icon and version header, selected-row highlighting, and hover feedback.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added
