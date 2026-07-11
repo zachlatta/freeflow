@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Improved
+
+- Faster stop-to-paste latency: the transcription upload now starts immediately when recording stops, instead of waiting for the audio capture session to finish tearing down.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added
