@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Fixed
+
+- Fixed Edit Mode silently falling back to dictation (overwriting the selection) in VS Code, Gmail-in-Chrome, and other Electron/Chromium apps. Those apps build their accessibility tree lazily, so FreeFlow now asks them to activate it before reading the selection.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added
