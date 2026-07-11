@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Added
+
+- Dictation is now aware of the text surrounding the cursor: cleanup matches the sentence flow when inserting mid-sentence (no stray leading capitals or trailing periods), a separating space is added automatically when inserting directly after a word, and the trailing space after sentence punctuation is skipped when the following text already provides one.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added
