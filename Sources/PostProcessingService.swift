@@ -480,16 +480,7 @@ Behavior:
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = postProcessingTimeoutSeconds
 
-        let normalizedVocabulary = normalizedVocabularyText(customVocabulary)
-        let vocabularyPrompt = if !normalizedVocabulary.isEmpty {
-            """
-The following vocabulary must be treated as high-priority terms while rewriting.
-Use these spellings exactly in the output when relevant:
-\(normalizedVocabulary)
-"""
-        } else {
-            ""
-        }
+        let vocabularyPrompt = vocabularyPromptSection(for: customVocabulary)
 
         var systemPrompt = customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? Self.defaultSystemPrompt
@@ -620,16 +611,7 @@ Model: \(model)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = postProcessingTimeoutSeconds
 
-        let normalizedVocabulary = normalizedVocabularyText(customVocabulary)
-        let vocabularyPrompt = if !normalizedVocabulary.isEmpty {
-            """
-The following vocabulary must be treated as high-priority terms while rewriting.
-Use these spellings exactly in the output when relevant:
-\(normalizedVocabulary)
-"""
-        } else {
-            ""
-        }
+        let vocabularyPrompt = vocabularyPromptSection(for: customVocabulary)
 
         var systemPrompt = Self.commandModeSystemPrompt
         let trimmedOutputLanguage = outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -973,6 +955,76 @@ Model: \(model)
         return Set(parts.map(String.init).filter { token in
             token.count > 1 && !stopWords.contains(token)
         })
+    }
+
+    /// A vocabulary list split into plain terms and explicit
+    /// heard-form -> correct-form correction pairs (issue #125).
+    private struct ParsedVocabulary {
+        var terms: [String] = []
+        var corrections: [(heard: String, correct: String)] = []
+    }
+
+    /// Entries may use "heard form -> Correct Form" (or "=>") to teach the
+    /// model a specific mishearing. Multiple heard variants can share one
+    /// correction with "|": "cloud code | clod code -> Claude Code".
+    /// Entries without an arrow behave exactly as before.
+    private func parseVocabularyEntries(_ entries: [String]) -> ParsedVocabulary {
+        var parsed = ParsedVocabulary()
+        for entry in entries {
+            guard let arrow = entry.range(of: "->") ?? entry.range(of: "=>") else {
+                parsed.terms.append(entry)
+                continue
+            }
+            let correct = entry[arrow.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            let heardForms = entry[..<arrow.lowerBound]
+                .split(separator: "|")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard !correct.isEmpty, !heardForms.isEmpty else {
+                // Malformed mapping: keep whichever side exists as a plain term.
+                let fallback = correct.isEmpty ? heardForms.joined(separator: ", ") : correct
+                if !fallback.isEmpty { parsed.terms.append(fallback) }
+                continue
+            }
+            parsed.terms.append(correct)
+            for heard in heardForms {
+                parsed.corrections.append((heard: heard, correct: correct))
+            }
+        }
+        // A mapping's correct form may repeat an existing plain entry.
+        var seen = Set<String>()
+        parsed.terms = parsed.terms.filter { seen.insert($0.lowercased()).inserted }
+        return parsed
+    }
+
+    /// Builds the system-prompt section for custom vocabulary: a
+    /// high-priority term list plus, when mappings are present, explicit
+    /// mishearing corrections. Returns "" when there is no vocabulary.
+    private func vocabularyPromptSection(for customVocabulary: [String]) -> String {
+        let parsed = parseVocabularyEntries(customVocabulary)
+        var sections: [String] = []
+
+        let normalizedVocabulary = normalizedVocabularyText(parsed.terms)
+        if !normalizedVocabulary.isEmpty {
+            sections.append("""
+The following vocabulary must be treated as high-priority terms while rewriting.
+Use these spellings exactly in the output when relevant:
+\(normalizedVocabulary)
+""")
+        }
+
+        if !parsed.corrections.isEmpty {
+            let pairs = parsed.corrections
+                .map { "- \"\($0.heard)\" -> \"\($0.correct)\"" }
+                .joined(separator: "\n")
+            sections.append("""
+Known mishearings. When the transcript contains a left-hand form below (or a close phonetic variant of it) and the speaker clearly meant the right-hand term, output the right-hand form instead:
+\(pairs)
+Only apply a correction when the surrounding words make the intended term plausible; otherwise leave the transcript wording unchanged.
+""")
+        }
+
+        return sections.joined(separator: "\n\n")
     }
 
     private func mergedVocabularyTerms(rawVocabulary: String) -> [String] {

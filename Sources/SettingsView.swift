@@ -1402,9 +1402,12 @@ struct GeneralSettingsView: View {
                     appState.customVocabulary = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 }
 
-            Text("Separate entries with commas, new lines, or semicolons.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Separate entries with commas, new lines, or semicolons.")
+                Text("Teach specific mishearings with an arrow: \"cloud code -> Claude Code\". Separate multiple heard forms with \"|\": \"cloud code | clod code -> Claude Code\".")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
