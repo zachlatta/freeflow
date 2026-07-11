@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Added
+
+- Custom vocabulary entries can now map specific mishearings to the intended term with an arrow (`cloud code -> Claude Code`), and multiple heard forms can share one correction (`cloud code | clod code -> Claude Code`). Plain entries behave exactly as before.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added
