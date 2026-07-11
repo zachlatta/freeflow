@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Added
+
+- The recording start, stop, and error feedback sounds are now configurable in Settings, with a picker and preview button for each event across the full set of built-in macOS alert sounds.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added

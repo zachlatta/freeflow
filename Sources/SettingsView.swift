@@ -1361,7 +1361,7 @@ struct GeneralSettingsView: View {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         showMutedHint = muted || (volume ?? 1) < 0.10
                     }
-                    appState.playAlertSound(named: "Tink")
+                    appState.playStartSound()
                 }
                 .font(.caption)
                 .disabled(!appState.alertSoundsEnabled)
@@ -1377,9 +1377,55 @@ struct GeneralSettingsView: View {
                     .transition(.opacity)
                 }
             }
+
+            Divider()
+
+            VStack(spacing: 8) {
+                soundPickerRow("Recording start", selection: $appState.startSoundName)
+                soundPickerRow("Recording stop", selection: $appState.stopSoundName)
+                soundPickerRow("Error", selection: $appState.errorSoundName)
+            }
+            .disabled(!appState.alertSoundsEnabled)
+            .opacity(appState.alertSoundsEnabled ? 1 : 0.5)
         }
         .onChange(of: appState.alertSoundsEnabled) { enabled in
             if !enabled { showMutedHint = false }
+        }
+    }
+
+    /// The stock macOS alert sounds in /System/Library/Sounds, all loadable
+    /// by name with NSSound(named:).
+    private static let systemSoundNames = [
+        "Basso", "Blow", "Bottle", "Frog", "Funk", "Glass", "Hero",
+        "Morse", "Ping", "Pop", "Purr", "Sosumi", "Submarine", "Tink",
+    ]
+
+    private func soundPickerRow(_ label: String, selection: Binding<String>) -> some View {
+        // Include an off-catalog value (e.g. set via `defaults write`) so the
+        // picker shows it instead of rendering blank.
+        var options = Self.systemSoundNames
+        if !options.contains(selection.wrappedValue) {
+            options.append(selection.wrappedValue)
+        }
+        return HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+            Spacer()
+            Picker("", selection: selection) {
+                ForEach(options, id: \.self) { name in
+                    Text(name).tag(name)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 130)
+            Button {
+                appState.playAlertSound(named: selection.wrappedValue)
+            } label: {
+                Image(systemName: "play.circle")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help("Preview this sound")
         }
     }
 
