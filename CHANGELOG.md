@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Improved
+
+- Redesigned the menu bar extra as a window-style panel, and the menu bar icon now shows a live waveform driven by the input level while recording.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added
