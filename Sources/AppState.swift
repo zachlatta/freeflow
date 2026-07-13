@@ -276,8 +276,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         ("ca", "Catalan")
     ]
     static let defaultPostProcessingModel = "openai/gpt-oss-20b"
-    static let defaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
+    static let defaultPostProcessingFallbackModel = "qwen/qwen3.6-27b"
     static let defaultContextModel = "qwen/qwen3.6-27b"
+    private static let deprecatedDefaultPostProcessingFallbackModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private static let deprecatedDefaultContextModel = "meta-llama/llama-4-scout-17b-16e-instruct"
     private static let trailingPressEnterCommandPattern = try! NSRegularExpression(
         pattern: #"(?i)(?:^|[ \t\r\n,;:\-]+)press[ \t\r\n]+enter[\s\p{P}]*$"#
@@ -634,7 +635,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let transcriptionAPIURL = Self.loadOptionalStoredAPIValue(account: transcriptionAPIURLStorageKey)
         let transcriptionAPIKey = Self.loadStoredAPIKey(account: transcriptionAPIKeyStorageKey)
         let postProcessingModel = UserDefaults.standard.string(forKey: postProcessingModelStorageKey) ?? Self.defaultPostProcessingModel
-        let postProcessingFallbackModel = UserDefaults.standard.string(forKey: postProcessingFallbackModelStorageKey) ?? Self.defaultPostProcessingFallbackModel
+        let postProcessingFallbackModel = Self.loadStoredPostProcessingFallbackModel(
+            key: postProcessingFallbackModelStorageKey
+        )
         let contextModel = Self.loadStoredContextModel(key: contextModelStorageKey)
         let shortcuts = Self.loadShortcutConfiguration(
             holdKey: holdShortcutStorageKey,
@@ -882,6 +885,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         return trimmed.isEmpty ? defaultContextModel : trimmed
+    }
+
+    private static func loadStoredPostProcessingFallbackModel(key: String) -> String {
+        guard let stored = UserDefaults.standard.string(forKey: key) else {
+            return defaultPostProcessingFallbackModel
+        }
+
+        let trimmed = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == deprecatedDefaultPostProcessingFallbackModel {
+            UserDefaults.standard.set(defaultPostProcessingFallbackModel, forKey: key)
+            return defaultPostProcessingFallbackModel
+        }
+
+        return trimmed.isEmpty ? defaultPostProcessingFallbackModel : trimmed
     }
 
     private static func loadShortcutConfiguration(

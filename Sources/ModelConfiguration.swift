@@ -9,13 +9,9 @@ public struct ModelConfig {
 
 public struct ModelConfiguration {
     public static let llmModels = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
-        "meta-llama/llama-4-scout-17b-16e-instruct",
         "openai/gpt-oss-20b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-safeguard-20b",
-        "qwen/qwen3-32b",
         "qwen/qwen3.6-27b",
         "allam-2-7b",
         "groq/compound",
@@ -73,8 +69,8 @@ public struct ModelConfiguration {
         } else if cleanModel == "qwen/qwen3.6-27b" {
             return ModelConfig(
                 maxCompletionTokens: nil,
-                reasoningEffort: nil,
-                includeReasoning: nil,
+                reasoningEffort: "none",
+                includeReasoning: false,
                 shouldStripThinkTags: true
             )
         } else if cleanModel == "llama-3.1-8b-instant" {

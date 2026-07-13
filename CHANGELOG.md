@@ -8,6 +8,28 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [1.2.0] - 2026-07-14
+
+### Added
+
+- A Preserve exact wording option that skips transcript cleanup while still supporting literal translation, voice macros, and Edit Mode.
+- An instruction guard that retries or falls back to the literal transcript when cleanup appears to answer a dictated prompt instead of preserving it.
+- An option to keep dictations in clipboard-manager history.
+- A menu bar action for adding copied words directly to the custom vocabulary while avoiding duplicates.
+
+### Improved
+
+- Post-processing now switches to the fallback model immediately when the primary model is rate-limited, remembers daily limits across restarts, and shows their reset times in Settings.
+- The default fallback model now uses Qwen 3.6 27B, and models scheduled for Groq shutdown in July or August 2026 have been removed from the picker.
+- Transcription failures now distinguish network outages from slow providers and display clearer errors in the recording overlay.
+- The default context model now uses Qwen 3.6 27B and strips reasoning tags from context summaries.
+- Local model requests now honor their configured timeouts, and transcription uses response formats compatible with a wider range of OpenAI-style models.
+- Permission and update checks use fewer unnecessary background wakeups.
+
+### Fixed
+
+- Fixed a recording overlay resource leak that could leave hidden animations running after the overlay closed.
+
 ## [1.1.0] - 2026-06-03
 
 ### Added

@@ -6,6 +6,8 @@ struct AppContextServiceTests {
         testQwenRawOutputIsSummarized()
         testQwenReasoningOutputIsStripped()
         testNonStrippingModelPreservesExistingBehavior()
+        testDeprecatedGroqModelsAreNotPredefined()
+        testQwenCleanupDisablesReasoning()
         print("AppContextServiceTests passed")
     }
 
@@ -49,6 +51,27 @@ struct AppContextServiceTests {
         )
 
         expectEqual(summary, output)
+    }
+
+    private static func testDeprecatedGroqModelsAreNotPredefined() {
+        let deprecatedModels = [
+            "qwen/qwen3-32b",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+            "llama-3.1-8b-instant",
+            "llama-3.3-70b-versatile"
+        ]
+
+        for model in deprecatedModels {
+            expect(!ModelConfiguration.llmModels.contains(model), "Deprecated model remains in picker: \(model)")
+        }
+        expect(ModelConfiguration.llmModels.contains("qwen/qwen3.6-27b"), "New fallback is missing from picker")
+    }
+
+    private static func testQwenCleanupDisablesReasoning() {
+        let config = ModelConfiguration.config(for: "qwen/qwen3.6-27b")
+
+        expect(config.reasoningEffort == "none", "Qwen cleanup should disable reasoning")
+        expect(config.includeReasoning == false, "Qwen cleanup should exclude reasoning output")
     }
 
     private static func expectEqual(_ actual: String?, _ expected: String, file: StaticString = #file, line: UInt = #line) {
