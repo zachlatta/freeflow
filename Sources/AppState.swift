@@ -1849,9 +1849,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Skips the cross-process accessibility round-trip entirely when Edit
+    /// Mode is off, since `resolveSessionIntent` ignores the snapshot's
+    /// contents in that case anyway — keeps a slow AX query (some apps,
+    /// notably Electron/Chromium, can take tens of ms to respond) out of the
+    /// hotkey-to-overlay latency path for the common case.
+    private func collectSelectionSnapshotIfNeeded() -> AppSelectionSnapshot {
+        isCommandModeEnabled ? contextService.collectSelectionSnapshot() : .empty
+    }
+
     private func scheduleShortcutStart(mode: RecordingTriggerMode) {
         cancelPendingShortcutStart(resetMode: false)
-        pendingSelectionSnapshot = contextService.collectSelectionSnapshot()
+        pendingSelectionSnapshot = collectSelectionSnapshotIfNeeded()
         pendingManualCommandInvocation = hotkeyManager.currentPressedModifiers.contains(
             commandModeManualModifier.shortcutModifier
         )
@@ -2008,7 +2017,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
         }
 
-        let selectionSnapshot = selectionSnapshot ?? contextService.collectSelectionSnapshot()
+        let selectionSnapshot = selectionSnapshot ?? collectSelectionSnapshotIfNeeded()
         let manualCommandRequested = manualCommandRequested
             ?? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
         guard let resolvedIntent = resolveSessionIntent(
@@ -2061,7 +2070,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
             prepareForMicrophonePermissionPrompt(
                 triggerMode: triggerMode,
-                selectionSnapshot: pendingSelectionSnapshot ?? contextService.collectSelectionSnapshot(),
+                selectionSnapshot: pendingSelectionSnapshot ?? collectSelectionSnapshotIfNeeded(),
                 manualCommandRequested: currentSessionIntent.isManualCommand
             )
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in

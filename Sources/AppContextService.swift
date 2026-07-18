@@ -7,6 +7,8 @@ struct AppSelectionSnapshot {
     let bundleIdentifier: String?
     let windowTitle: String?
     let selectedText: String?
+
+    static let empty = AppSelectionSnapshot(appName: nil, bundleIdentifier: nil, windowTitle: nil, selectedText: nil)
 }
 
 struct AppContext {
