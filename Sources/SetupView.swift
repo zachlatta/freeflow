@@ -105,7 +105,7 @@ struct SetupView: View {
     @State private var isCapturingToggleShortcut = false
     @State private var isCapturingCopyAgainShortcut = false
     @StateObject private var testHotkeyHarness = SetupTestHotkeyHarness()
-    @AppStorage("use_compact_overlay") private var useCompactOverlay = true
+    @AppStorage("overlay_style") private var overlayStyle: OverlayStyle = .minimalist
 
     private let totalSteps: [SetupStep] = SetupStep.allCases
     private var isCapturingShortcut: Bool {
@@ -880,14 +880,20 @@ struct SetupView: View {
                 OverlayStyleOptionRow(
                     title: "Minimalist menu-bar overlay",
                     subtitle: "Two slim wings flank the camera notch and stay inside the menu bar. Never covers app tabs or toolbars.",
-                    isMinimalist: true,
-                    selection: $useCompactOverlay
+                    style: .minimalist,
+                    selection: $overlayStyle
                 )
                 OverlayStyleOptionRow(
                     title: "Drop-down pill",
                     subtitle: "Single pill hangs below the menu bar during recording. Larger and more visible, but covers a thin strip of whatever app is active.",
-                    isMinimalist: false,
-                    selection: $useCompactOverlay
+                    style: .pill,
+                    selection: $overlayStyle
+                )
+                OverlayStyleOptionRow(
+                    title: "Notch Indicator",
+                    subtitle: "Stays a thin hairline until you start dictating, then opens into a small floating pill showing the app you're dictating into and a live waveform.",
+                    style: .notch,
+                    selection: $overlayStyle
                 )
             }
             .padding(.top, 6)
@@ -1519,9 +1525,10 @@ struct HowToRow: View {
 }
 
 /// Mini visual preview of one overlay style for the setup-flow option cards.
-/// Stylized MacBook top edge with the recording UI drawn as wings or pill.
+/// Stylized MacBook top edge with the recording UI drawn as wings, pill, or
+/// the floating notch capsule.
 struct OverlayStylePreview: View {
-    let isMinimalist: Bool
+    let style: OverlayStyle
 
     private let frameWidth: CGFloat = 110
     private let frameHeight: CGFloat = 56
@@ -1566,7 +1573,8 @@ struct OverlayStylePreview: View {
             .frame(width: notchWidth, height: notchHeight)
 
             // Style-specific overlay rendering.
-            if isMinimalist {
+            switch style {
+            case .minimalist:
                 // Two slim wings flanking the notch, inside menu bar height.
                 HStack(spacing: notchWidth) {
                     UnevenRoundedRectangle(
@@ -1587,7 +1595,7 @@ struct OverlayStylePreview: View {
                     .fill(Color.black)
                     .frame(width: 16, height: notchHeight)
                 }
-            } else {
+            case .pill:
                 // Drop-down pill hanging below the menu bar from the notch.
                 UnevenRoundedRectangle(
                     topLeadingRadius: 0,
@@ -1597,6 +1605,26 @@ struct OverlayStylePreview: View {
                 )
                 .fill(Color.black)
                 .frame(width: notchWidth + 10, height: notchHeight + 12)
+            case .notch:
+                // Small floating capsule with icon + waveform dots, sitting
+                // just below the menu bar — distinct from both other styles,
+                // which attach directly to the notch cutout.
+                Capsule()
+                    .fill(Color.black)
+                    .overlay(
+                        HStack(spacing: 3) {
+                            Circle()
+                                .fill(Color.white.opacity(0.85))
+                                .frame(width: 5, height: 5)
+                            ForEach(0..<3, id: \.self) { _ in
+                                Capsule()
+                                    .fill(Color.white.opacity(0.85))
+                                    .frame(width: 1.5, height: 6)
+                            }
+                        }
+                    )
+                    .frame(width: 34, height: 12)
+                    .padding(.top, menuBarHeight + 3)
             }
         }
         .frame(width: frameWidth, height: frameHeight)
@@ -1608,20 +1636,20 @@ struct OverlayStylePreview: View {
 struct OverlayStyleOptionRow: View {
     let title: String
     let subtitle: String
-    let isMinimalist: Bool
-    @Binding var selection: Bool
+    let style: OverlayStyle
+    @Binding var selection: OverlayStyle
 
     var body: some View {
-        let isSelected = (selection == isMinimalist)
+        let isSelected = selection == style
         Button(action: {
-            selection = isMinimalist
+            selection = style
         }) {
             HStack(alignment: .center, spacing: 14) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 20))
                     .foregroundStyle(isSelected ? Color.blue : Color.secondary)
 
-                OverlayStylePreview(isMinimalist: isMinimalist)
+                OverlayStylePreview(style: style)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)

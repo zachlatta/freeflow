@@ -6,6 +6,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Must run before any SwiftUI view reads the overlay_style AppStorage
+        // key (Setup's overlayStyleStep, Settings' overlaySection).
+        OverlayStyle.migrateLegacyOverlayPreferenceIfNeeded()
         NetworkMonitor.shared.start()
 
         NotificationCenter.default.addObserver(
@@ -25,6 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             showSetupWindow()
         } else {
             appState.startHotkeyMonitoring()
+            appState.overlayManager.setNotchIdleEnabled(OverlayStyle.current == .notch)
             appState.startAccessibilityPolling()
             Task { @MainActor in
                 UpdateManager.shared.startPeriodicChecks()
@@ -73,6 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if !self.appState.hasCompletedSetup {
                     self.appState.hasCompletedSetup = true
                     self.appState.startHotkeyMonitoring()
+                    self.appState.overlayManager.setNotchIdleEnabled(OverlayStyle.current == .notch)
                     self.appState.startAccessibilityPolling()
                     NSApp.setActivationPolicy(.accessory)
                 }
@@ -168,6 +173,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupWindow = nil
         NSApp.setActivationPolicy(.accessory)
         appState.startHotkeyMonitoring()
+        appState.overlayManager.setNotchIdleEnabled(OverlayStyle.current == .notch)
         appState.startAccessibilityPolling()
         Task { @MainActor in
             UpdateManager.shared.startPeriodicChecks()

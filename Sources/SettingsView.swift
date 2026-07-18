@@ -533,7 +533,7 @@ struct GeneralSettingsView: View {
     @Environment(\.openURL) private var openURL
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
-    @AppStorage("use_compact_overlay") private var useCompactOverlay = true
+    @AppStorage("overlay_style") private var overlayStyle: OverlayStyle = .minimalist
     @State private var screensVersion = 0
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
@@ -1126,19 +1126,28 @@ struct GeneralSettingsView: View {
             OverlayStyleOptionRow(
                 title: "Minimalist menu-bar overlay",
                 subtitle: "Two slim wings flank the camera notch and stay inside the menu bar. Never covers app tabs or toolbars.",
-                isMinimalist: true,
-                selection: $useCompactOverlay
+                style: .minimalist,
+                selection: $overlayStyle
             )
             OverlayStyleOptionRow(
                 title: "Drop-down pill",
                 subtitle: "Single pill hangs below the menu bar during recording. Larger and more visible, but covers a thin strip of whatever app is active.",
-                isMinimalist: false,
-                selection: $useCompactOverlay
+                style: .pill,
+                selection: $overlayStyle
+            )
+            OverlayStyleOptionRow(
+                title: "Notch Indicator",
+                subtitle: "Stays a thin hairline until you start dictating, then opens into a small floating pill showing the app you're dictating into and a live waveform.",
+                style: .notch,
+                selection: $overlayStyle
             )
 
             Divider()
 
             overlayDisplaySection
+        }
+        .onChange(of: overlayStyle) { newValue in
+            appState.overlayManager.setNotchIdleEnabled(newValue == .notch)
         }
     }
 
