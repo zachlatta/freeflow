@@ -1523,6 +1523,7 @@ struct PromptsSettingsView: View {
     @State private var contextTestOutput: String? = nil
     @State private var contextTestError: String? = nil
     @State private var contextTestPrompt: String? = nil
+    @AppStorage(AppContextSource.modeKey) private var appContextMode: String = AppContextSource.Mode.screenshot.rawValue
 
     var body: some View {
         ScrollView {
@@ -1533,7 +1534,7 @@ struct PromptsSettingsView: View {
                 SettingsCard("Instruction Guard", icon: "shield.lefthalf.filled") {
                     instructionGuardSection
                 }
-                SettingsCard("Context Prompt", icon: "eye.fill") {
+                SettingsCard("App Context", icon: "doc.text.viewfinder") {
                     contextPromptSection
                 }
             }
@@ -1793,6 +1794,18 @@ struct PromptsSettingsView: View {
 
     // MARK: Context Prompt
 
+    /// The per-mode description shown under the Context source segmented control.
+    private var contextSourceDescription: String {
+        switch AppContextSource.Mode(rawValue: appContextMode) ?? .screenshot {
+        case .off:
+            return "No context is sent — the cleanup model sees only your transcript."
+        case .metadata:
+            return "Sends one line of text about your app and page — instant, no added latency. E.g. \"User is dictating on github.com (Pull requests) in Safari\", or \"in the Chrome address bar\"."
+        case .screenshot:
+            return "Captures the window and asks the vision model — catches on-screen names and terms (e.g. in email). Uses vision quota; depending on your connection (ping, upload speed) it can add up to ~3 s per transcription."
+        }
+    }
+
     private var contextPromptSection: some View {
         let isCustom = !appState.customContextPrompt.isEmpty
         let hasNewerDefault = isCustom
@@ -1800,201 +1813,245 @@ struct PromptsSettingsView: View {
             && appState.customContextPromptLastModified < AppContextService.defaultContextPromptDate
 
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Controls how \(AppName.displayName) infers your current activity from app metadata and screenshots.")
+            Text("Controls how \(AppName.displayName) infers your current activity and what it sends to the AI.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if hasNewerDefault {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .foregroundStyle(.blue)
-                    Text("A newer default prompt is available.")
+            // MARK: Context source (always active)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Context source")
                         .font(.caption.weight(.semibold))
                     Spacer()
-                    Button("View Default") {
-                        showDefaultContextPrompt.toggle()
+                    Picker("", selection: $appContextMode) {
+                        Text("Off").tag(AppContextSource.Mode.off.rawValue)
+                        Text("App summary").tag(AppContextSource.Mode.metadata.rawValue)
+                        Text("Screenshot").tag(AppContextSource.Mode.screenshot.rawValue)
                     }
-                    .font(.caption)
-                    Button("Switch to Default") {
-                        customContextPromptInput = AppContextService.defaultContextPrompt
-                        appState.customContextPrompt = ""
-                        appState.customContextPromptLastModified = ""
-                    }
-                    .font(.caption)
-                }
-                .padding(10)
-                .background(Color.blue.opacity(0.1))
-                .cornerRadius(6)
-            }
-
-            if showDefaultContextPrompt {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text("Default Context Prompt")
-                            .font(.caption.weight(.semibold))
-                        Spacer()
-                        Button("Hide") {
-                            showDefaultContextPrompt = false
-                        }
-                        .font(.caption)
-                    }
-                    Text(AppContextService.defaultContextPrompt)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-                .padding(10)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .cornerRadius(6)
-            }
-
-            TextEditor(text: $customContextPromptInput)
-                .font(.system(.body, design: .monospaced))
-                .frame(minHeight: 120, maxHeight: 200)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                )
-                .onChange(of: customContextPromptInput) { newValue in
-                    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let defaultTrimmed = AppContextService.defaultContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if trimmed == defaultTrimmed || trimmed.isEmpty {
-                        if !appState.customContextPrompt.isEmpty {
-                            appState.customContextPrompt = ""
-                            appState.customContextPromptLastModified = ""
-                        }
-                    } else {
-                        appState.customContextPrompt = trimmed
-                        let today = iso8601DayFormatter.string(from: Date())
-                        if appState.customContextPromptLastModified != today {
-                            appState.customContextPromptLastModified = today
-                        }
-                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .accessibilityLabel("Context source")
                 }
 
-            HStack {
-                if isCustom {
-                    Label("Using custom prompt", systemImage: "pencil")
-                        .font(.caption)
-                        .foregroundStyle(.blue)
-                } else {
-                    Label("Using default", systemImage: "checkmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if isCustom {
-                    Button("Reset to Default") {
-                        customContextPromptInput = AppContextService.defaultContextPrompt
-                        appState.customContextPrompt = ""
-                        appState.customContextPromptLastModified = ""
-                    }
+                Text(contextSourceDescription)
                     .font(.caption)
-                }
+                    .foregroundStyle(.secondary)
             }
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Screenshot Resolution")
-                    .font(.caption.weight(.semibold))
-
-                Text("Controls the maximum image dimension sent for context inference.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Picker("", selection: $appState.contextScreenshotMaxDimension) {
-                    ForEach(AppState.contextScreenshotDimensionOptions, id: \.self) { dimension in
-                        Text("\(dimension) px").tag(dimension)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .accessibilityLabel("Screenshot Resolution")
-
-                HStack {
-                    if appState.contextScreenshotMaxDimension == AppState.defaultContextScreenshotMaxDimension {
-                        Label("Using default", systemImage: "checkmark.circle")
+            // MARK: Screenshot-only block — obscured + disabled unless in Screenshot mode
+            VStack(alignment: .leading, spacing: 10) {
+                // a) Vision Prompt
+                VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Vision Prompt")
+                            .font(.caption.weight(.semibold))
+                        Text("Instruction sent to the vision model in Screenshot mode.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    } else {
-                        Label("Using custom value", systemImage: "pencil")
+                    }
+
+                    if hasNewerDefault {
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .foregroundStyle(.blue)
+                            Text("A newer default prompt is available.")
+                                .font(.caption.weight(.semibold))
+                            Spacer()
+                            Button("View Default") {
+                                showDefaultContextPrompt.toggle()
+                            }
                             .font(.caption)
-                            .foregroundStyle(.blue)
-                    }
-                    Spacer()
-                    if appState.contextScreenshotMaxDimension != AppState.defaultContextScreenshotMaxDimension {
-                        Button("Reset to Default") {
-                            appState.contextScreenshotMaxDimension = AppState.defaultContextScreenshotMaxDimension
+                            Button("Switch to Default") {
+                                customContextPromptInput = AppContextService.defaultContextPrompt
+                                appState.customContextPrompt = ""
+                                appState.customContextPromptLastModified = ""
+                            }
+                            .font(.caption)
                         }
-                        .font(.caption)
+                        .padding(10)
+                        .background(Color.blue.opacity(0.1))
+                        .cornerRadius(6)
                     }
-                }
-            }
 
-            Divider()
+                    if showDefaultContextPrompt {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("Default Vision Prompt")
+                                    .font(.caption.weight(.semibold))
+                                Spacer()
+                                Button("Hide") {
+                                    showDefaultContextPrompt = false
+                                }
+                                .font(.caption)
+                            }
+                            Text(AppContextService.defaultContextPrompt)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .padding(10)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .cornerRadius(6)
+                    }
 
-            // Test section
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Test Context Prompt")
-                    .font(.caption.weight(.semibold))
-                Text("Captures a screenshot and metadata from the frontmost app, then runs the context prompt to infer activity.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    TextEditor(text: $customContextPromptInput)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(minHeight: 120, maxHeight: 200)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                        )
+                        .onChange(of: customContextPromptInput) { newValue in
+                            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let defaultTrimmed = AppContextService.defaultContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if trimmed == defaultTrimmed || trimmed.isEmpty {
+                                if !appState.customContextPrompt.isEmpty {
+                                    appState.customContextPrompt = ""
+                                    appState.customContextPromptLastModified = ""
+                                }
+                            } else {
+                                appState.customContextPrompt = trimmed
+                                let today = iso8601DayFormatter.string(from: Date())
+                                if appState.customContextPromptLastModified != today {
+                                    appState.customContextPromptLastModified = today
+                                }
+                            }
+                        }
 
-                Button {
-                    runContextPromptTest()
-                } label: {
-                    HStack(spacing: 6) {
-                        if contextTestRunning {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Running...")
+                    HStack {
+                        if isCustom {
+                            Label("Using custom prompt", systemImage: "pencil")
+                                .font(.caption)
+                                .foregroundStyle(.blue)
                         } else {
-                            Image(systemName: "play.fill")
-                            Text("Test Context Prompt")
+                            Label("Using default", systemImage: "checkmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if isCustom {
+                            Button("Reset to Default") {
+                                customContextPromptInput = AppContextService.defaultContextPrompt
+                                appState.customContextPrompt = ""
+                                appState.customContextPromptLastModified = ""
+                            }
+                            .font(.caption)
                         }
                     }
                 }
-                .disabled(contextTestRunning || appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                if appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Label("API key required to test", systemImage: "exclamationmark.triangle")
+                // b) Test Vision Prompt
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Test Vision Prompt")
+                        .font(.caption.weight(.semibold))
+                    Text("Runs the vision prompt on a fresh screenshot of the frontmost app.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
-                }
+                        .foregroundStyle(.secondary)
 
-                if let error = contextTestError {
-                    Label(error, systemImage: "xmark.circle.fill")
+                    Button {
+                        runContextPromptTest()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if contextTestRunning {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Running...")
+                            } else {
+                                Image(systemName: "play.fill")
+                                Text("Test Vision Prompt")
+                            }
+                        }
+                    }
+                    .disabled(contextTestRunning || appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Label("API key required to test", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+
+                    if let error = contextTestError {
+                        Label(error, systemImage: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+
+                    if let output = contextTestOutput {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Result:")
+                                .font(.caption.weight(.semibold))
+                            Text(output.isEmpty ? "(empty — no output)" : output)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.green.opacity(0.08))
+                                .cornerRadius(6)
+                        }
+                    }
+
+                    if let prompt = contextTestPrompt {
+                        DisclosureGroup("Full prompt sent") {
+                            Text(prompt)
+                                .font(.system(.caption2, design: .monospaced))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                if let output = contextTestOutput {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Result:")
-                            .font(.caption.weight(.semibold))
-                        Text(output.isEmpty ? "(empty — no output)" : output)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.green.opacity(0.08))
-                            .cornerRadius(6)
+                        .foregroundStyle(.secondary)
                     }
                 }
 
-                if let prompt = contextTestPrompt {
-                    DisclosureGroup("Full prompt sent") {
-                        Text(prompt)
-                            .font(.system(.caption2, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                Divider()
+
+                // c) Screenshot scope — the per-app multiselector
+                ScreenshotScopeSection()
+
+                Divider()
+
+                // d) Screenshot Resolution
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Screenshot Resolution")
+                        .font(.caption.weight(.semibold))
+
+                    Text("Maximum image dimension sent for context inference.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Picker("", selection: $appState.contextScreenshotMaxDimension) {
+                        ForEach(AppState.contextScreenshotDimensionOptions, id: \.self) { dimension in
+                            Text("\(dimension) px").tag(dimension)
+                        }
                     }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .accessibilityLabel("Screenshot Resolution")
+
+                    HStack {
+                        if appState.contextScreenshotMaxDimension == AppState.defaultContextScreenshotMaxDimension {
+                            Label("Using default", systemImage: "checkmark.circle")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Label("Using custom value", systemImage: "pencil")
+                                .font(.caption)
+                                .foregroundStyle(.blue)
+                        }
+                        Spacer()
+                        if appState.contextScreenshotMaxDimension != AppState.defaultContextScreenshotMaxDimension {
+                            Button("Reset to Default") {
+                                appState.contextScreenshotMaxDimension = AppState.defaultContextScreenshotMaxDimension
+                            }
+                            .font(.caption)
+                        }
+                    }
                 }
             }
+            .opacity(appContextMode == AppContextSource.Mode.screenshot.rawValue ? 1 : 0.5)
+            .disabled(appContextMode != AppContextSource.Mode.screenshot.rawValue)
         }
     }
 
@@ -2005,6 +2062,8 @@ struct PromptsSettingsView: View {
         contextTestPrompt = nil
 
         let service = appState.makeAppContextService()
+        // Force the vision path on this throwaway instance, regardless of the saved mode/scope.
+        service.forceScreenshotForTest = true
 
         Task {
             let context = await service.collectContext()

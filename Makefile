@@ -69,6 +69,9 @@ endif
 	@codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" --entitlements FreeFlow.entitlements "$(APP_BUNDLE)"
 	@echo "Built $(APP_BUNDLE)"
 
+# AppContextService now depends on this source, so the test build needs it too.
+$(TEST_RUNNER): Sources/AppContextSource.swift
+
 test: $(TEST_RUNNER)
 	@$(TEST_RUNNER)
 
@@ -79,7 +82,7 @@ $(TEST_RUNNER): Sources/AppContextService.swift Sources/LLMAPITransport.swift So
 		-o "$(TEST_RUNNER)" \
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target $(ARCH)-apple-macosx13.0 \
-		Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Tests/AppContextServiceTests.swift
+		$^
 
 icon: $(ICON_ICNS)
 

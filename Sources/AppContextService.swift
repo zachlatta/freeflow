@@ -45,6 +45,9 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     private let maxScreenshotDataURILength = 500_000
     private let screenshotCompressionPrimary = 0.5
     private let screenshotMaxDimension: CGFloat
+    /// Forces the vision path on this instance only — set by the "Test Vision Prompt" button on its own
+    /// throwaway service so the test works in any mode/scope. Real dictations use a separate instance.
+    var forceScreenshotForTest = false
     private var contextRequestTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "context_request_timeout_seconds")
         return override > 0 ? override : 20
@@ -176,6 +179,11 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         screenshotDataURL: String?,
         contextSystemPrompt: String
     ) async -> (activity: String, prompt: String)? {
+        // Skip vision/LLM inference unless this app uses Screenshot mode.
+        guard forceScreenshotForTest || AppContextSource.effectiveSource(forBundleID: bundleIdentifier) == .screenshot else {
+            return nil
+        }
+
         let attempts: [(model: String, screenshotDataURL: String?)] =
             if let screenshotDataURL {
                 [
@@ -318,6 +326,26 @@ Selected text: \(selectedText ?? "None")
         windowTitle: String?,
         screenshotAvailable: Bool
     ) -> String {
+        // Off → empty, App summary → metadata line, Screenshot → original error text below.
+        let source: AppContextSource.EffectiveSource =
+            forceScreenshotForTest ? .screenshot : AppContextSource.effectiveSource(forBundleID: bundleIdentifier)
+        switch source {
+        case .off:
+            return ""
+        case .metadata:
+            // One AX read: host / web-capable / address-bar focus (skips if the frontmost app changed).
+            let web = AppContextSource.webContext(expectedBundleID: bundleIdentifier)
+            return AppContextSource.metadataSummary(
+                appName: appName,
+                pageTitle: windowTitle,
+                webHost: web.host,
+                isWebApp: web.isWebApp,
+                addressBarFocused: web.addressBarFocused
+            )
+        case .screenshot:
+            break
+        }
+
         let activeApp = appName ?? "the active application"
         if screenshotAvailable {
             return "Could not reliably infer a two-sentence summary for \(activeApp) from the screenshot and metadata."
@@ -423,6 +451,13 @@ Selected text: \(selectedText ?? "None")
         appElement: AXUIElement,
         focusedWindowTitle: String?
     ) -> (dataURL: String?, mimeType: String?, error: String?) {
+        // Derive the bundle id from the pid; skip capture unless this app uses Screenshot mode.
+        let bundleID = NSRunningApplication(processIdentifier: processIdentifier)?.bundleIdentifier
+        guard forceScreenshotForTest || AppContextSource.effectiveSource(forBundleID: bundleID) == .screenshot else {
+            // Intentional skip, not a failure — no error so it isn't logged/shown as one.
+            return (nil, nil, nil)
+        }
+
         if !CGPreflightScreenCaptureAccess() {
             return (
                 nil,
