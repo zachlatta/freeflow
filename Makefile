@@ -12,6 +12,7 @@ APP_EXECUTABLE_TARGET := $(subst $(space),\ ,$(APP_EXECUTABLE))
 
 SOURCES = $(shell find Sources -name '*.swift' -type f | LC_ALL=C sort)
 TEST_RUNNER = $(BUILD_DIR)/FreeFlowTests
+TRANSCRIPTION_TEST_RUNNER = $(BUILD_DIR)/FreeFlowTranscriptionTests
 RESOURCES = $(CONTENTS)/Resources
 ARCH ?= $(shell uname -m)
 
@@ -69,8 +70,18 @@ endif
 	@codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" --entitlements FreeFlow.entitlements "$(APP_BUNDLE)"
 	@echo "Built $(APP_BUNDLE)"
 
-test: $(TEST_RUNNER)
+test: $(TEST_RUNNER) $(TRANSCRIPTION_TEST_RUNNER)
 	@$(TEST_RUNNER)
+	@$(TRANSCRIPTION_TEST_RUNNER)
+
+$(TRANSCRIPTION_TEST_RUNNER): Sources/TranscriptionService.swift Sources/LLMAPITransport.swift Tests/TranscriptionServiceTests.swift
+	@mkdir -p "$(BUILD_DIR)"
+	swiftc \
+		-parse-as-library \
+		-o "$(TRANSCRIPTION_TEST_RUNNER)" \
+		-sdk $(shell xcrun --show-sdk-path) \
+		-target $(ARCH)-apple-macosx13.0 \
+		Sources/TranscriptionService.swift Sources/LLMAPITransport.swift Tests/TranscriptionServiceTests.swift
 
 $(TEST_RUNNER): Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Tests/AppContextServiceTests.swift
 	@mkdir -p "$(BUILD_DIR)"
