@@ -19,7 +19,9 @@ public struct ModelConfiguration {
         "canopylabs/orpheus-arabic-saudi",
         "canopylabs/orpheus-v1-english",
         "meta-llama/llama-prompt-guard-2-22m",
-        "meta-llama/llama-prompt-guard-2-86m"
+        "meta-llama/llama-prompt-guard-2-86m",
+        "MiniMax-M3",
+        "MiniMax-M2.7"
     ]
 
     public static let transcriptionModels = [
@@ -142,6 +144,23 @@ public struct ModelConfiguration {
                 reasoningEffort: nil,
                 includeReasoning: nil,
                 shouldStripThinkTags: false
+            )
+        } else if cleanModel == "minimax-m3" {
+            // MiniMax-M3 emits an adaptive thinking block; strip reasoning tags so the
+            // cleaned transcript never contains the model's chain of thought.
+            return ModelConfig(
+                maxCompletionTokens: nil,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
+            )
+        } else if cleanModel == "minimax-m2.7" {
+            // MiniMax-M2.7 always emits reasoning; strip its think tags from the output.
+            return ModelConfig(
+                maxCompletionTokens: nil,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
             )
         } else if cleanModel == "whisper-large-v3" {
             return ModelConfig(
