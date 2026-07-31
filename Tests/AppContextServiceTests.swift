@@ -8,6 +8,7 @@ struct AppContextServiceTests {
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
+        testMiniMaxModelsArePredefinedAndStripThinkTags()
         print("AppContextServiceTests passed")
     }
 
@@ -72,6 +73,26 @@ struct AppContextServiceTests {
 
         expect(config.reasoningEffort == "none", "Qwen cleanup should disable reasoning")
         expect(config.includeReasoning == false, "Qwen cleanup should exclude reasoning output")
+    }
+
+    private static func testMiniMaxModelsArePredefinedAndStripThinkTags() {
+        expect(ModelConfiguration.llmModels.contains("MiniMax-M3"), "MiniMax-M3 is missing from the picker")
+        expect(ModelConfiguration.llmModels.contains("MiniMax-M2.7"), "MiniMax-M2.7 is missing from the picker")
+
+        for model in ["MiniMax-M3", "MiniMax-M2.7"] {
+            let config = ModelConfiguration.config(for: model)
+            expect(config.shouldStripThinkTags, "MiniMax model should strip think tags: \(model)")
+        }
+
+        let reasoningOutput = """
+        <think>
+        Hidden reasoning should never reach the transcript.
+        </think>
+        Cleaned transcript text.
+        """
+        let summary = AppContextService.activitySummary(from: reasoningOutput, model: "MiniMax-M3")
+        expect(summary?.contains("Hidden reasoning") == false, "MiniMax reasoning leaked into summary")
+        expect(summary?.contains("Cleaned transcript text.") == true, "MiniMax summary dropped the transcript text")
     }
 
     private static func expectEqual(_ actual: String?, _ expected: String, file: StaticString = #file, line: UInt = #line) {
