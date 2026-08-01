@@ -238,8 +238,8 @@ struct ProviderSettingsFields: View {
 
             ModelDropdownView(
                 title: "Context Model",
-                subtitle: "Used for context inference, with a text-only retry when screenshot analysis fails.",
-                predefinedModels: ModelConfiguration.llmModels,
+                subtitle: "Used for context inference, with a text-only retry when screenshot analysis fails. Screenshot analysis requires a model that accepts image input.",
+                predefinedModels: ModelConfiguration.visionModels,
                 defaultModel: AppState.defaultContextModel,
                 textDraft: $contextModelDraft,
                 onCommit: commitContextModel,

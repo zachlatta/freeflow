@@ -13,13 +13,15 @@ public struct ModelConfiguration {
         "openai/gpt-oss-120b",
         "openai/gpt-oss-safeguard-20b",
         "qwen/qwen3.6-27b",
-        "allam-2-7b",
         "groq/compound",
-        "groq/compound-mini",
-        "canopylabs/orpheus-arabic-saudi",
-        "canopylabs/orpheus-v1-english",
-        "meta-llama/llama-prompt-guard-2-22m",
-        "meta-llama/llama-prompt-guard-2-86m"
+        "groq/compound-mini"
+    ]
+
+    // MARK: - Vision-capable models
+
+    /// Models that accept image input. The context model must support vision for screenshot analysis to work.
+    public static let visionModels = [
+        "qwen/qwen3.6-27b"
     ]
 
     public static let transcriptionModels = [
@@ -59,7 +61,7 @@ public struct ModelConfiguration {
                 shouldStripThinkTags: false
             )
         } else if cleanModel == "qwen/qwen3-32b" {
- // Model that requires sanitization of thought tags
+            // Model that requires sanitization of thought tags
             return ModelConfig(
                 maxCompletionTokens: nil,
                 reasoningEffort: nil,
@@ -159,7 +161,7 @@ public struct ModelConfiguration {
             )
         }
         
-        // Fallback genérico para qualquer outro modelo que não esteja na lista acima
+        // Generic fallback for any model not explicitly listed above
         return ModelConfig(
             maxCompletionTokens: nil,
             reasoningEffort: nil,
