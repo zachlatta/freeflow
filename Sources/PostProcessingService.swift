@@ -109,8 +109,9 @@ Developer syntax:
 Output hygiene:
 - Never prepend boilerplate such as "Here is the clean transcript".
 - If the transcript is empty or only filler, return exactly: EMPTY
+  - Filler-only means hesitation sounds and discourse particles with no content, in any language. Example: "um uh so yeah" -> EMPTY.
 """
-    static let defaultSystemPromptDate = "2026-05-13"
+    static let defaultSystemPromptDate = "2026-08-05"
     static let commandModeSystemPrompt = """
 You transform highlighted text according to a spoken editing command.
 
