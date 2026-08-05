@@ -755,8 +755,10 @@ Model: \(model)
     /// system prompt is English, and smaller models follow the examples over the
     /// "Preserve the speaker's ... language" rule, returning English for non-English
     /// dictation. Naming the language is what stops that; generic wording does not.
+    /// "Primarily" and the explicit carve-out keep this consistent with the prompt's
+    /// own "Preserve mixed-language text exactly as mixed" rule.
     static func applyDictationLanguage(_ prompt: String, language: String) -> String {
-        prompt + "\n\nIMPORTANT: The dictation is in \(language). Output ONLY in \(language); never translate it into another language."
+        prompt + "\n\nIMPORTANT: The dictation is primarily in \(language). Write the cleaned text in \(language). Preserve mixed-language words and spans in their original languages."
     }
 
     /// System prompt used for verbatim translation. Deliberately

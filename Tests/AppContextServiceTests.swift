@@ -80,8 +80,11 @@ struct AppContextServiceTests {
         let prompt = PostProcessingService.applyDictationLanguage("PROMPT", language: "Russian")
 
         expect(prompt.hasPrefix("PROMPT"), "Directive must be appended, not replace the prompt")
-        expect(prompt.contains("The dictation is in Russian"), "Language must be named explicitly")
-        expect(prompt.contains("Output ONLY in Russian"), "Output language must be named explicitly")
+        expect(prompt.contains("primarily in Russian"), "Language must be named explicitly")
+        expect(prompt.contains("Write the cleaned text in Russian"),
+               "Output language must be named explicitly")
+        expect(prompt.contains("Preserve mixed-language words and spans in their original languages"),
+               "Naming a language must not override mixed-language preservation")
     }
 
     private static func testDictationLanguageLeavesPromptBodyIntact() {
