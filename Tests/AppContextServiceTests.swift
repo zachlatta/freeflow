@@ -8,6 +8,8 @@ struct AppContextServiceTests {
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
+        testDictationLanguageIsNamedInPrompt()
+        testDictationLanguageLeavesPromptBodyIntact()
         print("AppContextServiceTests passed")
     }
 
@@ -72,6 +74,27 @@ struct AppContextServiceTests {
 
         expect(config.reasoningEffort == "none", "Qwen cleanup should disable reasoning")
         expect(config.includeReasoning == false, "Qwen cleanup should exclude reasoning output")
+    }
+
+    private static func testDictationLanguageIsNamedInPrompt() {
+        let prompt = PostProcessingService.applyDictationLanguage("PROMPT", language: "Russian")
+
+        expect(prompt.hasPrefix("PROMPT"), "Directive must be appended, not replace the prompt")
+        expect(prompt.contains("The dictation is in Russian"), "Language must be named explicitly")
+        expect(prompt.contains("Output ONLY in Russian"), "Output language must be named explicitly")
+    }
+
+    private static func testDictationLanguageLeavesPromptBodyIntact() {
+        // applyOutputLanguage asks for a translation, applyDictationLanguage asks for the
+        // opposite; neither may edit the prompt body, only append to it.
+        let body = PostProcessingService.defaultSystemPrompt
+        let translated = PostProcessingService.applyOutputLanguage(body, language: "German")
+        let preserved = PostProcessingService.applyDictationLanguage(body, language: "German")
+
+        expect(translated.hasPrefix(body), "applyOutputLanguage must only append")
+        expect(preserved.hasPrefix(body), "applyDictationLanguage must only append")
+        expect(!preserved.contains("Translate the final cleaned text"),
+               "Preserving a language must not ask for a translation")
     }
 
     private static func expectEqual(_ actual: String?, _ expected: String, file: StaticString = #file, line: UInt = #line) {
