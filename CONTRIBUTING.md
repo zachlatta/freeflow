@@ -1,6 +1,6 @@
 # Contributing to FreeFlow
 
-Thanks for your interest in contributing to FreeFlow! FreeFlow is a free and open source macOS dictation app, and community contributions are welcome.
+Thanks for your interest in contributing to FreeFlow! FreeFlow is a free and open-source macOS dictation app, and community contributions are welcome.
 
 This guide describes how to set up the project, what conventions to follow, and how to submit your changes.
 
