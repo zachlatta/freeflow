@@ -14,9 +14,18 @@ struct PipelineDebugPanelView: View {
                 contextSummary: appState.lastContextSummary,
                 contextScreenshotStatus: appState.lastContextScreenshotStatus,
                 contextScreenshotDataURL: appState.lastContextScreenshotDataURL,
+                contextPrecedingText: appState.lastContextPrecedingText,
+                contextFollowingText: appState.lastContextFollowingText,
+                contextSelectedText: appState.lastContextSelectedText,
                 rawTranscript: appState.lastRawTranscript,
                 postProcessedTranscript: appState.lastPostProcessedTranscript,
-                postProcessingPrompt: appState.lastPostProcessingPrompt
+                formattedTranscript: appState.lastTranscript,
+                postProcessingPrompt: appState.lastPostProcessingPrompt,
+                cursorPosition: appState.lastContextCursorPosition,
+                contextFormatRule: appState.lastContextFormatRule,
+                isBlindApp: appState.lastIsBlindApp,
+                extractionMethod: appState.lastContextExtractionMethod,
+                appKind: appState.lastContextAppKind
             )
 
             if appState.lastContextSummary.isEmpty && appState.lastRawTranscript.isEmpty {

@@ -15,6 +15,9 @@ TEST_RUNNER = $(BUILD_DIR)/FreeFlowTests
 RESOURCES = $(CONTENTS)/Resources
 ARCH ?= $(shell uname -m)
 
+# AppContextService now depends on this source, so the test build needs it too.
+$(TEST_RUNNER): Sources/AccessibilityTextReader.swift
+
 # Pick the icon source based on which bundle we are building. Dev builds get
 # a distinct hammer-on-waveform icon so a developer's dock shows at a glance
 # which FreeFlow they are running when both are installed side by side.
@@ -79,7 +82,7 @@ $(TEST_RUNNER): Sources/AppContextService.swift Sources/LLMAPITransport.swift So
 		-o "$(TEST_RUNNER)" \
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target $(ARCH)-apple-macosx13.0 \
-		Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Tests/AppContextServiceTests.swift
+		$^
 
 icon: $(ICON_ICNS)
 

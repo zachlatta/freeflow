@@ -578,6 +578,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var lastContextBundleIdentifier: String = ""
     @Published var lastContextWindowTitle: String = ""
     @Published var lastContextSelectedText: String = ""
+    /// Text just before the cursor in the last dictation's target field, shown in the debug panel.
+    @Published var lastContextPrecedingText: String = ""
+    /// Text just after the cursor in the last dictation's target field, shown in the debug panel.
+    @Published var lastContextFollowingText: String = ""
+    /// Which smart-paste formatting rule (spacing/casing) was applied to the last dictation, for the debug panel.
+    @Published var lastContextFormatRule: String = ""
+    /// Where the cursor sat in the field for the last dictation (e.g. start/middle/end/unknown), for the debug panel.
+    @Published var lastContextCursorPosition: String = ""
+    /// True when the accessibility read returned no surrounding text at all for the last dictation (the app was "blind").
+    @Published var lastIsBlindApp: Bool = false
+    /// Which read method produced the last dictation's surrounding text (e.g. axAPI, axWebTextMarker), for the debug panel.
+    @Published var lastContextExtractionMethod: String? = nil
+    /// App kind ("native" / "webView" / "unknown") of the last dictation's target app.
+    @Published var lastContextAppKind: String? = nil
     @Published var lastContextLLMPrompt: String = ""
     @Published var hasScreenRecordingPermission = false
     @Published var launchAtLogin: Bool {
@@ -603,6 +617,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var contextService: AppContextService
     private var contextCaptureTask: Task<AppContext?, Never>?
     private var capturedContext: AppContext?
+    /// A gentle surrounding-text read started when recording begins, so web/Electron
+    /// context is ready by the time recording stops. Non-disruptive (purely observational).
+    private var startSurroundingTask: Task<SurroundingTextSnapshot, Never>?
     private var hasShownScreenshotPermissionAlert = false
     private var audioDeviceObservers: [NSObjectProtocol] = []
     private var needsMicrophoneRefreshAfterRecording = false
@@ -611,6 +628,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var activeRecordingTriggerMode: RecordingTriggerMode?
     private var currentSessionIntent: SessionIntent = .dictation
     private var pendingSelectionSnapshot: AppSelectionSnapshot?
+    /// Selected text/app captured at the start of the current recording, reused so stop-time context matches the start.
+    private var currentSelectionSnapshot: AppSelectionSnapshot?
+
     private var pendingManualCommandInvocation = false
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
@@ -1968,6 +1988,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let t0 = CFAbsoluteTimeGetCurrent()
         os_log(.info, log: recordingLog, "startRecording() entered")
         guard !isRecording && !isTranscribing else { return }
+        
         let scheduledSelectionSnapshot = pendingSelectionSnapshot
         let scheduledManualCommandInvocation = pendingManualCommandInvocation
         cancelPendingShortcutStart()
@@ -1982,8 +2003,38 @@ final class AppState: ObservableObject, @unchecked Sendable {
         guard ensureMicrophoneAccess() else { return }
         os_log(.info, log: recordingLog, "mic access check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
         applyAudioInterruptionIfNeeded()
+        // JIT Accessibility Wake-up: Force Chromium/Electron apps to keep their accessibility
+        // tree updated during the dictation window. This prevents the (0,0) cursor bug. Runs
+        // only after the start guards succeed, so a failed start can't leave the tree woken.
+        Task { @MainActor in
+            AccessibilityWakeManager.shared.wakeUpCurrentApp()
+        }
         beginRecording(triggerMode: triggerMode)
+        startGentleStartContextRead()
         os_log(.info, log: recordingLog, "startRecording() finished: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
+    }
+
+    /// Kicks off a gentle surrounding-text read the moment recording begins.
+    /// It runs while the user is speaking so web/Electron context is ready when they
+    /// stop, instead of only being read afterwards. Deliberately non-disruptive: no
+    /// screenshot, no LLM — those heavier paths stay in the
+    /// stop-time flow so they never interfere with the user while they dictate.
+    private func startGentleStartContextRead() {
+        guard let app = NSWorkspace.shared.frontmostApplication else {
+            startSurroundingTask = nil
+            return
+        }
+        // AX handle for the frontmost app's process (macOS Accessibility API).
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        startSurroundingTask?.cancel()
+        startSurroundingTask = Task(priority: .userInitiated) {
+            // Give the accessibility wake-up a brief head start (Electron trees wake lazily).
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            return await AccessibilityTextReader.readSurroundingTextWithSync(
+                from: appElement,
+                purpose: "start"
+            )
+        }
     }
 
     private func prepareRecordingStart(
@@ -2009,6 +2060,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
 
         let selectionSnapshot = selectionSnapshot ?? contextService.collectSelectionSnapshot()
+        self.currentSelectionSnapshot = selectionSnapshot
         let manualCommandRequested = manualCommandRequested
             ?? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
         guard let resolvedIntent = resolveSessionIntent(
@@ -2168,6 +2220,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func endCriticalDictationActivity() {
+        // JIT Accessibility Wake-up: We keep Chromium awake for 1.5 seconds after dictation.
+        // This ensures that when we paste the transcript (Cmd+V), the accessibility tree
+        // is still active and captures the newly pasted text and updated cursor position.
+        // Without this delay, Chromium goes to sleep before the paste, leading to stale context.
+        // Wait for the in-flight paste pipeline before sleeping, so a slow paste/re-read under load
+        // isn't blinded by an early teardown.
+        let pasteFlow = transcriptionTask
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            _ = await pasteFlow?.value
+            // Skip if a newer dictation re-armed the keepalive while we waited — it owns the tree now.
+            guard let self, !self.isRecording, !self.isTranscribing else { return }
+            AccessibilityWakeManager.shared.sleepCurrentApp()
+        }
+        
         guard automaticTerminationDisabled else { return }
         ProcessInfo.processInfo.enableAutomaticTermination("FreeFlow dictation in progress")
         automaticTerminationDisabled = false
@@ -2244,7 +2311,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 os_log(.info, log: recordingLog, "audioRecorder.startRecording() done: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
                 DispatchQueue.main.async {
                     guard self.isRecording, self.activeRecordingTriggerMode != nil else { return }
-                    self.startContextCapture()
                     self.audioLevelCancellable = self.audioRecorder.$audioLevel
                         .receive(on: DispatchQueue.main)
                         .sink { [weak self] level in
@@ -2270,6 +2336,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         capturedContext = nil
+        startSurroundingTask?.cancel()
+        startSurroundingTask = nil
         tearDownRealtimeService()
         audioRecorder.cleanup()
         restoreAudioInterruptionIfNeeded()
@@ -2609,7 +2677,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return try await fileService.transcribe(fileURL: fileURL)
     }
 
+    /// Elapsed milliseconds since `start`, for release→paste timing logs.
+    nonisolated private static func elapsedMs(_ start: ContinuousClock.Instant) -> Int {
+        let d = ContinuousClock.now - start
+        return Int(Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15)
+    }
+
     private func stopAndTranscribe() {
+        let stopwatch = ContinuousClock.now   // release→paste latency stopwatch
         cancelPendingShortcutStart()
         cancelRecordingInitializationTimer()
         shortcutSessionController.reset()
@@ -2621,8 +2696,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioLevelCancellable?.cancel()
         audioLevelCancellable = nil
         debugStatusMessage = "Preparing audio"
+        
+        // JIT Context Capture: We capture the context exactly when the shortcut is released,
+        // so the LLM gets the most up-to-date screen state (not the state from 3 seconds ago).
+        startContextCapture()
+        
         let sessionContext = capturedContext
         let inFlightContextTask = contextCaptureTask
+        // Hand off the start-of-recording gentle read so stop can use it as a fallback.
+        let startSurroundingHandle = startSurroundingTask
+        startSurroundingTask = nil
         capturedContext = nil
         contextCaptureTask = nil
         lastRawTranscript = ""
@@ -2700,6 +2783,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         fileURL: transcriptionFileURL
                     )
                     let rawTranscript = try await transcript
+                    os_log(.info, log: recordingLog, "timing: transcription ready %dms", AppState.elapsedMs(stopwatch))
                     let parsedTranscript = Self.parseTranscriptCommands(
                         from: rawTranscript,
                         pressEnterCommandEnabled: self.isPressEnterVoiceCommandEnabled
@@ -2724,6 +2808,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         appContext = self.fallbackContextAtStop()
                     }
                     try Task.checkCancellation()
+                    os_log(.info, log: recordingLog, "timing: context resolved %dms", AppState.elapsedMs(stopwatch))
+
                     await MainActor.run { [weak self] in
                         self?.debugStatusMessage = "Running post-processing"
                     }
@@ -2738,9 +2824,140 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         preserveExactWording: self.preserveExactWording
                     )
                     try Task.checkCancellation()
+                    os_log(.info, log: recordingLog, "timing: post-processing ready %dms", AppState.elapsedMs(stopwatch))
+
+                    // JUST-IN-TIME CONTEXT READ
+                    // When the stop-time read came back blind, re-read the surrounding text right
+                    // before pasting — purely observational (no key simulation, no selection changes).
+                    var finalPreceding = appContext.precedingText
+                    var finalFollowing = appContext.followingText
+                    // nil cursorPosition (fallback context / no frontmost app) means the same as
+                    // "unknown" — coalesce so the JIT rescue below is not silently skipped on the
+                    // dictations that lost their context hardest.
+                    var finalCursorPos = appContext.cursorPosition ?? "unknown"
+                    let finalSelectedText = appContext.selectedText
+                    // Track the method/appKind as ACTUALLY resolved: a JIT re-read can succeed via a
+                    // real rung even though the stop read was blind, so without this the Run Log and
+                    // ContextReadMetrics would show the stale stop-time method. Seeded to stop-time.
+                    var resolvedMethodFromJIT = appContext.contextExtractionMethod
+                    var resolvedAppKindFromJIT = appContext.appKind
+
+                    // The JIT re-read runs only when the stop read is blind AND the non-destructive
+                    // start-of-recording snapshot is ALSO blind. When the start snapshot has text we
+                    // skip the re-read entirely — the start-of-recording fallback below applies it
+                    // (carrying its own method/appKind, so the Run Log stays faithful) without paying
+                    // extra AX round-trips at paste time.
+                    // "Real text" = at least one non-whitespace char on either side. A stray
+                    // newline from a web view is a false "non-empty" and must not count as context.
+                    func hasRealText(_ a: String?, _ b: String?) -> Bool {
+                        (a?.contains(where: { !$0.isWhitespace }) ?? false)
+                            || (b?.contains(where: { !$0.isWhitespace }) ?? false)
+                    }
+                    // Await the start snapshot only when the stop read came back unknown —
+                    // an unconditional await could hold the paste behind a slow AX read.
+                    let startSnapshotBlind: Bool
+                    if finalCursorPos == "unknown" {
+                        let startSnapshotForGate = await startSurroundingHandle?.value
+                        startSnapshotBlind = !hasRealText(startSnapshotForGate?.precedingText, startSnapshotForGate?.followingText)
+                    } else {
+                        startSnapshotBlind = false   // unused when the cursor is known; skip the await
+                    }
+
+                    if finalCursorPos == "unknown", startSnapshotBlind {
+                        os_log(.info, log: recordingLog, "JIT re-read triggered: cursorPos=unknown")
+
+                        if let frontmostApp = NSWorkspace.shared.frontmostApplication {
+                            let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+                            var attempts = 0
+                            let maxAttempts = 3
+                            var didFindContext = false
+                            // Wall-clock budget for the whole rescue: each attempt walks the full AX
+                            // ladder, whose per-message IPC can stall up to ~2s against a hung app —
+                            // without this cap the paste could be delayed for many seconds.
+                            let jitDeadline = ContinuousClock.now.advanced(by: .seconds(2))
+
+                            while attempts < maxAttempts && !didFindContext && ContinuousClock.now < jitDeadline {
+                                try Task.checkCancellation()
+                                os_log(.debug, log: recordingLog, "JIT attempt %d/%d", attempts + 1, maxAttempts)
+                                let surrounding = await AccessibilityTextReader.readSurroundingTextWithSync(
+                                    from: appElement,
+                                    purpose: "jit"
+                                )
+
+                                let isBlind = (surrounding.precedingText?.isEmpty ?? true) && (surrounding.followingText?.isEmpty ?? true)
+                                os_log(.debug, log: recordingLog,
+                                       "JIT attempt %d result: prec=%d foll=%d method=%{public}@ blind=%{public}@",
+                                       attempts + 1,
+                                       surrounding.precedingText?.count ?? 0,
+                                       surrounding.followingText?.count ?? 0,
+                                       surrounding.extractionMethod.rawValue,
+                                       isBlind ? "true" : "false")
+
+                                if surrounding.hasContext && !isBlind {
+                                    finalPreceding = surrounding.precedingText
+                                    finalFollowing = surrounding.followingText
+                                    finalCursorPos = surrounding.cursorPosition.rawValue
+                                    resolvedMethodFromJIT = surrounding.extractionMethod.rawValue
+                                    resolvedAppKindFromJIT = surrounding.appKind.rawValue
+                                    didFindContext = true
+                                    os_log(.info, log: recordingLog, "JIT resolved after %d attempt(s)", attempts + 1)
+                                } else {
+                                    attempts += 1
+                                    if attempts < maxAttempts {
+                                        try? await Task.sleep(nanoseconds: 400_000_000)
+                                    }
+                                }
+                            }
+
+                            if !didFindContext {
+                                os_log(.error, log: recordingLog,
+                                       "JIT gave up (attempts or deadline) — using stop-time context (may be blind app)")
+                            }
+                        }
+                    }
+
+                    let resolvedPreceding = finalPreceding
+                    let resolvedFollowing = finalFollowing
+                    let resolvedCursorPos = finalCursorPos
+                    let resolvedSelectedText = finalSelectedText
+                    let resolvedMethod = resolvedMethodFromJIT
+                    let resolvedAppKind = resolvedAppKindFromJIT
+
+                    // When the read taken at stop has no USEFUL text, fall back to the gentle read
+                    // started when recording began. "No useful text" means nil OR whitespace-only:
+                    // in web views a stop read commonly returns a stray newline (a false "empty"),
+                    // which must not be trusted over the during-recording read that did see the
+                    // real text. The fallback carries its own method/appKind so the resolved
+                    // context stays internally consistent.
+                    let startFallback: (preceding: String?, following: String?, cursor: String?, method: String?, appKind: String?)?
+                    if !hasRealText(resolvedPreceding, resolvedFollowing),
+                       let startSnap = await startSurroundingHandle?.value,
+                       hasRealText(startSnap.precedingText, startSnap.followingText) {
+                        startFallback = (startSnap.precedingText, startSnap.followingText,
+                                         startSnap.cursorPosition.rawValue,
+                                         startSnap.extractionMethod.rawValue, startSnap.appKind.rawValue)
+                        os_log(.info, log: recordingLog,
+                               "using start-of-recording context (stop read had no useful text): prec=%d foll=%d method=%{public}@",
+                               startSnap.precedingText?.count ?? 0,
+                               startSnap.followingText?.count ?? 0,
+                               startSnap.extractionMethod.rawValue)
+                    } else {
+                        startFallback = nil
+                    }
+
+                    try Task.checkCancellation()
+
+                    // Re-read the focused field right before pasting, OFF the MainActor.
+                    // `readSurroundingText` is a synchronous cross-process Accessibility IPC
+                    // call (focusedElement + native/TextMarker round-trips); running it inside
+                    // the `MainActor.run` below would block the UI until the target app replies.
+                    // The result is a Sendable value type, safe to capture across the hop.
+                    let pasteSnap: SurroundingTextSnapshot? = NSWorkspace.shared.frontmostApplication.map {
+                        AccessibilityTextReader.readSurroundingText(from: AXUIElementCreateApplication($0.processIdentifier), purpose: "paste")
+                    }
 
                     await MainActor.run {
-                        guard self.isTranscribing else { return }
+                        guard self.isTranscribing && !Task.isCancelled else { return }
                         self.lastContextSummary = appContext.contextSummary
                         self.lastContextScreenshotDataURL = appContext.screenshotDataURL
                         self.lastContextScreenshotStatus = appContext.screenshotError
@@ -2748,33 +2965,128 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.lastContextAppName = appContext.appName ?? ""
                         self.lastContextBundleIdentifier = appContext.bundleIdentifier ?? ""
                         self.lastContextWindowTitle = appContext.windowTitle ?? ""
-                        self.lastContextSelectedText = appContext.selectedText ?? ""
+                        self.lastContextSelectedText = resolvedSelectedText ?? ""
                         self.lastContextLLMPrompt = appContext.contextPrompt ?? ""
+
                         let trimmedRawTranscript = parsedTranscript.transcript
                         let trimmedFinalTranscript = result.finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
                         let processingStatus = Self.statusMessage(
                             for: result.outcome,
                             parsedTranscript: parsedTranscript
                         )
+
+                        // ── Single source of truth for the surrounding context ──
+                        // We settle on one set of values here that feeds EVERYTHING below — the
+                        // formatter, the live debug panel, and the saved history — so they can
+                        // never disagree with each other. Start from the context read during
+                        // recording, or the fallback captured at recording start if that was blind.
+                        var settledPreceding = startFallback?.preceding ?? resolvedPreceding
+                        var settledFollowing = startFallback?.following ?? resolvedFollowing
+                        var settledCursor    = startFallback?.cursor   ?? resolvedCursorPos
+                        var settledMethod    = startFallback?.method   ?? resolvedMethod
+                        var settledAppKind   = startFallback?.appKind  ?? resolvedAppKind
+
+                        // Apply the pre-paste re-read (taken off the MainActor above): it catches
+                        // any cursor movement that happened while the user was speaking.
+                        if let pasteSnap {
+                            // If we still don't know the app kind, take it from this read.
+                            if (settledAppKind == nil || settledAppKind == "unknown"),
+                               pasteSnap.appKind != .unknown {
+                                settledAppKind = pasteSnap.appKind.rawValue
+                            }
+                            // Only trust this quick read for standard Mac apps. In web views
+                            // (browsers/Electron) a synchronous read often returns a stale or
+                            // partial value — e.g. just a leading newline — which would wrongly
+                            // overwrite the good context we already read during recording and
+                            // break spacing/casing. There we keep the during-recording context.
+                            let isNativeApp = (settledAppKind == "native")
+                            if pasteSnap.hasContext, isNativeApp {
+                                settledPreceding = pasteSnap.precedingText
+                                settledFollowing = pasteSnap.followingText
+                                settledCursor    = pasteSnap.cursorPosition.rawValue
+                                settledMethod    = pasteSnap.extractionMethod.rawValue
+                                os_log(.info, log: recordingLog,
+                                       "paste-time re-read (native): prec=%d foll=%d method=%{public}@ (overrides earlier read)",
+                                       pasteSnap.precedingText?.count ?? 0,
+                                       pasteSnap.followingText?.count ?? 0,
+                                       pasteSnap.extractionMethod.rawValue)
+                            } else if pasteSnap.hasContext {
+                                os_log(.info, log: recordingLog, "paste-time re-read skipped (web view — keeping during-recording context)")
+                            } else {
+                                os_log(.info, log: recordingLog, "paste-time re-read: nothing read — keeping during-recording context")
+                            }
+                        }
+
+                        // Canonicalize line/paragraph/page breaks to "\n" once, so the formatter,
+                        // the Run Log, and the saved history all see (and faithfully show) the same
+                        // normalized surrounding text the deterministic formatter acts on.
+                        settledPreceding = settledPreceding.map(ContextualFormattingService.normalizeLineBreaks)
+                        settledFollowing = settledFollowing.map(ContextualFormattingService.normalizeLineBreaks)
+
+                        // Publish the resolved context to the live debug panel.
+                        self.lastContextPrecedingText = settledPreceding ?? ""
+                        self.lastContextFollowingText = settledFollowing ?? ""
+                        self.lastContextCursorPosition = settledCursor
+                        self.lastContextExtractionMethod = settledMethod
+                        // Extraction-ladder result: which rung resolved the context (method == rung).
+                        // All rungs are purely observational (axWebTextMarker / axAPI / axWebAreaBFS).
+                        os_log(.info, log: recordingLog, "context ladder: resolved via %{public}@",
+                               settledMethod ?? "blind")
+                        // Session metric: how often reads succeed vs come back blind.
+                        os_log(.info, log: recordingLog, "context-read metric: %{public}@",
+                               ContextReadMetrics.record(settledMethod))
+                        self.lastContextAppKind = settledAppKind
+                        // "Blind" means the accessibility read returned nothing at all (both nil).
+                        // An empty field ("") is NOT blind — the read worked, the field was just empty.
+                        let isBlind = (settledPreceding == nil && settledFollowing == nil)
+                        self.lastIsBlindApp = isBlind
+
+                        let formatResult = ContextualFormattingService.format(
+                            trimmedFinalTranscript,
+                            precedingText: settledPreceding,
+                            followingText: settledFollowing,
+                            selectedText: resolvedSelectedText,
+                            cursorPosition: settledCursor,
+                            vocabulary: self.customVocabulary
+                        )
+                        let formattedTranscript = formatResult.formattedText
+                        os_log(.info, log: recordingLog, "timing: formatted, release→format total %dms", AppState.elapsedMs(stopwatch))
+
+                        self.lastContextFormatRule = formatResult.ruleApplied
+
                         self.lastPostProcessingPrompt = result.prompt
                         self.lastRawTranscript = trimmedRawTranscript
                         self.lastPostProcessedTranscript = trimmedFinalTranscript
                         self.lastPostProcessingStatus = processingStatus
+
+                        // Save history from the SAME resolved context the formatter used.
+                        var resolvedContext = appContext
+                        resolvedContext.precedingText           = settledPreceding
+                        resolvedContext.followingText           = settledFollowing
+                        resolvedContext.cursorPosition          = settledCursor
+                        resolvedContext.contextExtractionMethod = settledMethod
+                        resolvedContext.appKind                 = settledAppKind
                         self.recordPipelineHistoryEntry(
                             rawTranscript: trimmedRawTranscript,
                             postProcessedTranscript: trimmedFinalTranscript,
                             postProcessingPrompt: result.prompt,
                             systemPrompt: Self.resolvedSystemPrompt(self.customSystemPrompt),
-                            context: appContext,
+                            context: resolvedContext,
                             processingStatus: processingStatus,
                             intent: sessionIntent,
-                            audioFileName: savedAudioFile?.fileName
+                            audioFileName: savedAudioFile?.fileName,
+                            formattedTranscript: formattedTranscript,
+                            cursorPosition: settledCursor,
+                            contextFormatRule: formatResult.ruleApplied,
+                            isBlindApp: isBlind
                         )
+                        // Arm the keepalive BEFORE clearing transcriptionTask, so it captures the
+                        // in-flight paste pipeline and can genuinely await it before sleeping the tree.
+                        self.endCriticalDictationActivity()
                         self.transcriptionTask = nil
                         self.transcribingAudioFileName = nil
-                        self.lastTranscript = trimmedFinalTranscript
+                        self.lastTranscript = formattedTranscript
                         self.isTranscribing = false
-                        self.endCriticalDictationActivity()
                         self.debugStatusMessage = "Done"
                         let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
                         let enterOnlyStatusText = "Pressed Enter"
@@ -2809,7 +3121,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                                 }
                             }
 
-                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
+                            let pendingClipboardRestore = self.writeTranscriptToPasteboard(formattedTranscript)
                             self.pasteAtCursorWhenShortcutReleased {
                                 if shouldPressEnterAfterPaste {
                                     self.pressEnterAfterPaste {
@@ -2882,6 +3194,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
             : customSystemPrompt
     }
 
+    /// Appends one dictation to the persisted pipeline history.
+    /// - Parameters:
+    ///   - audioFileName: Saved recording file, when audio retention is enabled.
+    ///   - formattedTranscript: Smart-paste output actually inserted at the cursor.
+    ///   - cursorPosition: Semantic caret position raw value ("start"/"middle"/"end"/"empty"/"unknown").
+    ///   - contextFormatRule: The formatter's rule trace (e.g. "no-punct | cap:↑ | sp:L").
+    ///   - isBlindApp: True when the accessibility read found no surrounding text at all.
     private func recordPipelineHistoryEntry(
         rawTranscript: String,
         postProcessedTranscript: String,
@@ -2890,7 +3209,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         context: AppContext,
         processingStatus: String,
         intent: SessionIntent,
-        audioFileName: String? = nil
+        audioFileName: String? = nil,
+        formattedTranscript: String? = nil,
+        cursorPosition: String? = nil,
+        contextFormatRule: String? = nil,
+        isBlindApp: Bool = false
     ) {
         let newEntry = PipelineHistoryItem(
             intent: intent.persistedIntent,
@@ -2913,7 +3236,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
             audioFileName: audioFileName,
             contextAppName: context.appName,
             contextBundleIdentifier: context.bundleIdentifier,
-            contextWindowTitle: context.windowTitle
+            contextWindowTitle: context.windowTitle,
+            precedingText: context.precedingText,
+            followingText: context.followingText,
+            formattedTranscript: formattedTranscript,
+            cursorPosition: cursorPosition,
+            contextFormatRule: contextFormatRule,
+            isBlindApp: isBlindApp,
+            extractionMethod: context.contextExtractionMethod,
+            appKind: context.appKind
         )
         do {
             let removedAudioFileNames = try pipelineHistoryStore.append(newEntry, maxCount: maxPipelineHistoryCount)
@@ -2968,8 +3299,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         lastContextScreenshotStatus = "Collecting screenshot..."
 
         contextCaptureTask = Task { [weak self] in
+            // Capture runs at the END of dictation, when the OS accessibility tree
+            // has already stabilized — no settling delay is needed.
             guard let self else { return nil }
-            let context = await self.contextService.collectContext()
+            let context = await self.contextService.collectContext(selectionSnapshot: self.currentSelectionSnapshot)
             await MainActor.run {
                 self.capturedContext = context
                 self.lastContextSummary = context.contextSummary
@@ -2980,7 +3313,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.lastContextBundleIdentifier = context.bundleIdentifier ?? ""
                 self.lastContextWindowTitle = context.windowTitle ?? ""
                 self.lastContextSelectedText = context.selectedText ?? ""
+                self.lastContextPrecedingText = context.precedingText ?? ""
+                self.lastContextFollowingText = context.followingText ?? ""
                 self.lastContextLLMPrompt = context.contextPrompt ?? ""
+                self.lastContextExtractionMethod = context.contextExtractionMethod
+                self.lastContextAppKind = context.appKind
                 self.lastPostProcessingStatus = "App context captured"
                 self.handleScreenshotCaptureIssue(context.screenshotError)
             }
@@ -2996,6 +3333,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
             bundleIdentifier: frontmostApp?.bundleIdentifier,
             windowTitle: windowTitle,
             selectedText: nil,
+            precedingText: nil,
+            followingText: nil,
+            cursorPosition: nil,
             currentActivity: "Could not refresh app context at stop time; using text-only post-processing.",
             contextSystemPrompt: resolvedContextSystemPrompt(),
             contextPrompt: nil,
@@ -3282,22 +3622,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     /// Writes the final transcript to the system pasteboard.
-    /// Also handles appending necessary trailing spaces, declaring transient
-    /// types for clipboard managers, and saving the clipboard state for later restoration.
+    /// Also handles declaring transient types for clipboard managers, and
+    /// saving the clipboard state for later restoration.
     /// - Parameter transcript: The text to be pasted.
     /// - Returns: A `PendingClipboardRestore` object if clipboard preservation is enabled, otherwise nil.
     private func writeTranscriptToPasteboard(_ transcript: String) -> PendingClipboardRestore? {
         let pasteboard = NSPasteboard.general
         let snapshot = preserveClipboard ? PreservedPasteboardSnapshot(pasteboard: pasteboard) : nil
 
-        // Append a space when ending with sentence-ending punctuation so the
-        // next dictation does not jam against the prior period.
-        let textToWrite: String
-        if let last = transcript.last, ".!?".contains(last) {
-            textToWrite = transcript + " "
-        } else {
-            textToWrite = transcript
-        }
+        let textToWrite = transcript
 
         if keepDictationInClipboardHistory {
             // Plain write so clipboard managers record the dictation in history.

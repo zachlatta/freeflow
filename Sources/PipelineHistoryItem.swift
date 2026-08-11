@@ -28,6 +28,25 @@ struct PipelineHistoryItem: Identifiable, Codable {
     let contextAppName: String?
     let contextBundleIdentifier: String?
     let contextWindowTitle: String?
+    /// Text just before the cursor when this dictation ran (nil if the read failed).
+    let precedingText: String?
+    /// Text just after the cursor when this dictation ran (nil if the read failed).
+    let followingText: String?
+    /// The transcript after smart-paste formatting (spacing/casing) was applied.
+    let formattedTranscript: String?
+    /// Where the cursor sat in the field (e.g. start/middle/end/unknown) for this dictation.
+    /// Persisted for parity with the live debug panel; not shown in the history list.
+    let cursorPosition: String?
+    /// Which smart-paste formatting rule was applied to this dictation.
+    let contextFormatRule: String?
+    /// True when the accessibility read found no surrounding text (a "blind" app).
+    /// Persisted for parity with the live debug panel; not shown in the history list.
+    /// Optional so history persisted before these fields existed still decodes.
+    let isBlindApp: Bool?
+    /// Which read method produced the surrounding text (e.g. axAPI, axWebTextMarker).
+    let extractionMethod: String?
+    /// App kind: "native", "webView", or "unknown". Optional for backward-compatible decoding.
+    let appKind: String?
 
     init(
         intent: PipelineHistoryItemIntent = .dictation,
@@ -50,7 +69,15 @@ struct PipelineHistoryItem: Identifiable, Codable {
         audioFileName: String? = nil,
         contextAppName: String? = nil,
         contextBundleIdentifier: String? = nil,
-        contextWindowTitle: String? = nil
+        contextWindowTitle: String? = nil,
+        precedingText: String? = nil,
+        followingText: String? = nil,
+        formattedTranscript: String? = nil,
+        cursorPosition: String? = nil,
+        contextFormatRule: String? = nil,
+        isBlindApp: Bool? = false,
+        extractionMethod: String? = nil,
+        appKind: String? = nil
     ) {
         self.intent = intent
         self.selectedText = selectedText
@@ -73,5 +100,13 @@ struct PipelineHistoryItem: Identifiable, Codable {
         self.contextAppName = contextAppName
         self.contextBundleIdentifier = contextBundleIdentifier
         self.contextWindowTitle = contextWindowTitle
+        self.precedingText = precedingText
+        self.followingText = followingText
+        self.formattedTranscript = formattedTranscript
+        self.cursorPosition = cursorPosition
+        self.contextFormatRule = contextFormatRule
+        self.isBlindApp = isBlindApp
+        self.extractionMethod = extractionMethod
+        self.appKind = appKind
     }
 }

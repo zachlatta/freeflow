@@ -14,9 +14,27 @@ struct PipelineDebugContentView: View {
     let contextSummary: String
     let contextScreenshotStatus: String
     let contextScreenshotDataURL: String?
+    /// Text just before the cursor, shown in the Smart Paste panel.
+    let contextPrecedingText: String
+    /// Text just after the cursor, shown in the Smart Paste panel.
+    let contextFollowingText: String
+    /// Text the user had selected when dictating, shown in its own debug row.
+    let contextSelectedText: String
     let rawTranscript: String
     let postProcessedTranscript: String
+    /// The transcript after smart-paste formatting (spacing/casing) is applied.
+    let formattedTranscript: String
     let postProcessingPrompt: String
+    /// Where the cursor sat in the field (e.g. start/middle/end/unknown).
+    let cursorPosition: String?
+    /// Which smart-paste formatting rule was applied, shown in the Smart Paste panel.
+    let contextFormatRule: String?
+    /// True when no surrounding text could be read (the app was "blind"); flags a failed read in the panel.
+    let isBlindApp: Bool
+    /// Which read method produced the surrounding text (e.g. axAPI, axWebTextMarker).
+    let extractionMethod: String?
+    /// App kind of the target field: "native", "webView", or "unknown".
+    let appKind: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -43,12 +61,12 @@ struct PipelineDebugContentView: View {
                 )
             }
 
-            if !rawTranscript.isEmpty {
-                debugRow(title: "Raw Transcript", value: rawTranscript, copyText: rawTranscript)
+            if !contextSelectedText.isEmpty {
+                debugRow(title: "Selected Text", value: contextSelectedText, copyText: contextSelectedText)
             }
 
-            if !postProcessedTranscript.isEmpty {
-                debugRow(title: "Post-Processed Transcript", value: postProcessedTranscript, copyText: postProcessedTranscript)
+            if !rawTranscript.isEmpty || !contextPrecedingText.isEmpty || !contextFollowingText.isEmpty {
+                smartPasteSection()
             }
 
             if contextSummary.isEmpty && rawTranscript.isEmpty && postProcessedTranscript.isEmpty && postProcessingPrompt.isEmpty {
@@ -170,5 +188,57 @@ struct PipelineDebugContentView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.writeObjects([image])
+    }
+
+    // MARK: - Smart Paste Section
+
+    /// Builds the Smart Paste panel: app type, how text was read, and the before/after context around the cursor.
+    private func smartPasteSection() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Smart Paste Formatting")
+                .font(.body.bold())
+            
+            // Build human-readable labels via the shared helper.
+            // This panel passes empty strings (never nil), so a failed read is flagged by isBlindApp.
+            // "Has text" needs a real character; a lone space or newline does not count.
+            let hasText = contextPrecedingText.contains(where: { !$0.isWhitespace })
+                || contextFollowingText.contains(where: { !$0.isWhitespace })
+            let appTypeLabel = ContextDebugLabels.appType(appKind)
+            let readLabel = ContextDebugLabels.howTextWasRead(extractionMethod)
+            let detected = ContextDebugLabels.surroundingText(hasText: hasText, readFailed: isBlindApp)
+
+            let combined = """
+            App Type: \(appTypeLabel)
+            How text was read: \(readLabel)
+            Text around cursor: \(detected)
+            Cursor position: \(cursorPosition ?? "unknown")
+
+            Preceding Text: "\(contextPrecedingText)"
+            Raw Transcript: "\(rawTranscript)"
+            Raw LLM Output: "\(postProcessedTranscript)"
+            Formatted Output: "\(formattedTranscript)"
+            Following Text: "\(contextFollowingText)"
+
+            Resulting Text: "\(contextPrecedingText)\(formattedTranscript)\(contextFollowingText)"
+            Smart paste: \(ContextDebugLabels.ruleSummary(contextFormatRule))
+            """
+            
+            ScrollView {
+                Text(combined)
+                    .textSelection(.enabled)
+                    .font(.system(size: 15, weight: .regular, design: .monospaced))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 280)
+            .padding(10)
+            .background(Color(nsColor: .textBackgroundColor))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
+            
+            Button("Copy Smart Paste Log") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(combined, forType: .string)
+            }
+            .font(.body)
+        }
     }
 }
