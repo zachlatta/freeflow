@@ -1013,6 +1013,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return stored.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// English name of the selected dictation language, for the cleanup prompt to
+    /// name explicitly. Empty on Auto-detect, because there is nothing to name, and
+    /// empty for English, because the prompt's own examples are already English and
+    /// English dictation never drifts.
+    static func dictationLanguageName(for language: String) -> String {
+        let normalized = normalizeTranscriptionLanguage(language)
+        guard !normalized.isEmpty, normalized != "en" else { return "" }
+        return transcriptionLanguageOptions.first { $0.code == normalized }?.name ?? ""
+    }
+
     private static func normalizeTranscriptionLanguage(_ language: String) -> String {
         let normalized = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard transcriptionLanguageOptions.contains(where: { $0.code == normalized }) else {
@@ -2573,7 +2583,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 context: context,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt,
-                outputLanguage: outputLanguage
+                outputLanguage: outputLanguage,
+                dictationLanguage: Self.dictationLanguageName(for: transcriptionLanguage)
             )
             return (result.transcript, .postProcessingSucceeded, result.prompt)
         } catch {

@@ -165,7 +165,8 @@ Behavior:
         context: AppContext,
         customVocabulary: String,
         customSystemPrompt: String = "",
-        outputLanguage: String = ""
+        outputLanguage: String = "",
+        dictationLanguage: String = ""
     ) async throws -> PostProcessingResult {
         let vocabularyTerms = mergedVocabularyTerms(rawVocabulary: customVocabulary)
 
@@ -180,7 +181,8 @@ Behavior:
                     contextSummary: context.contextSummary,
                     customVocabulary: vocabularyTerms,
                     customSystemPrompt: customSystemPrompt,
-                    outputLanguage: outputLanguage
+                    outputLanguage: outputLanguage,
+                    dictationLanguage: dictationLanguage
                 )
             }
 
@@ -310,7 +312,8 @@ Behavior:
         contextSummary: String,
         customVocabulary: [String],
         customSystemPrompt: String = "",
-        outputLanguage: String = ""
+        outputLanguage: String = "",
+        dictationLanguage: String = ""
     ) async throws -> PostProcessingResult {
         var primaryModel = resolvedPrimaryModel()
         let retryModel = resolvedRetryModel(for: primaryModel)
@@ -330,7 +333,8 @@ Behavior:
                 model: primaryModel,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt,
-                outputLanguage: outputLanguage
+                outputLanguage: outputLanguage,
+                dictationLanguage: dictationLanguage
             )
         } catch let error as PostProcessingError {
             // Unified fallback policy: decide whether to retry on the other model.
@@ -377,7 +381,8 @@ Behavior:
                     model: retryModel,
                     customVocabulary: customVocabulary,
                     customSystemPrompt: customSystemPrompt,
-                    outputLanguage: outputLanguage
+                    outputLanguage: outputLanguage,
+                    dictationLanguage: dictationLanguage
                 )
             } catch PostProcessingError.suspectedInstructionExecution {
                 return PostProcessingResult(
@@ -472,7 +477,8 @@ Behavior:
         model: String,
         customVocabulary: [String],
         customSystemPrompt: String = "",
-        outputLanguage: String = ""
+        outputLanguage: String = "",
+        dictationLanguage: String = ""
     ) async throws -> PostProcessingResult {
         var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
         request.httpMethod = "POST"
@@ -495,8 +501,11 @@ Use these spellings exactly in the output when relevant:
             ? Self.defaultSystemPrompt
             : customSystemPrompt
         let trimmedOutputLanguage = outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDictationLanguage = dictationLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedOutputLanguage.isEmpty {
             systemPrompt = Self.applyOutputLanguage(systemPrompt, language: trimmedOutputLanguage)
+        } else if !trimmedDictationLanguage.isEmpty {
+            systemPrompt = Self.applyDictationLanguage(systemPrompt, language: trimmedDictationLanguage)
         }
         if !vocabularyPrompt.isEmpty {
             systemPrompt += "\n\n" + vocabularyPrompt
@@ -739,6 +748,17 @@ Model: \(model)
 
     static func applyOutputLanguage(_ prompt: String, language: String) -> String {
         prompt + "\n\nIMPORTANT: Translate the final cleaned text into \(language). Output ONLY in \(language), regardless of the original spoken language."
+    }
+
+    /// Counterpart to `applyOutputLanguage` for when no output language is set: name
+    /// the language the user dictates in so cleanup keeps it. Every example in the
+    /// system prompt is English, and smaller models follow the examples over the
+    /// "Preserve the speaker's ... language" rule, returning English for non-English
+    /// dictation. Naming the language is what stops that; generic wording does not.
+    /// "Primarily" and the explicit carve-out keep this consistent with the prompt's
+    /// own "Preserve mixed-language text exactly as mixed" rule.
+    static func applyDictationLanguage(_ prompt: String, language: String) -> String {
+        prompt + "\n\nIMPORTANT: The dictation is primarily in \(language). Write the cleaned text in \(language). Preserve mixed-language words and spans in their original languages."
     }
 
     /// System prompt used for verbatim translation. Deliberately
