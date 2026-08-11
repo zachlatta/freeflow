@@ -326,6 +326,33 @@ class TranscriptionService {
         "you"
     ]
 
+    // On silence whisper also emits a subtitle-credit line in whatever language it
+    // guessed ("Undertekster av Ai-Media", "Untertitel von ...", "字幕by..."). The
+    // wording varies endlessly, so match the credit word instead of the full phrase.
+    // Compared against diacritic-folded text, and only for short outputs, so a real
+    // sentence that happens to mention subtitles is not swallowed.
+    private let hallucinationMarkers = [
+        "amara.org",
+        "subtitles by", "subtitle by", "subs by", "captions by", "captioning by",
+        "undertekster", "undertitel", "tekstet av",      // no/da
+        "undertext", "textning",                          // sv
+        "untertitel",                                     // de
+        "ondertitel",                                     // nl
+        "sous-titr",                                      // fr
+        "subtitulos", "subtitulado",                      // es
+        "sottotitoli",                                    // it
+        "legendas",                                       // pt
+        "napisy",                                         // pl
+        "tekstitys",                                      // fi
+        "altyaz",                                         // tr
+        "субтитр",                                        // ru
+        "字幕",                                            // zh/ja
+        "자막",                                            // ko
+        "ترجمة"                                           // ar
+    ]
+
+    private let hallucinationMarkerMaxLength = 60
+
     private let hallucinationNoSpeechThreshold = 0.1
 
     private func parseTranscript(from data: Data) throws -> String {
@@ -349,11 +376,14 @@ class TranscriptionService {
         return text
     }
 
-    private func isHallucination(text: String, json: [String: Any]) -> Bool {
+    func isHallucination(text: String, json: [String: Any]) -> Bool {
         let normalized = text
+            .folding(options: .diacriticInsensitive, locale: nil)
             .lowercased()
             .trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines))
-        guard hallucinationPhrases.contains(normalized) else {
+        let matchesMarker = normalized.count <= hallucinationMarkerMaxLength
+            && hallucinationMarkers.contains { normalized.contains($0) }
+        guard hallucinationPhrases.contains(normalized) || matchesMarker else {
             return false
         }
 
