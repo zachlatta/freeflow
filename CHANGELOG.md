@@ -8,6 +8,16 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [1.2.1] - 2026-08-11
+
+### Improved
+
+- Model pickers now show only currently supported Groq options, with context models limited to those that can analyze screenshots.
+
+### Fixed
+
+- Fixed typing lag in custom vocabulary and prompt editors by saving changes when editing finishes instead of after every keystroke.
+
 ## [1.2.0] - 2026-07-14
 
 ### Added
