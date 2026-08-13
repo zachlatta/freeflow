@@ -60,7 +60,22 @@ Full settings UI with 5 tabs matching macOS SettingsView:
 ## Prerequisites
 
 - Windows 10 or Windows 11
-- .NET 8.0 SDK (for building) or .NET 8.0 Runtime (for running)
+- .NET 8.0 SDK (for building from source only)
+
+## Installation
+
+### Option 1: Download Pre-built Release (Recommended)
+
+1. Download `FreeFlow-Windows-x.x.x-win-x64.zip` from the [releases page](https://github.com/zachlatta/freeflow/releases)
+2. Extract the ZIP file to a folder of your choice (e.g., `C:\Program Files\FreeFlow\`)
+3. Run `FreeFlow.exe`
+4. The app will appear in your system tray
+
+**Note:** The release is a self-contained single-file executable (~85MB). No .NET runtime installation required.
+
+### Option 2: Build from Source
+
+See the [Building](#building) section below.
 
 ## Project Structure
 
@@ -97,11 +112,37 @@ FreeFlowWindows/
 
 ## Building
 
+### Development Build
+
 ```bash
 cd FreeFlowWindows
 dotnet restore
 dotnet build
 ```
+
+### Release Build
+
+To create a distributable release:
+
+```powershell
+cd FreeFlowWindows
+.\build-release.ps1
+```
+
+Or use the batch file wrapper:
+
+```cmd
+cd FreeFlowWindows
+build-release.cmd
+```
+
+Build options:
+- `-Version "1.2.3"` - Set version number (default: 1.0.0)
+- `-SkipTests` - Skip running tests
+- `-X64Only` - Build only for x64 (skip ARM64)
+- `-Arm64Only` - Build only for ARM64 (skip x64)
+
+The release builds will be created in `FreeFlowWindows/releases/v{version}/`.
 
 ## Running
 

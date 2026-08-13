@@ -6,8 +6,33 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <AssemblyName>FreeFlowWindows</AssemblyName>
+    <AssemblyName>FreeFlow</AssemblyName>
     <RootNamespace>FreeFlowWindows.App</RootNamespace>
+    
+    <!-- Application metadata -->
+    <Product>FreeFlow</Product>
+    <Company>FreeFlow</Company>
+    <Copyright>Copyright © 2024-2026 FreeFlow Contributors. MIT License.</Copyright>
+    <Description>Free and open source voice dictation app with AI transcription</Description>
+    <Version>1.0.0</Version>
+    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    
+    <!-- Application icon -->
+    <ApplicationIcon Condition="Exists('Resources\app.ico')">Resources\app.ico</ApplicationIcon>
+    
+    <!-- Publishing settings -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    
+    <!-- Trim unused code for smaller file size -->
+    <PublishTrimmed>false</PublishTrimmed>
+    
+    <!-- Ready to run for faster startup -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

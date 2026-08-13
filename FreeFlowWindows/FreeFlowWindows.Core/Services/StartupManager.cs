@@ -177,18 +177,29 @@ public class StartupManager : IStartupManager
             return processPath;
         }
 
-        // Fallback: use the entry assembly location
+        // For single-file deployments, Assembly.Location returns empty string.
+        // Use AppContext.BaseDirectory with the executable name instead.
         var entryAssembly = System.Reflection.Assembly.GetEntryAssembly();
         if (entryAssembly != null)
         {
+            // First try to get the location (works for non-single-file deployments)
+            #pragma warning disable IL3000 // Avoid accessing Assembly file path when publishing as a single file
             var location = entryAssembly.Location;
+            #pragma warning restore IL3000
             if (!string.IsNullOrEmpty(location))
             {
                 return location;
             }
+            
+            // For single-file apps, construct path from BaseDirectory and assembly name
+            var assemblyName = entryAssembly.GetName().Name;
+            if (!string.IsNullOrEmpty(assemblyName))
+            {
+                return Path.Combine(AppContext.BaseDirectory, $"{assemblyName}.exe");
+            }
         }
 
         // Final fallback: use AppContext.BaseDirectory with expected exe name
-        return Path.Combine(AppContext.BaseDirectory, "FreeFlowWindows.exe");
+        return Path.Combine(AppContext.BaseDirectory, "FreeFlow.exe");
     }
 }
