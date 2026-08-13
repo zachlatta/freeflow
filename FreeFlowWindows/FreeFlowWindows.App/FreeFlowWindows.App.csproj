@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>FreeFlowWindows</AssemblyName>
+    <RootNamespace>FreeFlowWindows.App</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="1.1.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" Version="7.1.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FreeFlowWindows.Core\FreeFlowWindows.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Resources\*.ico" />
+    <None Remove="Resources\*.png" />
+    <Resource Include="Resources\*.ico" Condition="Exists('Resources')" />
+    <Resource Include="Resources\*.png" Condition="Exists('Resources')" />
+  </ItemGroup>
+
+</Project>

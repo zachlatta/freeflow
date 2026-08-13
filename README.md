@@ -9,8 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg"><b>⬇ Download FreeFlow.dmg</b></a><br>
-  <sub>Works on all Macs (Apple Silicon + Intel)</sub>
+  <a href="https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg"><b>⬇ Download for macOS</b></a>
+  &nbsp;|&nbsp;
+  <a href="#windows"><b>⬇ Download for Windows</b></a><br>
+  <sub>Works on macOS (Apple Silicon + Intel) and Windows 10/11</sub>
 </p>
 
 ---
@@ -25,13 +27,27 @@
 
 ## Overview
 
-FreeFlow is a free Mac dictation app inspired by [Wispr Flow](https://wisprflow.ai/), [Superwhisper](https://superwhisper.com/), and [Monologue](https://www.monologue.to/). It gives you fast AI transcription, context-aware cleanup, and voice-driven text editing without a monthly subscription.
+FreeFlow is a free dictation app inspired by [Wispr Flow](https://wisprflow.ai/), [Superwhisper](https://superwhisper.com/), and [Monologue](https://www.monologue.to/). It gives you fast AI transcription, context-aware cleanup, and voice-driven text editing without a monthly subscription.
+
+**Now available for both macOS and Windows!**
 
 ## Quick Start
+
+### macOS
 
 1. Download the app from above or [click here](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg)
 2. Get a free Groq API key from [groq.com](https://groq.com/)
 3. Hold `Fn` to talk, or tap `Command-Fn` to start and stop dictation, and have whatever you say pasted into the current text field
+
+### Windows
+
+1. Download the latest Windows release from the [releases page](https://github.com/zachlatta/freeflow/releases)
+2. Get a free Groq API key from [groq.com](https://groq.com/)
+3. Run the application - it will appear in your system tray
+4. Right-click the tray icon and select "Settings" to enter your API key
+5. Hold `Ctrl+Shift+Space` to talk, or tap `Ctrl+Alt+Space` to toggle dictation
+
+See the [Windows README](FreeFlowWindows/README.md) for detailed build and development instructions.
 
 ## Features
 
@@ -108,6 +124,32 @@ defaults delete com.zachlatta.freeflow context_request_timeout_seconds
 ```
 
 </details>
+
+## Windows
+
+FreeFlow for Windows is a native WPF port that provides feature parity with the macOS version. It includes:
+
+- **System tray integration** with the same menu structure as macOS
+- **Global hotkeys** for hold-to-talk (`Ctrl+Shift+Space`) and toggle (`Ctrl+Alt+Space`) modes
+- **Recording indicator** matching the macOS overlay design
+- **Full settings UI** with all 5 tabs (General, Prompts, Macros, Run Log, Debug)
+- **Auto-save settings** that apply immediately when changed (like macOS)
+- **Secure API key storage** via Windows Credential Manager
+- **Theme adaptation** - icons automatically adjust to light/dark Windows theme
+
+### Windows System Requirements
+
+- Windows 10 or Windows 11
+- .NET 8.0 Runtime (will prompt to install if missing)
+
+### Building from Source (Windows)
+
+```bash
+cd FreeFlowWindows
+dotnet restore
+dotnet build
+dotnet run --project FreeFlowWindows.App
+```
 
 ## License
 

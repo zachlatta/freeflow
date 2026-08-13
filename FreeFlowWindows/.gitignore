@@ -1,0 +1,80 @@
+# Environment files (secrets)
+.env
+.env.*
+!.env.example
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio files
+.vs/
+*.user
+*.userosscache
+*.suo
+*.cache
+*.rsuser
+*.ncb
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.VC.opendb
+
+# Rider files
+.idea/
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+!**/[Pp]ackages/repositories.config
+
+# Build results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+# dotnet
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# StyleCop
+StyleCopReport.xml
+
+# Windows thumbnail cache files
+Thumbs.db
+ehthumbs.db
+ehthumbs_vista.db
+
+# Folder config file
+[Dd]esktop.ini
+
+# Recycle Bin
+$RECYCLE.BIN/
+
+# Windows shortcuts
+*.lnk
+
+# JetBrains Rider
+*.sln.iml
+
+# Coverage
+*.coverage
+*.coveragexml
+
+# NCrunch
+*.ncrunch*
+_NCrunch_*
