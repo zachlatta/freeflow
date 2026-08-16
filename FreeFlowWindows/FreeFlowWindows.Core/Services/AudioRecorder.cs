@@ -308,32 +308,43 @@ public class AudioRecorder : IAudioRecorder
 
     /// <summary>
     /// Handles incoming audio data from the microphone.
+    /// Thread-safe: uses lock to prevent races with StopRecordingAsync.
     /// </summary>
     private void OnDataAvailable(object? sender, WaveInEventArgs e)
     {
         // Update last data received time for watchdog
         _lastDataReceivedTime = DateTime.UtcNow;
 
-        // Write data to file
-        try
+        // Write data to file under lock to prevent race with disposal
+        lock (_recordingLock)
         {
-            _waveFileWriter?.Write(e.Buffer, 0, e.BytesRecorded);
-        }
-        catch (Exception ex)
-        {
-            // Handle write error
-            lock (_recordingLock)
+            if (!_isRecording || _waveFileWriter == null)
             {
+                return; // Recording has stopped, ignore this callback
+            }
+
+            try
+            {
+                _waveFileWriter.Write(e.Buffer, 0, e.BytesRecorded);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Writer was disposed between our check and write - ignore
+                return;
+            }
+            catch (Exception ex)
+            {
+                // Handle write error
                 CleanupRecording();
                 RaiseRecordingFailed(
                     RecordingErrorType.WriteError,
                     $"Failed to write audio data: {ex.Message}",
                     ex);
+                return;
             }
-            return;
         }
 
-        // Calculate and report audio level
+        // Calculate and report audio level (outside lock for performance)
         float rms = CalculateRms(e.Buffer, e.BytesRecorded);
         float normalizedLevel = _levelNormalizer.NormalizedLevel(rms);
 

@@ -70,52 +70,58 @@ public partial class App : Application
 
             // Wire up hotkey events to pipeline
             var hotkeyManager = _serviceProvider.GetRequiredService<IHotkeyManager>();
-            var logPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "freeflow_debug.log");
-            
             // Hold mode: start on press, stop on release
+            // Wrapped in try/catch to prevent async void from crashing the app
             hotkeyManager.HoldHotkeyPressed += async (s, args) =>
             {
-                System.IO.File.AppendAllText(logPath, $"\n[{DateTime.Now:HH:mm:ss}] HoldHotkeyPressed event fired!\n");
-                if (!orchestrator.IsActive)
+                try
                 {
-                    System.IO.File.AppendAllText(logPath, "  Starting recording...\n");
-                    var settings = settingsManager.Load();
-                    await orchestrator.StartAsync(Core.Models.RecordingMode.Hold, settings.SelectedMicrophoneId);
+                    if (!orchestrator.IsActive)
+                    {
+                        var settings = settingsManager.Load();
+                        await orchestrator.StartAsync(Core.Models.RecordingMode.Hold, settings.SelectedMicrophoneId);
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    System.IO.File.AppendAllText(logPath, "  Already active, ignoring\n");
+                    System.Diagnostics.Debug.WriteLine($"HoldHotkeyPressed error: {ex.Message}");
                 }
             };
 
             hotkeyManager.HoldHotkeyReleased += async (s, args) =>
             {
-                System.IO.File.AppendAllText(logPath, $"\n[{DateTime.Now:HH:mm:ss}] HoldHotkeyReleased event fired!\n");
-                if (orchestrator.IsActive)
+                try
                 {
-                    System.IO.File.AppendAllText(logPath, "  Stopping recording...\n");
-                    await orchestrator.StopAsync();
+                    if (orchestrator.IsActive)
+                    {
+                        await orchestrator.StopAsync();
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    System.IO.File.AppendAllText(logPath, "  Not active, ignoring\n");
+                    System.Diagnostics.Debug.WriteLine($"HoldHotkeyReleased error: {ex.Message}");
                 }
             };
 
             // Toggle mode: toggle recording on/off
+            // Wrapped in try/catch to prevent async void from crashing the app
             hotkeyManager.ToggleHotkeyPressed += async (s, args) =>
             {
-                System.IO.File.AppendAllText(logPath, $"\n[{DateTime.Now:HH:mm:ss}] ToggleHotkeyPressed event fired!\n");
-                if (orchestrator.IsActive)
+                try
                 {
-                    System.IO.File.AppendAllText(logPath, "  Stopping recording...\n");
-                    await orchestrator.StopAsync();
+                    if (orchestrator.IsActive)
+                    {
+                        await orchestrator.StopAsync();
+                    }
+                    else
+                    {
+                        var settings = settingsManager.Load();
+                        await orchestrator.StartAsync(Core.Models.RecordingMode.Toggle, settings.SelectedMicrophoneId);
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    System.IO.File.AppendAllText(logPath, "  Starting recording...\n");
-                    var settings = settingsManager.Load();
-                    await orchestrator.StartAsync(Core.Models.RecordingMode.Toggle, settings.SelectedMicrophoneId);
+                    System.Diagnostics.Debug.WriteLine($"ToggleHotkeyPressed error: {ex.Message}");
                 }
             };
 
@@ -254,9 +260,6 @@ public partial class App : Application
     
     private void OnSettingsWindowClosed(object? sender, EventArgs e)
     {
-        var logPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "freeflow_debug.log");
-        System.IO.File.AppendAllText(logPath, $"\n[{DateTime.Now:HH:mm:ss}] OnSettingsWindowClosed called\n");
-        
         if (sender is SettingsWindow window)
         {
             window.Closed -= OnSettingsWindowClosed;
@@ -264,28 +267,25 @@ public partial class App : Application
             // Re-register hotkeys on the UI thread to ensure ComponentDispatcher works correctly
             Dispatcher.BeginInvoke(() =>
             {
-                var hotkeyManager = _serviceProvider?.GetRequiredService<IHotkeyManager>();
-                var settingsManager = _serviceProvider?.GetRequiredService<ISettingsManager>();
-                if (hotkeyManager != null && settingsManager != null)
+                try
                 {
-                    var settings = settingsManager.Load();
-                    System.IO.File.AppendAllText(logPath, $"  Loaded HoldHotkey: {settings.HoldHotkey}\n");
-                    System.IO.File.AppendAllText(logPath, $"  Loaded ToggleHotkey: {settings.ToggleHotkey}\n");
-                    
-                    var config = new Core.Models.HotkeyConfiguration
+                    var hotkeyManager = _serviceProvider?.GetRequiredService<IHotkeyManager>();
+                    var settingsManager = _serviceProvider?.GetRequiredService<ISettingsManager>();
+                    if (hotkeyManager != null && settingsManager != null)
                     {
-                        HoldHotkey = settings.HoldHotkey,
-                        ToggleHotkey = settings.ToggleHotkey,
-                        PasteAgainHotkey = null
-                    };
-                    
-                    var result = hotkeyManager.RegisterHotkeys(config);
-                    System.IO.File.AppendAllText(logPath, $"  RegisterHotkeys result: {result}\n");
-                    System.IO.File.AppendAllText(logPath, $"  IsActive: {hotkeyManager.IsActive}\n");
+                        var settings = settingsManager.Load();
+                        var config = new Core.Models.HotkeyConfiguration
+                        {
+                            HoldHotkey = settings.HoldHotkey,
+                            ToggleHotkey = settings.ToggleHotkey,
+                            PasteAgainHotkey = null
+                        };
+                        hotkeyManager.RegisterHotkeys(config);
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    System.IO.File.AppendAllText(logPath, "  hotkeyManager or settingsManager is null!\n");
+                    System.Diagnostics.Debug.WriteLine($"OnSettingsWindowClosed error: {ex.Message}");
                 }
             });
         }

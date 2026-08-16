@@ -117,38 +117,32 @@ public partial class SettingsWindow : Window
 
     private void OnRequestClose(object? sender, bool saved)
     {
-        DialogResult = saved;
+        // Note: Don't set DialogResult here - this window is opened with Show(), not ShowDialog()
+        // Setting DialogResult on a non-dialog window throws InvalidOperationException
         Close();
     }
 
     private void OnSettingsApplied(object? sender, EventArgs e)
     {
         // Re-register hotkeys immediately when settings are changed
-        var logPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "freeflow_debug.log");
-        System.IO.File.AppendAllText(logPath, $"\n[{DateTime.Now:HH:mm:ss}] OnSettingsApplied - re-registering hotkeys immediately\n");
-        
-        // Get the hotkey manager from the App's service provider
-        var hotkeyManager = App.Services.GetService(typeof(IHotkeyManager)) as IHotkeyManager;
-        if (hotkeyManager != null)
+        try
         {
-            var settings = _settingsManager.Load();
-            System.IO.File.AppendAllText(logPath, $"  Loaded HoldHotkey: {settings.HoldHotkey}\n");
-            System.IO.File.AppendAllText(logPath, $"  Loaded ToggleHotkey: {settings.ToggleHotkey}\n");
-            
-            var config = new HotkeyConfiguration
+            var hotkeyManager = App.Services.GetService(typeof(IHotkeyManager)) as IHotkeyManager;
+            if (hotkeyManager != null)
             {
-                HoldHotkey = settings.HoldHotkey,
-                ToggleHotkey = settings.ToggleHotkey,
-                PasteAgainHotkey = null
-            };
-            
-            var result = hotkeyManager.RegisterHotkeys(config);
-            System.IO.File.AppendAllText(logPath, $"  RegisterHotkeys result: {result}\n");
-            System.IO.File.AppendAllText(logPath, $"  Hotkeys now active immediately!\n");
+                var settings = _settingsManager.Load();
+                var config = new HotkeyConfiguration
+                {
+                    HoldHotkey = settings.HoldHotkey,
+                    ToggleHotkey = settings.ToggleHotkey,
+                    PasteAgainHotkey = null
+                };
+                hotkeyManager.RegisterHotkeys(config);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            System.IO.File.AppendAllText(logPath, $"  ERROR: Could not get IHotkeyManager\n");
+            System.Diagnostics.Debug.WriteLine($"OnSettingsApplied error: {ex.Message}");
         }
     }
 
@@ -240,18 +234,8 @@ public partial class SettingsWindow : Window
 
     private void SaveApiKeyButton_Click(object sender, RoutedEventArgs e)
     {
-        var logPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "freeflow_debug.log");
-        System.IO.File.AppendAllText(logPath, $"\n[{DateTime.Now:HH:mm:ss}] SaveApiKeyButton_Click\n");
-        System.IO.File.AppendAllText(logPath, $"  HasUnsavedChanges: {_viewModel.HasUnsavedChanges}\n");
-        System.IO.File.AppendAllText(logPath, $"  HasValidationError: {_viewModel.HasValidationError}\n");
-        System.IO.File.AppendAllText(logPath, $"  CanExecute: {_viewModel.SaveCommand.CanExecute(null)}\n");
-        System.IO.File.AppendAllText(logPath, $"  HoldHotkey: {_viewModel.HoldHotkey}\n");
-        System.IO.File.AppendAllText(logPath, $"  ToggleHotkey: {_viewModel.ToggleHotkey}\n");
-        
         if (_viewModel.SaveCommand.CanExecute(null))
             _viewModel.SaveCommand.Execute(null);
-        else
-            System.IO.File.AppendAllText(logPath, $"  CANNOT SAVE - command disabled\n");
     }
 
     private void StartDelaySlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)

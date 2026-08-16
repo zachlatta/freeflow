@@ -89,14 +89,10 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
     /// <inheritdoc />
     public async Task StartAsync(RecordingMode mode, string? deviceId = null)
     {
-        var logPath = Path.Combine(Path.GetTempPath(), "freeflow_debug.log");
-        File.AppendAllText(logPath, $"\n[{DateTime.Now:HH:mm:ss}] StartAsync called, mode={mode}, deviceId={deviceId}\n");
-        
         lock (_stateLock)
         {
             if (_currentState != PipelineState.Idle)
             {
-                File.AppendAllText(logPath, $"  Already in state {_currentState}, throwing\n");
                 throw new InvalidOperationException(
                     $"Cannot start pipeline: already in state {_currentState}");
             }
@@ -111,26 +107,21 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
         try
         {
             // Transition to Initializing
-            File.AppendAllText(logPath, "  Transitioning to Initializing\n");
             SetState(PipelineState.Initializing);
 
             // Start recording
-            File.AppendAllText(logPath, "  Starting audio recording...\n");
             await _audioRecorder.StartRecordingAsync(deviceId);
 
             // Transition to Recording
-            File.AppendAllText(logPath, "  Transitioning to Recording\n");
             SetState(PipelineState.Recording);
         }
         catch (OperationCanceledException)
         {
-            File.AppendAllText(logPath, "  Cancelled during initialization\n");
             // Cancelled during initialization
             HandleCancellation();
         }
         catch (Exception ex)
         {
-            File.AppendAllText(logPath, $"  Exception: {ex.Message}\n");
             HandleError(PipelineState.Initializing, "Failed to start recording", ex);
         }
     }
@@ -138,13 +129,10 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
     /// <inheritdoc />
     public async Task StopAsync()
     {
-        var logPath = Path.Combine(Path.GetTempPath(), "freeflow_debug.log");
         var currentState = CurrentState;
-        File.AppendAllText(logPath, $"\n[{DateTime.Now:HH:mm:ss}] StopAsync called, currentState={currentState}\n");
         
         if (currentState != PipelineState.Recording)
         {
-            File.AppendAllText(logPath, "  Not recording, returning early\n");
             // Not recording, nothing to stop
             return;
         }
@@ -154,13 +142,10 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
         try
         {
             // Stop recording and get the audio file path
-            File.AppendAllText(logPath, "  Stopping audio recording...\n");
             _currentAudioFilePath = await _audioRecorder.StopRecordingAsync();
-            File.AppendAllText(logPath, $"  Audio file: {_currentAudioFilePath}\n");
 
             if (string.IsNullOrEmpty(_currentAudioFilePath))
             {
-                File.AppendAllText(logPath, "  No audio file, completing with empty\n");
                 // No audio recorded (possibly too short)
                 HandleCompletion(string.Empty, wasCancelled: false);
                 return;
@@ -170,17 +155,13 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
             ct.ThrowIfCancellationRequested();
 
             // Transition to Transcribing
-            File.AppendAllText(logPath, "  Transitioning to Transcribing\n");
             SetState(PipelineState.Transcribing);
 
             // Transcribe the audio
-            File.AppendAllText(logPath, "  Starting transcription...\n");
             var transcriptionResult = await _transcriptionService.TranscribeAsync(_currentAudioFilePath, ct);
-            File.AppendAllText(logPath, $"  Transcription result: success={transcriptionResult.Success}\n");
 
             if (!transcriptionResult.Success)
             {
-                File.AppendAllText(logPath, $"  Transcription failed: {transcriptionResult.Error?.Message}\n");
                 HandleError(
                     PipelineState.Transcribing,
                     transcriptionResult.Error?.Message ?? "Transcription failed");
@@ -188,12 +169,10 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
             }
 
             _rawTranscript = transcriptionResult.Transcript;
-            File.AppendAllText(logPath, $"  Raw transcript: {_rawTranscript}\n");
 
             // Check for empty transcript (silence/noise)
             if (string.IsNullOrWhiteSpace(_rawTranscript))
             {
-                File.AppendAllText(logPath, "  Empty transcript (silence/noise)\n");
                 HandleCompletion(string.Empty, wasCancelled: false);
                 return;
             }
@@ -201,7 +180,6 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
             ct.ThrowIfCancellationRequested();
 
             // Transition to PostProcessing
-            File.AppendAllText(logPath, "  Transitioning to PostProcessing\n");
             SetState(PipelineState.PostProcessing);
 
             // Load settings for post-processing
@@ -209,7 +187,6 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
             var vocabularyLines = ParseVocabulary(settings.CustomVocabulary);
 
             // Post-process the transcript
-            File.AppendAllText(logPath, "  Starting post-processing...\n");
             var postProcessingResult = await _postProcessingService.ProcessAsync(
                 _rawTranscript,
                 contextSummary: string.Empty, // TODO: Add context capture support
@@ -221,13 +198,11 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
             string finalTranscript;
             if (!postProcessingResult.Success)
             {
-                File.AppendAllText(logPath, "  Post-processing failed, using raw transcript\n");
                 // Fall back to raw transcript if post-processing fails
                 finalTranscript = _rawTranscript.Trim();
             }
             else if (string.IsNullOrWhiteSpace(postProcessingResult.CleanedTranscript))
             {
-                File.AppendAllText(logPath, "  Post-processing returned empty (noise)\n");
                 // Post-processing returned empty (determined to be noise)
                 HandleCompletion(string.Empty, wasCancelled: false);
                 return;
@@ -237,16 +212,12 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
                 finalTranscript = postProcessingResult.CleanedTranscript!;
             }
 
-            File.AppendAllText(logPath, $"  Final transcript: {finalTranscript}\n");
-
             ct.ThrowIfCancellationRequested();
 
             // Transition to Pasting
-            File.AppendAllText(logPath, "  Transitioning to Pasting\n");
             SetState(PipelineState.Pasting);
 
             // Paste the transcript
-            File.AppendAllText(logPath, "  Pasting text...\n");
             await _clipboardManager.PasteTextAsync(
                 finalTranscript,
                 preserveClipboard: settings.PreserveClipboard,
@@ -256,18 +227,14 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
             _lastTranscript = finalTranscript;
 
             // Success!
-            File.AppendAllText(logPath, "  Pipeline completed successfully!\n");
             HandleCompletion(finalTranscript, wasCancelled: false);
         }
         catch (OperationCanceledException)
         {
-            File.AppendAllText(logPath, "  Pipeline was cancelled\n");
             HandleCancellation();
         }
         catch (Exception ex)
         {
-            File.AppendAllText(logPath, $"  Exception: {ex.Message}\n");
-            File.AppendAllText(logPath, $"  Stack trace: {ex.StackTrace}\n");
             HandleError(CurrentState, ex.Message, ex);
         }
         finally
@@ -323,14 +290,16 @@ public class PipelineOrchestrator : IPipelineOrchestrator, IDisposable
     {
         CleanupAudioFile();
 
+        PipelineState previousState;
         lock (_stateLock)
         {
+            previousState = _currentState; // Capture before changing
             _activeRecordingMode = null;
             _currentState = PipelineState.Idle;
         }
 
-        // Fire state changed to Idle
-        StateChanged?.Invoke(this, new PipelineStateChangedEventArgs(_currentState, PipelineState.Idle));
+        // Fire state changed to Idle with correct previous state
+        StateChanged?.Invoke(this, new PipelineStateChangedEventArgs(previousState, PipelineState.Idle));
 
         // Fire completion event
         Completed?.Invoke(this, new PipelineCompletedEventArgs(transcript, wasCancelled, _rawTranscript));

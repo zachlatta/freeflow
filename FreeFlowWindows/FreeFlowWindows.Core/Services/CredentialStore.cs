@@ -71,20 +71,16 @@ public class CredentialStore : ICredentialStore
     private static Dictionary<string, string> LoadEnvFile()
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var logPath = Path.Combine(Path.GetTempPath(), "freeflow_debug.log");
         
         // Look for .env in the app directory and parent directories
         var dir = AppDomain.CurrentDomain.BaseDirectory;
-        File.AppendAllText(logPath, $"\n[{DateTime.Now:HH:mm:ss}] Looking for .env starting from: {dir}\n");
         
         for (int i = 0; i < 10; i++) // Check up to 10 parent directories
         {
             var envPath = Path.Combine(dir, ".env");
-            File.AppendAllText(logPath, $"  Checking: {envPath}\n");
             
             if (File.Exists(envPath))
             {
-                File.AppendAllText(logPath, $"  Found .env at: {envPath}\n");
                 try
                 {
                     foreach (var line in File.ReadAllLines(envPath))
@@ -106,13 +102,12 @@ public class CredentialStore : ICredentialStore
                                 value = value.Substring(1, value.Length - 2);
                             }
                             result[key] = value;
-                            File.AppendAllText(logPath, $"  Loaded: {key}={value.Substring(0, Math.Min(10, value.Length))}...\n");
                         }
                     }
                 }
-                catch (Exception ex)
+                catch
                 {
-                    File.AppendAllText(logPath, $"  Error reading .env: {ex.Message}\n");
+                    // Silently ignore errors reading .env file
                 }
                 break;
             }
@@ -120,15 +115,9 @@ public class CredentialStore : ICredentialStore
             var parent = Directory.GetParent(dir);
             if (parent == null)
             {
-                File.AppendAllText(logPath, "  Reached root directory, no .env found\n");
                 break;
             }
             dir = parent.FullName;
-        }
-
-        if (result.Count == 0)
-        {
-            File.AppendAllText(logPath, "  No .env values loaded\n");
         }
 
         return result;
