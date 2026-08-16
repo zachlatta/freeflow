@@ -1,0 +1,10 @@
+<Application x:Class="FreeFlowWindows.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:windows="clr-namespace:FreeFlowWindows.App.Windows"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <!-- Global Converters -->
+        <windows:BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+    </Application.Resources>
+</Application>
