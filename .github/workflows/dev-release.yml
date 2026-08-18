@@ -19,6 +19,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve dev version
         id: version
@@ -125,7 +126,12 @@ jobs:
         run: mv "build/FreeFlow Dev.dmg" FreeFlow-Dev.dmg
 
       - name: Move dev tag
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
+          AUTHORIZATION="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64)"
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $AUTHORIZATION"
+          trap 'git config --local --unset-all http.https://github.com/.extraheader || true' EXIT
           git tag --force "${{ steps.version.outputs.tag }}" "$GITHUB_SHA"
           git push --force origin "refs/tags/${{ steps.version.outputs.tag }}"
 
