@@ -1,0 +1,97 @@
+name: Bug report
+description: Report reproducible incorrect behavior in FreeFlow
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Never include API keys, real audio,
+        private transcripts, screenshots containing personal information,
+        selected text, clipboard contents, or private provider URLs.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the incorrect behavior without including private dictated content.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open...
+        2. Configure...
+        3. Press...
+        4. Observe...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: FreeFlow version and build
+      description: Use the version and build shown by the app. Say "unknown" if unavailable.
+    validations:
+      required: true
+
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "For example: macOS 15.6"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Mac type
+      options:
+        - Apple Silicon
+        - Intel
+        - Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider and model
+      description: Provider and model names only. Do not include an API key or private URL.
+      placeholder: "For example: Groq / whisper-large-v3-turbo"
+
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Relevant permission state
+      description: Note Microphone, Accessibility, or Screen Recording state if relevant.
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: |
+        Paste only content you have reviewed and redacted. Remove secrets,
+        transcripts, audio, screenshots, selected text, clipboard contents,
+        window titles, usernames, filesystem paths, and private URLs.
+      render: shell
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I reviewed this report and removed credentials and private user content.
+          required: true

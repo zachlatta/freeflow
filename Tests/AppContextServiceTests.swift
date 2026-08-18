@@ -1,14 +1,12 @@
 import Foundation
 
-@main
-struct AppContextServiceTests {
-    static func main() {
+enum AppContextServiceTests {
+    static func run() {
         testQwenRawOutputIsSummarized()
         testQwenReasoningOutputIsStripped()
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
-        print("AppContextServiceTests passed")
     }
 
     private static func testQwenRawOutputIsSummarized() {
@@ -18,7 +16,7 @@ struct AppContextServiceTests {
 
         let summary = AppContextService.activitySummary(from: output, model: "qwen/qwen3.6-27b")
 
-        expectEqual(
+        TestSupport.expectEqual(
             summary,
             "The user is replying to an email about the product launch. They likely intend to confirm the next steps."
         )
@@ -35,11 +33,11 @@ struct AppContextServiceTests {
 
         let summary = AppContextService.activitySummary(from: output, model: "qwen/qwen3.6-27b")
 
-        expectEqual(
+        TestSupport.expectEqual(
             summary,
             "The user is editing a project note in FreeFlow. They likely intend to tighten the release wording."
         )
-        expect(summary?.contains("Hidden chain of thought") == false, "Qwen reasoning leaked into summary")
+        TestSupport.expect(summary?.contains("Hidden chain of thought") == false, "Qwen reasoning leaked into summary")
     }
 
     private static func testNonStrippingModelPreservesExistingBehavior() {
@@ -50,7 +48,7 @@ struct AppContextServiceTests {
             model: "meta-llama/llama-4-scout-17b-16e-instruct"
         )
 
-        expectEqual(summary, output)
+        TestSupport.expectEqual(summary, output)
     }
 
     private static func testDeprecatedGroqModelsAreNotPredefined() {
@@ -62,25 +60,15 @@ struct AppContextServiceTests {
         ]
 
         for model in deprecatedModels {
-            expect(!ModelConfiguration.llmModels.contains(model), "Deprecated model remains in picker: \(model)")
+            TestSupport.expect(!ModelConfiguration.llmModels.contains(model), "Deprecated model remains in picker: \(model)")
         }
-        expect(ModelConfiguration.llmModels.contains("qwen/qwen3.6-27b"), "New fallback is missing from picker")
+        TestSupport.expect(ModelConfiguration.llmModels.contains("qwen/qwen3.6-27b"), "New fallback is missing from picker")
     }
 
     private static func testQwenCleanupDisablesReasoning() {
         let config = ModelConfiguration.config(for: "qwen/qwen3.6-27b")
 
-        expect(config.reasoningEffort == "none", "Qwen cleanup should disable reasoning")
-        expect(config.includeReasoning == false, "Qwen cleanup should exclude reasoning output")
-    }
-
-    private static func expectEqual(_ actual: String?, _ expected: String, file: StaticString = #file, line: UInt = #line) {
-        expect(actual == expected, "Expected \(expected.debugDescription), got \((actual ?? "nil").debugDescription)", file: file, line: line)
-    }
-
-    private static func expect(_ condition: Bool, _ message: String, file: StaticString = #file, line: UInt = #line) {
-        if !condition {
-            fatalError("\(file):\(line): \(message)")
-        }
+        TestSupport.expect(config.reasoningEffort == "none", "Qwen cleanup should disable reasoning")
+        TestSupport.expect(config.includeReasoning == false, "Qwen cleanup should exclude reasoning output")
     }
 }
