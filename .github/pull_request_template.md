@@ -10,7 +10,7 @@
 
 - [ ] `make check`
 - [ ] `git diff --check`
-- [ ] Focused regression test added or updated
+- [ ] Focused regression test added or updated, or no-test reason documented below
 - [ ] Manual app verification completed, if required
 
 Manual verification performed:
@@ -26,7 +26,7 @@ Manual verification performed:
 - [ ] macOS permissions and entitlements are unchanged, or explained below
 - [ ] Preferences and pipeline-history compatibility are unchanged, or
       explained below
-- [ ] Signing, notarization, updates, and release workflows are unchanged, or
+- [ ] Signing, notarization, updates, and GitHub workflows are unchanged, or
       explained below
 
 Risk notes:

@@ -32,7 +32,9 @@ body:
       description: |
         Would this read, store, log, or transmit audio, transcripts,
         screenshots, app context, selected text, clipboard data, diagnostics,
-        or identifiers? Which provider or local store would receive it?
+        or identifiers? Which provider or local store would receive it? Use
+        provider or store names only. Do not include private URLs or real user
+        content.
     validations:
       required: true
 
