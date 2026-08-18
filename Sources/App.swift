@@ -10,6 +10,7 @@ struct FreeFlowApp: App {
         MenuBarExtra(isInserted: $showMenuBarIcon) {
             MenuBarView()
                 .environmentObject(appDelegate.appState)
+                .environmentObject(appDelegate.archiveService)
         } label: {
             MenuBarLabel()
                 .environmentObject(appDelegate.appState)

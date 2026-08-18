@@ -2,11 +2,14 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     let appState = AppState()
+    lazy var archiveService = ArchiveService(appState: appState)
     var setupWindow: NSWindow?
     private var settingsWindow: NSWindow?
+    private var dashboardWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NetworkMonitor.shared.start()
+        archiveService.start()
 
         NotificationCenter.default.addObserver(
             self,
@@ -18,6 +21,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleShowSettings),
             name: .showSettings,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleShowArchiveDashboard),
+            name: .showArchiveDashboard,
             object: nil
         )
 
@@ -34,7 +43,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 appState.showAccessibilityAlert()
             }
         }
-
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -105,6 +113,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func presentSettingsWindow() {
         let settingsView = SettingsView()
             .environmentObject(appState)
+            .environmentObject(archiveService)
         let hostingView = NSHostingView(rootView: settingsView)
 
         let window = NSWindow(
@@ -127,10 +136,51 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: window,
             queue: .main
         ) { [weak self] _ in
-            if self?.setupWindow == nil {
+            if self?.setupWindow == nil && self?.dashboardWindow == nil {
                 NSApp.setActivationPolicy(.accessory)
             }
             self?.settingsWindow = nil
+        }
+    }
+
+    @objc private func handleShowArchiveDashboard() {
+        showDashboardWindow()
+    }
+
+    private func showDashboardWindow() {
+        NSApp.setActivationPolicy(.regular)
+
+        if let dashboardWindow, dashboardWindow.isVisible {
+            dashboardWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let dashboard = ArchiveDashboardView(archive: archiveService)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 680),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "FlowArchive"
+        window.contentView = NSHostingView(rootView: dashboard)
+        window.isReleasedWhenClosed = false
+        window.minSize = NSSize(width: 900, height: 520)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        dashboardWindow = window
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            if self?.setupWindow == nil && self?.settingsWindow == nil {
+                NSApp.setActivationPolicy(.accessory)
+            }
+            self?.dashboardWindow = nil
         }
     }
 

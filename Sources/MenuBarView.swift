@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var archiveService: ArchiveService
     @ObservedObject private var updateManager = UpdateManager.shared
 
     private var appVersion: String {
@@ -46,6 +47,69 @@ struct MenuBarView: View {
         NotificationCenter.default.post(name: .showSettings, object: nil)
     }
 
+    @ViewBuilder
+    private var archiveMenuSection: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(archiveService.recorderConnected ? Color.green : Color.secondary.opacity(0.4))
+                .frame(width: 8, height: 8)
+            Text(archiveService.recorderConnected
+                 ? "Sony Recorder Connected (\(archiveService.recorderName))"
+                 : "Sony Recorder Disconnected")
+                .font(.caption)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+
+        if archiveService.isProcessing || !archiveService.syncMessage.isEmpty {
+            Label(archiveService.processingMessage.isEmpty ? archiveService.syncMessage : archiveService.processingMessage,
+                  systemImage: archiveService.isProcessing ? "arrow.triangle.2.circlepath" : "externaldrive")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        if let last = archiveService.lastNoteRelativeLabel() {
+            Label("Last Note: \(last)", systemImage: "note.text")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+
+        if archiveService.destinationMissing {
+            Text("\(archiveService.destinationLabel) unavailable — saving locally")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .padding(.horizontal, 16)
+        }
+
+        if let error = archiveService.errorMessage {
+            Text(error)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .padding(.horizontal, 16)
+                .lineLimit(3)
+        }
+
+        Button("Open Archive Folder") {
+            archiveService.openLibraryInFinder()
+        }
+        Button("Open Dashboard") {
+            NotificationCenter.default.post(name: .showArchiveDashboard, object: nil)
+        }
+        Button("Archive Settings") {
+            appState.selectedSettingsTab = .archive
+            NotificationCenter.default.post(name: .showSettings, object: nil)
+        }
+
+        Divider()
+    }
+
     var body: some View {
         VStack(spacing: 4) {
             Text("\(AppName.displayName) v\(appVersion)")
@@ -55,6 +119,8 @@ struct MenuBarView: View {
                 .padding(.vertical, 4)
 
             Divider()
+
+            archiveMenuSection
 
             if !appState.hasScreenRecordingPermission {
                 Button {

@@ -69,17 +69,32 @@ endif
 	@codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" --entitlements FreeFlow.entitlements "$(APP_BUNDLE)"
 	@echo "Built $(APP_BUNDLE)"
 
+TEST_SOURCES = \
+	Sources/AppContextService.swift \
+	Sources/LLMAPITransport.swift \
+	Sources/ModelConfiguration.swift \
+	Sources/FlowArchive/ArchivePaths.swift \
+	Sources/FlowArchive/ArchiveMarkdownWriter.swift \
+	Sources/FlowArchive/FolderRouter.swift \
+	Sources/FlowArchive/RecorderVolumeMatcher.swift \
+	Sources/FlowArchive/CloudDestination.swift \
+	Sources/FlowArchive/IngestHasher.swift \
+	Sources/FlowArchive/ArchiveOrganizer.swift \
+	Sources/FlowArchive/ArchiveSettings.swift \
+	Tests/AppContextServiceTests.swift \
+	Tests/FlowArchiveTests.swift
+
 test: $(TEST_RUNNER)
 	@$(TEST_RUNNER)
 
-$(TEST_RUNNER): Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Tests/AppContextServiceTests.swift
+$(TEST_RUNNER): $(TEST_SOURCES)
 	@mkdir -p "$(BUILD_DIR)"
 	swiftc \
 		-parse-as-library \
 		-o "$(TEST_RUNNER)" \
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target $(ARCH)-apple-macosx13.0 \
-		Sources/AppContextService.swift Sources/LLMAPITransport.swift Sources/ModelConfiguration.swift Tests/AppContextServiceTests.swift
+		$(TEST_SOURCES)
 
 icon: $(ICON_ICNS)
 

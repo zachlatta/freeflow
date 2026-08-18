@@ -3,6 +3,17 @@ import os.log
 
 private let transcriptionLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Transcription")
 
+struct TranscriptionSegment {
+    let start: TimeInterval
+    let end: TimeInterval
+    let text: String
+}
+
+struct TranscriptionResult {
+    let text: String
+    let segments: [TranscriptionSegment]
+}
+
 class TranscriptionService {
     private static let modelsSupportingVerboseJSON: Set<String> = [
         // OpenAI's Whisper model supports segment metadata. The newer
@@ -18,10 +29,12 @@ class TranscriptionService {
     private let baseURL: URL
     private let transcriptionModel: String
     private let language: String?
+    private let timeoutOverride: TimeInterval?
     private var transcriptionResponseFormat: String {
         Self.responseFormat(forModel: transcriptionModel)
     }
     private var transcriptionTimeoutSeconds: TimeInterval {
+        if let timeoutOverride, timeoutOverride > 0 { return timeoutOverride }
         let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
         return override > 0 ? override : 20
     }
@@ -30,7 +43,8 @@ class TranscriptionService {
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         transcriptionModel: String = "whisper-large-v3",
-        language: String? = nil
+        language: String? = nil,
+        timeoutSeconds: TimeInterval? = nil
     ) throws {
         self.apiKey = apiKey
         self.baseURL = try Self.normalizedBaseURL(from: baseURL)
@@ -38,6 +52,7 @@ class TranscriptionService {
         self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
         let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
+        self.timeoutOverride = timeoutSeconds
     }
 
     static func responseFormat(forModel model: String) -> String {
@@ -71,7 +86,7 @@ class TranscriptionService {
         }
 
         let timeoutSeconds = transcriptionTimeoutSeconds
-        let raceState = TranscriptionTimeoutRaceState()
+        let raceState = TranscriptionTimeoutRaceState<String>()
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -109,12 +124,60 @@ class TranscriptionService {
         }
     }
 
-    // Send audio file for transcription and return text
-    private func transcribeAudio(fileURL: URL) async throws -> String {
-        return try await transcribeAudioWithURLSession(fileURL: fileURL)
+    func transcribeDetailed(fileURL: URL) async throws -> TranscriptionResult {
+        guard !Task.isCancelled else {
+            throw CancellationError()
+        }
+
+        let timeoutSeconds = transcriptionTimeoutSeconds
+        let raceState = TranscriptionTimeoutRaceState<TranscriptionResult>()
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                raceState.setContinuation(continuation)
+
+                let transcriptionTask = Task { [weak self] in
+                    do {
+                        guard let self else {
+                            throw TranscriptionError.transcriptionFailed("Transcription service deallocated")
+                        }
+                        let result = try await self.transcribeAudioResult(fileURL: fileURL)
+                        raceState.finish(.success(result))
+                    } catch {
+                        raceState.finish(.failure(Self.transcriptionTimeoutErrorIfNeeded(
+                            error,
+                            timeoutSeconds: timeoutSeconds
+                        )))
+                    }
+                }
+
+                let timeoutTask = Task {
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                        raceState.finish(.failure(TranscriptionError.transcriptionTimedOut(timeoutSeconds)))
+                    } catch is CancellationError {
+                    } catch {
+                        raceState.finish(.failure(error))
+                    }
+                }
+
+                raceState.setTasks([transcriptionTask, timeoutTask])
+            }
+        } onCancel: {
+            raceState.cancel()
+        }
     }
 
-    private func transcribeAudioWithURLSession(fileURL: URL) async throws -> String {
+    // Send audio file for transcription and return text
+    private func transcribeAudio(fileURL: URL) async throws -> String {
+        try await transcribeAudioResult(fileURL: fileURL).text
+    }
+
+    private func transcribeAudioResult(fileURL: URL) async throws -> TranscriptionResult {
+        try await transcribeAudioWithURLSession(fileURL: fileURL)
+    }
+
+    private func transcribeAudioWithURLSession(fileURL: URL) async throws -> TranscriptionResult {
         let url = baseURL
             .appendingPathComponent("audio")
             .appendingPathComponent("transcriptions")
@@ -137,7 +200,8 @@ class TranscriptionService {
 
         do {
             let (data, response) = try await LLMAPITransport.upload(for: request, from: body)
-            return try validateTranscriptionResponse(data: data, response: response, fileURL: fileURL)
+            try validateTranscriptionHTTP(data: data, response: response, fileURL: fileURL)
+            return try parseTranscriptionResult(from: data)
         } catch {
             let nsError = error as NSError
             os_log(
@@ -154,7 +218,7 @@ class TranscriptionService {
         }
     }
 
-    private func validateTranscriptionResponse(data: Data, response: URLResponse, fileURL: URL) throws -> String {
+    private func validateTranscriptionHTTP(data: Data, response: URLResponse, fileURL: URL) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw TranscriptionError.submissionFailed("No response from server")
         }
@@ -175,8 +239,6 @@ class TranscriptionService {
                 host: baseURL.host
             ))
         }
-
-        return try parseTranscript(from: data)
     }
     private func audioContentType(for fileName: String) -> String {
         if fileName.lowercased().hasSuffix(".wav") {
@@ -329,12 +391,26 @@ class TranscriptionService {
     private let hallucinationNoSpeechThreshold = 0.1
 
     private func parseTranscript(from data: Data) throws -> String {
+        try parseTranscriptionResult(from: data).text
+    }
+
+    private func parseTranscriptionResult(from data: Data) throws -> TranscriptionResult {
         if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
            let text = json["text"] as? String {
             if isHallucination(text: text, json: json) {
-                return ""
+                return TranscriptionResult(text: "", segments: [])
             }
-            return text
+            let segments = (json["segments"] as? [[String: Any]] ?? []).compactMap { item -> TranscriptionSegment? in
+                guard let segmentText = item["text"] as? String else { return nil }
+                let start = (item["start"] as? Double) ?? (item["start"] as? NSNumber)?.doubleValue ?? 0
+                let end = (item["end"] as? Double) ?? (item["end"] as? NSNumber)?.doubleValue ?? start
+                return TranscriptionSegment(
+                    start: start,
+                    end: end,
+                    text: segmentText.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            }
+            return TranscriptionResult(text: text, segments: segments)
         }
 
         let plainText = String(data: data, encoding: .utf8) ?? ""
@@ -346,7 +422,7 @@ class TranscriptionService {
             throw TranscriptionError.pollFailed("Invalid response")
         }
 
-        return text
+        return TranscriptionResult(text: text, segments: [])
     }
 
     private func isHallucination(text: String, json: [String: Any]) -> Bool {
@@ -402,13 +478,13 @@ enum TranscriptionError: LocalizedError {
     }
 }
 
-private final class TranscriptionTimeoutRaceState {
+private final class TranscriptionTimeoutRaceState<Value> {
     private let lock = NSLock()
     private var didFinish = false
-    private var continuation: CheckedContinuation<String, Error>?
+    private var continuation: CheckedContinuation<Value, Error>?
     private var tasks: [Task<Void, Never>] = []
 
-    func setContinuation(_ continuation: CheckedContinuation<String, Error>) {
+    func setContinuation(_ continuation: CheckedContinuation<Value, Error>) {
         lock.lock()
         if didFinish {
             lock.unlock()
@@ -432,7 +508,7 @@ private final class TranscriptionTimeoutRaceState {
         lock.unlock()
     }
 
-    func finish(_ result: Result<String, Error>) {
+    func finish(_ result: Result<Value, Error>) {
         lock.lock()
         guard !didFinish else {
             lock.unlock()

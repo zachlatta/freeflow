@@ -415,6 +415,7 @@ struct ProviderSettingsFields: View {
 
 struct SettingsView: View {
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var archiveService: ArchiveService
 
     var body: some View {
         HStack(spacing: 0) {
@@ -446,6 +447,8 @@ struct SettingsView: View {
                 switch appState.selectedSettingsTab {
                 case .general, .none:
                     GeneralSettingsView()
+                case .archive:
+                    ArchiveSettingsPane(archive: archiveService)
                 case .prompts:
                     PromptsSettingsView()
                 case .macros:
