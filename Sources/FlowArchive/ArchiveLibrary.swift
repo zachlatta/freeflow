@@ -18,7 +18,9 @@ final class ArchiveLibrary {
         var notes: [ArchiveNote] = []
         while let item = enumerator.nextObject() as? URL {
             if item.path.contains("/_drop/") { continue }
+            if item.pathExtension.lowercased() == "icloud" { continue }
             guard item.pathExtension.lowercased() == "md" else { continue }
+            if isDatalessUbiquitous(item) { continue }
             guard let parsed = parseNote(at: item, libraryRoot: libraryRoot) else { continue }
             notes.append(parsed)
         }
@@ -83,5 +85,13 @@ final class ArchiveLibrary {
             return relative.isEmpty ? FolderRouter.inbox : relative
         }
         return FolderRouter.inbox
+    }
+
+    private func isDatalessUbiquitous(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]) else {
+            return false
+        }
+        guard values.isUbiquitousItem == true else { return false }
+        return values.ubiquitousItemDownloadingStatus == .notDownloaded
     }
 }

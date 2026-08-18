@@ -25,22 +25,28 @@ enum RecorderVolumeMatcher {
     }
 
     static func hasRecorderStructure(at url: URL, fileManager: FileManager = .default) -> Bool {
-        guard let enumerator = fileManager.enumerator(
+        guard let items = try? fileManager.contentsOfDirectory(
             at: url,
-            includingPropertiesForKeys: [.isDirectoryKey],
+            includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles]
         ) else { return false }
-
-        var depth = 0
-        while let item = enumerator.nextObject() as? URL {
-            if enumerator.level > 3 { enumerator.skipDescendants() }
-            depth += 1
-            if depth > 80 { break }
+        return items.contains { item in
             let name = item.lastPathComponent.uppercased()
-            if structureHints.contains(where: { name.contains($0) }) {
-                return true
-            }
+            return structureHints.contains(where: { name.contains($0) }) || name.hasPrefix("FOLDER")
         }
-        return false
+    }
+
+    static func searchRoots(at volume: URL, fileManager: FileManager = .default) -> [URL] {
+        guard let items = try? fileManager.contentsOfDirectory(
+            at: volume,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) else { return [volume] }
+
+        let matches = items.filter { item in
+            let name = item.lastPathComponent.uppercased()
+            return structureHints.contains(where: { name.contains($0) }) || name.hasPrefix("FOLDER")
+        }
+        return matches.isEmpty ? [volume] : matches
     }
 }

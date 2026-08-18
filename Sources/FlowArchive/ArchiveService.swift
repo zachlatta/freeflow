@@ -18,6 +18,7 @@ final class ArchiveService: ObservableObject {
     @Published var searchQuery = ""
     @Published var selectedSidebar: ArchiveSidebarItem = .inbox
     @Published var selectedNoteID: String?
+    @Published var libraryPathDisplay = ""
 
     let settings: ArchiveSettings
     private weak var appState: AppState?
@@ -28,6 +29,7 @@ final class ArchiveService: ObservableObject {
     private var queuedPaths = Set<String>()
     private var isRunningJobs = false
     private var connectedRecorderURL: URL?
+    private let ioQueue = DispatchQueue(label: "com.zachlatta.freeflow.archive-io", qos: .userInitiated)
 
     private struct PendingIngest {
         var url: URL
@@ -38,8 +40,7 @@ final class ArchiveService: ObservableObject {
     init(appState: AppState, settings: ArchiveSettings = ArchiveSettings()) {
         self.appState = appState
         self.settings = settings
-        refreshDestination()
-        refreshLibrary()
+        self.destinationLabel = settings.provider.shortLabel
     }
 
     var filteredNotes: [ArchiveNote] {
@@ -98,45 +99,46 @@ final class ArchiveService: ObservableObject {
     }
 
     func start() {
-        refreshDestination()
-        refreshLibrary()
         monitor.onMount = { [weak self] url in
-            self?.handleMount(url)
+            self?.ioQueue.async {
+                self?.inspectMountedVolume(url)
+            }
         }
         monitor.onUnmount = { [weak self] url in
-            self?.handleUnmount(url)
+            DispatchQueue.main.async {
+                self?.handleUnmount(url)
+            }
         }
         monitor.start()
-        monitor.scanExisting()
+        ioQueue.async { [weak self] in
+            self?.refreshDestinationOnIO()
+            self?.refreshLibraryOnIO()
+            self?.monitor.scanExisting()
+        }
         startDropPolling()
     }
 
     func refreshDestination() {
-        destinationLabel = settings.provider.shortLabel
-        guard let root = resolveLibraryRoot() else { return }
-        try? ArchivePaths.ensureDirectory(root)
-        try? ArchivePaths.ensureDirectory(ArchivePaths.inbox(in: root))
-        if settings.dropFolderEnabled {
-            try? ArchivePaths.ensureDirectory(ArchivePaths.dropFolder(in: root))
+        ioQueue.async { [weak self] in
+            self?.refreshDestinationOnIO()
         }
     }
 
     func refreshLibrary() {
-        guard let root = resolveLibraryRoot() else {
-            notes = []
-            return
-        }
-        notes = libraryScanner.scan(libraryRoot: root)
-        if lastNoteTitle == nil, let newest = notes.first {
-            lastNoteTitle = newest.title
-            lastNoteDate = newest.date
+        ioQueue.async { [weak self] in
+            self?.refreshLibraryOnIO()
         }
     }
 
     func openLibraryInFinder() {
-        guard let root = resolveLibraryRoot() else { return }
-        try? ArchivePaths.ensureDirectory(root)
-        NSWorkspace.shared.open(root)
+        ioQueue.async { [weak self] in
+            guard let self else { return }
+            self.refreshDestinationOnIO()
+            guard let root = self.computeLibraryRoot() else { return }
+            DispatchQueue.main.async {
+                NSWorkspace.shared.open(root)
+            }
+        }
     }
 
     func reveal(_ url: URL) {
@@ -144,8 +146,10 @@ final class ArchiveService: ObservableObject {
     }
 
     func materialize(_ url: URL) {
-        guard FileManager.default.isUbiquitousItem(at: url) else { return }
-        try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+        ioQueue.async {
+            guard FileManager.default.isUbiquitousItem(at: url) else { return }
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+        }
     }
 
     func chooseDestinationFolder(provider: CloudProvider) {
@@ -155,84 +159,136 @@ final class ArchiveService: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
         panel.message = "Choose the folder FlowArchive should write into."
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        settings.saveBookmark(for: url)
-        settings.provider = provider == .idrive ? .idrive : .custom
-        refreshDestination()
-        refreshLibrary()
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            self?.settings.saveBookmark(for: url)
+            self?.settings.provider = provider == .idrive ? .idrive : .custom
+            self?.refreshDestination()
+            self?.refreshLibrary()
+        }
     }
 
-    func resolveLibraryRoot() -> URL? {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let options = CloudDestination.options(home: home, volumes: monitor.mountedVolumes())
-        destinationMissing = false
-
-        func root(for provider: CloudProvider) -> URL? {
-            options.first(where: { $0.provider == provider })?.root
+    private func refreshDestinationOnIO() {
+        let root = computeLibraryRoot()
+        let missing: Bool
+        if let root {
+            missing = false
+            try? ArchivePaths.ensureDirectory(root)
+            try? ArchivePaths.ensureDirectory(ArchivePaths.inbox(in: root))
+            if settings.dropFolderEnabled {
+                try? ArchivePaths.ensureDirectory(ArchivePaths.dropFolder(in: root))
+            }
+        } else {
+            missing = true
         }
+        let path = root?.path ?? ""
+        let label = settings.provider.shortLabel
+        DispatchQueue.main.async { [weak self] in
+            self?.destinationLabel = label
+            self?.destinationMissing = missing
+            self?.libraryPathDisplay = path
+        }
+    }
 
-        let parent: URL?
+    private func refreshLibraryOnIO() {
+        let root = computeLibraryRoot()
+        let scanned = root.map { libraryScanner.scan(libraryRoot: $0) } ?? []
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.notes = scanned
+            if self.lastNoteTitle == nil, let newest = scanned.first {
+                self.lastNoteTitle = newest.title
+                self.lastNoteDate = newest.date
+            }
+        }
+    }
+
+    /// Lightweight path for UI and ingest. Does not probe iCloud with `fileExists` when signed in.
+    func computeLibraryRoot() -> URL? {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let documents = CloudDestination.documentsRoot()
+
         switch settings.provider {
         case .icloud:
-            parent = root(for: .icloud)
-            if parent == nil {
-                destinationMissing = true
-                return ArchivePaths.libraryRoot(in: CloudDestination.documentsRoot())
+            let signedIn = FileManager.default.ubiquityIdentityToken != nil
+            if let parent = CloudDestination.iCloudDriveRoot(home: home, probeExists: !signedIn) {
+                return ArchivePaths.libraryRoot(in: parent)
             }
+            return ArchivePaths.libraryRoot(in: documents)
         case .gdrive:
-            parent = root(for: .gdrive)
-            if parent == nil {
-                destinationMissing = true
-                return ArchivePaths.libraryRoot(in: CloudDestination.documentsRoot())
+            if let parent = CloudDestination.googleDriveRoots(home: home).first {
+                return ArchivePaths.libraryRoot(in: parent)
             }
+            return ArchivePaths.libraryRoot(in: documents)
         case .idrive:
-            parent = root(for: .idrive) ?? settings.resolvedCustomURL()
-            if parent == nil {
-                destinationMissing = true
-                return ArchivePaths.libraryRoot(in: CloudDestination.documentsRoot())
+            if let parent = CloudDestination.iDriveRoots(
+                home: home,
+                volumes: monitor.mountedVolumes()
+            ).first ?? settings.resolvedCustomURL() {
+                return ArchivePaths.libraryRoot(in: parent)
             }
+            return ArchivePaths.libraryRoot(in: documents)
         case .local:
-            parent = CloudDestination.documentsRoot()
+            return ArchivePaths.libraryRoot(in: documents)
         case .custom:
-            parent = settings.resolvedCustomURL()
-            if parent == nil {
-                destinationMissing = true
-                return ArchivePaths.libraryRoot(in: CloudDestination.documentsRoot())
+            if let parent = settings.resolvedCustomURL() {
+                return ArchivePaths.libraryRoot(in: parent)
             }
+            return ArchivePaths.libraryRoot(in: documents)
         }
-
-        guard let parent else { return nil }
-        return ArchivePaths.libraryRoot(in: parent)
     }
 
     private func startDropPolling() {
         dropTimer?.invalidate()
         dropTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
-            self?.scanDropFolder()
+            self?.ioQueue.async {
+                self?.scanDropFolderOnIO()
+            }
         }
-        scanDropFolder()
+        ioQueue.async { [weak self] in
+            self?.scanDropFolderOnIO()
+        }
     }
 
-    private func handleMount(_ url: URL) {
+    private func inspectMountedVolume(_ url: URL) {
         let name = VolumeMonitor.volumeName(for: url)
         let uuid = VolumeMonitor.volumeUUID(for: url) ?? ""
-        let structure = RecorderVolumeMatcher.hasRecorderStructure(at: url)
+        let extra = settings.extraVolumeNameList
         let nameMatch = RecorderVolumeMatcher.matches(
             volumeName: name,
-            extraNames: settings.extraVolumeNameList,
-            hasRecorderStructure: structure
+            extraNames: extra,
+            hasRecorderStructure: false
         )
         let uuidMatch = !settings.confirmedVolumeUUID.isEmpty && uuid == settings.confirmedVolumeUUID
-        guard nameMatch || uuidMatch else { return }
+        let untitled = ["NO NAME", "NO_NAME", "UNTITLED", "UNTITLED 1"].contains(name.uppercased())
+        let structure = (!nameMatch && !uuidMatch && untitled)
+            ? RecorderVolumeMatcher.hasRecorderStructure(at: url)
+            : false
+        guard nameMatch || uuidMatch || structure else { return }
 
         if settings.confirmedVolumeUUID.isEmpty, !uuid.isEmpty {
-            settings.confirmedVolumeUUID = uuid
+            DispatchQueue.main.async { [weak self] in
+                self?.settings.confirmedVolumeUUID = uuid
+            }
         }
-        connectedRecorderURL = url
-        recorderConnected = true
-        recorderName = name
-        syncMessage = "Sony Recorder connected"
-        enqueueRecorderFiles(at: url, volumeName: name)
+
+        let enabled = settings.enabled
+        let files = enabled ? recorderAudioFiles(at: url) : []
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.connectedRecorderURL = url
+            self.recorderConnected = true
+            self.recorderName = name
+            if files.isEmpty {
+                self.syncMessage = "Sony Recorder connected"
+                return
+            }
+            self.syncMessage = "Syncing: \(files.count) audio file\(files.count == 1 ? "" : "s") found…"
+            for file in files {
+                self.enqueue(PendingIngest(url: file, sourceVolume: name, deleteSource: false))
+            }
+            self.pump()
+        }
     }
 
     private func handleUnmount(_ url: URL) {
@@ -246,30 +302,24 @@ final class ArchiveService: ObservableObject {
         }
     }
 
-    private func enqueueRecorderFiles(at volumeURL: URL, volumeName: String) {
-        guard settings.enabled else { return }
-        let files = audioFiles(under: volumeURL)
-        guard !files.isEmpty else {
-            syncMessage = "Sony Recorder connected"
-            return
-        }
-        syncMessage = "Syncing: \(files.count) audio file\(files.count == 1 ? "" : "s") found…"
-        for file in files {
-            enqueue(PendingIngest(url: file, sourceVolume: volumeName, deleteSource: false))
-        }
-        pump()
-    }
-
-    private func scanDropFolder() {
+    private func scanDropFolderOnIO() {
         guard settings.enabled, settings.dropFolderEnabled else { return }
-        guard let root = resolveLibraryRoot() else { return }
+        guard let root = computeLibraryRoot() else { return }
         let drop = ArchivePaths.dropFolder(in: root)
         try? ArchivePaths.ensureDirectory(drop)
         let files = audioFiles(under: drop)
-        for file in files {
-            enqueue(PendingIngest(url: file, sourceVolume: "Inbox drop", deleteSource: true))
+        guard !files.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            for file in files {
+                self.enqueue(PendingIngest(url: file, sourceVolume: "Inbox drop", deleteSource: true))
+            }
+            self.pump()
         }
-        if !files.isEmpty { pump() }
+    }
+
+    private func recorderAudioFiles(at volumeURL: URL) -> [URL] {
+        RecorderVolumeMatcher.searchRoots(at: volumeURL).flatMap { audioFiles(under: $0) }
     }
 
     private func audioFiles(under root: URL) -> [URL] {
@@ -282,8 +332,11 @@ final class ArchiveService: ObservableObject {
 
         var files: [URL] = []
         while let item = enumerator.nextObject() as? URL {
+            if files.count >= 500 { break }
+            if enumerator.level > 6 { enumerator.skipDescendants(); continue }
             if item.lastPathComponent.hasPrefix(".") { continue }
             if item.lastPathComponent.hasPrefix("._") { continue }
+            if item.pathExtension.lowercased() == "icloud" { continue }
             if extensions.contains(item.pathExtension.lowercased()) {
                 files.append(item)
             }
@@ -421,7 +474,7 @@ final class ArchiveService: ObservableObject {
             transcript: rawTranscript,
             rules: settings.folderRules
         )
-        guard let libraryRoot = await MainActor.run(body: { self.resolveLibraryRoot() }) else {
+        guard let libraryRoot = computeLibraryRoot() else {
             throw ArchivePipelineError.destinationMissing("Archive folder is unavailable.")
         }
         let destinationFolder = libraryRoot.appendingPathComponent(relative, isDirectory: true)

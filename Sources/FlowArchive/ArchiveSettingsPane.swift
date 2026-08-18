@@ -30,13 +30,9 @@ struct ArchiveSettingsPane: View {
                             Text(provider.title).tag(provider)
                         }
                     }
-                    .onChange(of: settings.provider) { provider in
-                        if provider == .custom || (provider == .idrive && archive.destinationMissing) {
-                            archive.chooseDestinationFolder(provider: provider)
-                        } else {
-                            archive.refreshDestination()
-                            archive.refreshLibrary()
-                        }
+                    .onChange(of: settings.provider) { _ in
+                        archive.refreshDestination()
+                        archive.refreshLibrary()
                     }
 
                     HStack {
@@ -49,8 +45,8 @@ struct ArchiveSettingsPane: View {
                         }
                     }
 
-                    if let root = archive.resolveLibraryRoot() {
-                        Text(root.path)
+                    if !archive.libraryPathDisplay.isEmpty {
+                        Text(archive.libraryPathDisplay)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)

@@ -85,6 +85,13 @@ enum FlowArchiveTests {
             RecorderVolumeMatcher.matches(volumeName: "NOPE", hasRecorderStructure: true),
             "structure hint should match"
         )
+        expectEqual(
+            RecorderVolumeMatcher.searchRoots(
+                at: FileManager.default.temporaryDirectory,
+                fileManager: .default
+            ).first?.lastPathComponent ?? "",
+            FileManager.default.temporaryDirectory.lastPathComponent
+        )
     }
 
     private static func testCloudDestinationDetection() {

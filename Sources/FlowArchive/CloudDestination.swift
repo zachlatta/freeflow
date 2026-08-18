@@ -40,12 +40,16 @@ struct CloudDestinationOption: Equatable {
 enum CloudDestination {
     static func iCloudDriveRoot(
         home: URL,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        probeExists: Bool = true
     ) -> URL? {
         let url = home
             .appendingPathComponent("Library")
             .appendingPathComponent("Mobile Documents")
             .appendingPathComponent("com~apple~CloudDocs")
+        if !probeExists {
+            return url
+        }
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
 
@@ -124,7 +128,13 @@ enum CloudDestination {
         volumes: [URL] = [],
         fileManager: FileManager = .default
     ) -> [CloudDestinationOption] {
-        let icloud = iCloudDriveRoot(home: home, fileManager: fileManager)
+        let icloud: URL?
+        if home.standardizedFileURL.path == FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path,
+           FileManager.default.ubiquityIdentityToken != nil {
+            icloud = iCloudDriveRoot(home: home, fileManager: fileManager, probeExists: false)
+        } else {
+            icloud = iCloudDriveRoot(home: home, fileManager: fileManager)
+        }
         let gdrive = googleDriveRoots(home: home, fileManager: fileManager).first
         let idrive = iDriveRoots(home: home, volumes: volumes, fileManager: fileManager).first
         let idriveInstalled = isIDriveAppInstalled(fileManager: fileManager)

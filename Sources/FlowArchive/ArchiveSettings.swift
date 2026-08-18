@@ -70,9 +70,10 @@ final class ArchiveSettings: ObservableObject {
         if let raw = defaults.string(forKey: Self.providerKey),
            let stored = CloudProvider(rawValue: raw) {
             self.provider = stored
+        } else if FileManager.default.ubiquityIdentityToken != nil {
+            self.provider = .icloud
         } else {
-            let home = FileManager.default.homeDirectoryForCurrentUser
-            self.provider = CloudDestination.defaultProvider(from: CloudDestination.options(home: home))
+            self.provider = .local
         }
 
         self.extraVolumeNames = defaults.string(forKey: Self.extraVolumeNamesKey) ?? ""
