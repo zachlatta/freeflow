@@ -16,7 +16,7 @@ jobs:
   build-and-release:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -39,7 +39,11 @@ jobs:
           plutil -replace FreeFlowBuildTag -string "${{ steps.version.outputs.build_tag }}" Info.plist
 
       - name: Install build tools
-        run: brew install create-dmg fileicon
+        run: |
+          if brew tap | grep -qx 'aws/tap'; then
+            brew untap aws/tap
+          fi
+          brew install create-dmg fileicon
 
       # --- Code signing setup ---
       # Required GitHub secrets:
@@ -127,7 +131,7 @@ jobs:
 
       # --- Release ---
       - name: Create or update dev release
-        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2.5.0
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: FreeFlow Dev ${{ steps.version.outputs.short_sha }}
