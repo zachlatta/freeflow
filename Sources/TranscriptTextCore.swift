@@ -32,7 +32,14 @@ enum TranscriptionResponseParser {
     private static let hallucinationNoSpeechThreshold = 0.1
 
     static func parse(_ data: Data) throws -> String {
-        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw TranscriptionResponseParsingError.invalidResponse
+        }
+
+        if let json = object as? [String: Any],
            let text = json["text"] as? String {
             if isHallucination(text: text, json: json) {
                 return ""

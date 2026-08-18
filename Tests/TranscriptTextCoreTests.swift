@@ -32,10 +32,10 @@ enum TranscriptTextCoreTests {
     }
 
     private static func testInvalidTranscriptResponses() {
-        expectParsingFailure(Data())
-        expectParsingFailure(Data(" \n\t ".utf8))
-        expectParsingFailure(Data("{malformed synthetic JSON".utf8))
-        expectParsingFailure(Data([0xFF, 0xFE]))
+        expectInvalidResponse(Data())
+        expectInvalidResponse(Data(" \n\t ".utf8))
+        expectInvalidResponse(Data("{malformed synthetic JSON".utf8))
+        expectInvalidResponse(Data([0xFF, 0xFE]))
     }
 
     private static func testHighConfidenceHallucinationsAreSuppressed() {
@@ -154,16 +154,23 @@ enum TranscriptTextCoreTests {
         return data
     }
 
-    private static func expectParsingFailure(
+    private static func expectInvalidResponse(
         _ data: Data,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
         do {
             _ = try TranscriptionResponseParser.parse(data)
-            TestSupport.expect(false, "Expected response parsing to fail", file: file, line: line)
+            TestSupport.expect(false, "Expected invalid response error", file: file, line: line)
+        } catch let error as TranscriptionResponseParsingError {
+            TestSupport.expectEqual(error, .invalidResponse, file: file, line: line)
         } catch {
-            return
+            TestSupport.expect(
+                false,
+                "Expected TranscriptionResponseParsingError, got \(error)",
+                file: file,
+                line: line
+            )
         }
     }
 }
