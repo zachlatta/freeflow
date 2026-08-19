@@ -8,6 +8,7 @@ struct FreeFlowTests {
         ShortcutCoreTests.run()
         SemanticVersionTests.run()
         LLMCooldownManagerTests.run()
+        RealtimeFinalizationAwaiterTests.run()
         TranscriptTextCoreTests.run()
         print("FreeFlowTests passed")
     }
