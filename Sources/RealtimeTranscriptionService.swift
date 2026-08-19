@@ -29,13 +29,14 @@ final class RealtimeTranscriptionService {
 
     private let config: Configuration
     private let session: URLSession
+    private let finalizationTimeoutNanoseconds: UInt64
     private var task: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
 
     private let stateQueue = DispatchQueue(label: "com.zachlatta.freeflow.realtime.state")
     private var finalText: String = ""
     private var partialText: String = ""
-    private var finalContinuation: CheckedContinuation<String, Error>?
+    private var finalAwaiter: RealtimeFinalizationAwaiter?
     private var commitSent: Bool = false
     private var closed: Bool = false
     private var terminalError: Error?
@@ -49,9 +50,14 @@ final class RealtimeTranscriptionService {
     /// events — useful for a live overlay readout.
     var onPartialUpdate: ((String) -> Void)?
 
-    init(config: Configuration, session: URLSession = .shared) {
+    init(
+        config: Configuration,
+        session: URLSession = .shared,
+        finalizationTimeoutNanoseconds: UInt64 = 10_000_000_000
+    ) {
         self.config = config
         self.session = session
+        self.finalizationTimeoutNanoseconds = finalizationTimeoutNanoseconds
     }
 
     // MARK: Lifecycle
@@ -85,19 +91,19 @@ final class RealtimeTranscriptionService {
 
     /// Cancel the socket and any in-flight receive. Safe to call multiple times.
     func cancel() {
-        let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+        let (currentTask, pendingAwaiter): (
+            URLSessionWebSocketTask?,
+            RealtimeFinalizationAwaiter?
+        ) = stateQueue.sync {
             let currentTask = task
             task = nil
-            return currentTask
-        }
-        stateQueue.sync {
-            guard !closed else { return }
+            guard !closed else { return (currentTask, nil) }
             closed = true
-            if let cont = finalContinuation {
-                finalContinuation = nil
-                cont.resume(throwing: CancellationError())
-            }
+            let pendingAwaiter = finalAwaiter
+            finalAwaiter = nil
+            return (currentTask, pendingAwaiter)
         }
+        pendingAwaiter?.resolve(.failure(CancellationError()))
         receiveTask?.cancel()
         currentTask?.cancel(with: .normalClosure, reason: nil)
     }
@@ -139,28 +145,51 @@ final class RealtimeTranscriptionService {
             send(["type": "input_audio_buffer.commit"], over: currentTask)
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            var immediateResult: Result<String, Error>?
+        let awaiter = RealtimeFinalizationAwaiter(
+            timeoutNanoseconds: finalizationTimeoutNanoseconds
+        )
+        var immediateResult: Result<String, Error>?
+        stateQueue.sync {
+            if let terminalError {
+                immediateResult = .failure(terminalError)
+                return
+            }
+            if closed {
+                immediateResult = .failure(RealtimeTranscriptionError.closedBeforeFinal)
+                return
+            }
+            if let finalText = readyCommittedTranscriptLocked() {
+                closed = true
+                immediateResult = .success(finalText)
+                return
+            }
+            finalAwaiter = awaiter
+        }
+        if let immediateResult {
+            currentTask.cancel(with: .normalClosure, reason: nil)
+            return try immediateResult.get()
+        }
+
+        do {
+            return try await awaiter.wait()
+        } catch {
+            let shouldCancelSocket = error is RealtimeFinalizationError || error is CancellationError
             stateQueue.sync {
-                if let terminalError {
-                    immediateResult = .failure(terminalError)
-                    return
+                if finalAwaiter === awaiter {
+                    finalAwaiter = nil
                 }
-                if closed {
-                    immediateResult = .failure(RealtimeTranscriptionError.closedBeforeFinal)
-                    return
-                }
-                if let finalText = readyCommittedTranscriptLocked() {
+                if shouldCancelSocket {
                     closed = true
-                    immediateResult = .success(finalText)
-                    return
+                    task = nil
+                    if error is RealtimeFinalizationError {
+                        terminalError = error
+                    }
                 }
-                finalContinuation = continuation
             }
-            if let immediateResult {
+            if shouldCancelSocket {
                 currentTask.cancel(with: .normalClosure, reason: nil)
-                continuation.resume(with: immediateResult)
             }
+            throw error
         }
     }
 
@@ -193,16 +222,17 @@ final class RealtimeTranscriptionService {
     }
 
     private func finishWithClose() {
-        stateQueue.sync {
+        let pendingResult: (RealtimeFinalizationAwaiter, Result<String, Error>)? = stateQueue.sync {
             closed = true
-            if let cont = finalContinuation {
-                finalContinuation = nil
-                if postCommitCompleted {
-                    cont.resume(returning: finalText)
-                } else {
-                    cont.resume(throwing: RealtimeTranscriptionError.closedBeforeFinal)
-                }
+            guard let finalAwaiter else { return nil }
+            self.finalAwaiter = nil
+            if postCommitCompleted {
+                return (finalAwaiter, .success(finalText))
             }
+            return (finalAwaiter, .failure(RealtimeTranscriptionError.closedBeforeFinal))
+        }
+        if let (awaiter, result) = pendingResult {
+            awaiter.resolve(result)
         }
     }
 
@@ -257,14 +287,14 @@ final class RealtimeTranscriptionService {
             let message = errObj?["message"] as? String ?? "unknown realtime error"
             os_log(.error, log: realtimeLog, "server error [%{public}@]: %{public}@", code, message)
             let error = RealtimeTranscriptionError.serverError(code: code, message: message)
-            stateQueue.sync {
+            let pendingAwaiter: RealtimeFinalizationAwaiter? = stateQueue.sync {
                 terminalError = error
                 closed = true
-                if let cont = finalContinuation {
-                    finalContinuation = nil
-                    cont.resume(throwing: error)
-                }
+                let pendingAwaiter = finalAwaiter
+                finalAwaiter = nil
+                return pendingAwaiter
             }
+            pendingAwaiter?.resolve(.failure(error))
         default:
             resumeIfReadyAfterCommit()
             break
@@ -381,22 +411,22 @@ final class RealtimeTranscriptionService {
     }
 
     private func resumeIfReadyAfterCommit() {
-        var pendingResume: (CheckedContinuation<String, Error>, String)?
+        var pendingResume: (RealtimeFinalizationAwaiter, String)?
         stateQueue.sync {
-            guard let cont = finalContinuation,
+            guard let finalAwaiter,
                   let finalText = readyCommittedTranscriptLocked() else {
                 return
             }
-            finalContinuation = nil
+            self.finalAwaiter = nil
             closed = true
-            pendingResume = (cont, finalText)
+            pendingResume = (finalAwaiter, finalText)
         }
-        if let (cont, text) = pendingResume {
+        if let (awaiter, text) = pendingResume {
             let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
                 task
             }
             currentTask?.cancel(with: .normalClosure, reason: nil)
-            cont.resume(returning: text)
+            awaiter.resolve(.success(text))
         }
     }
 
