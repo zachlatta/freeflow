@@ -84,10 +84,23 @@ enum ShortcutMatcher {
             nextState.pressedModifierKeyCodes = pressedModifierKeyCodes
 
             let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
+
+            // GlobalShortcutBackend attaches this decision to the ordinary
+            // key event that carried the snapshot. If the snapshot merely
+            // repairs a missed Fn state (e.g. after the event tap was
+            // re-enabled), flipping Fn hold state must not swallow that key;
+            // macOS still needs unobstructed Fn handling for Globe actions.
+            // Toggle and non-Fn hold transitions keep consuming as before.
+            let onlyFnHoldTransitions =
+                configuration.hold.usesFnKey
+                && emittedEvents.allSatisfy { $0 == .holdActivated || $0 == .holdDeactivated }
+            let consumeDecision: ShortcutConsumeDecision =
+                emittedEvents.isEmpty || onlyFnHoldTransitions ? .passthrough : .consume
+
             return ShortcutMatchResult(
                 state: nextState,
                 emittedEvents: emittedEvents,
-                consumeDecision: emittedEvents.isEmpty ? .passthrough : .consume
+                consumeDecision: consumeDecision
             )
 
         case .modifierChanged(let keyCode, let isDown):

@@ -29,7 +29,9 @@ enum ModifierKeyEventState {
         }
     }
 
-    static let fnKeyCode: UInt16 = 63
+    // Single source of truth lives on ShortcutBinding so event production
+    // and shortcut matching cannot diverge.
+    static let fnKeyCode = ShortcutBinding.fnKeyCode
 
     /// Reads the current system-wide Fn state. Useful for seeding a backend's
     /// tracked Fn state at start or after a tap reset, since flagsChanged events

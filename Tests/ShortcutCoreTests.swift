@@ -5,6 +5,7 @@ enum ShortcutCoreTests {
         testBareFnHoldLifecycle()
         testBareFnToggleStillConsumes()
         testFnHoldPassthroughUnlessToggleComboActive()
+        testSnapshotRepairFnHoldDoesNotConsume()
         testDefaultShortcutSpecificityOrdering()
         testRightOptionPresetIsSideSpecific()
         testExactModifierMatching()
@@ -85,6 +86,33 @@ enum ShortcutCoreTests {
             configuration: configuration
         )
         TestSupport.expectEqual(fnDownWithCmd.consumeDecision, .consume)
+    }
+
+    private static func testSnapshotRepairFnHoldDoesNotConsume() {
+        // A snapshot that suddenly reports Fn as pressed (e.g. the event tap
+        // missed the Fn flagsChanged while disabled) repairs hold state; the
+        // ordinary key event carrying the snapshot must not be swallowed.
+        let configuration = ShortcutConfiguration(hold: .defaultHold, toggle: .disabled)
+        let repaired = ShortcutMatcher.reduce(
+            state: ShortcutInputState(),
+            event: .modifierSnapshot([63]),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(repaired.emittedEvents, [.holdActivated])
+        TestSupport.expectEqual(repaired.consumeDecision, .passthrough)
+
+        // Non-Fn hold bindings keep their existing edge-consumption behavior.
+        let optionConfiguration = ShortcutConfiguration(
+            hold: ShortcutPreset.rightOption.binding,
+            toggle: .disabled
+        )
+        let optionRepaired = ShortcutMatcher.reduce(
+            state: ShortcutInputState(),
+            event: .modifierSnapshot([61]),
+            configuration: optionConfiguration
+        )
+        TestSupport.expectEqual(optionRepaired.emittedEvents, [.holdActivated])
+        TestSupport.expectEqual(optionRepaired.consumeDecision, .consume)
     }
 
     private static func testDefaultShortcutSpecificityOrdering() {
