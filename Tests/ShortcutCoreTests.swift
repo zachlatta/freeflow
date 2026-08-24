@@ -74,17 +74,22 @@ enum ShortcutCoreTests {
         TestSupport.expectEqual(fnDown.emittedEvents, [.holdActivated])
         TestSupport.expectEqual(fnDown.consumeDecision, .passthrough)
 
-        // With Cmd held, the Cmd+Fn toggle activates and Fn is consumed.
+        // With Cmd held, the Fn-down event activates the Cmd+Fn toggle and
+        // Fn is consumed. Cmd down alone activates nothing and passes through.
         let cmdDown = ShortcutMatcher.reduce(
             state: ShortcutInputState(),
             event: .modifierChanged(keyCode: 55, isDown: true),
             configuration: configuration
         )
+        TestSupport.expectEqual(cmdDown.emittedEvents, [])
+        TestSupport.expectEqual(cmdDown.consumeDecision, .passthrough)
+
         let fnDownWithCmd = ShortcutMatcher.reduce(
             state: cmdDown.state,
             event: .modifierChanged(keyCode: 63, isDown: true),
             configuration: configuration
         )
+        TestSupport.expectEqual(fnDownWithCmd.emittedEvents, [.toggleActivated, .holdActivated])
         TestSupport.expectEqual(fnDownWithCmd.consumeDecision, .consume)
     }
 
