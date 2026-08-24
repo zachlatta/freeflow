@@ -91,10 +91,24 @@ enum ShortcutMatcher {
             )
 
         case .modifierChanged(let keyCode, let isDown):
+            // Fn/Globe is the only modifier with a system-level tap action
+            // (e.g. "Press globe to: Change Input Source"). If a hold-to-talk
+            // binding consumes Fn events, macOS never sees the key at all and
+            // the Globe action can never fire, even for quick taps. macOS
+            // itself ignores long Fn holds, so hold bindings can safely
+            // observe Fn passively: quick taps reach the system Globe action,
+            // sustained holds still drive hold-to-talk. Toggle bindings keep
+            // consuming because a Fn tap is meaningful on both sides and the
+            // user chose Fn for it.
+            let consumeConfiguration =
+                keyCode == ShortcutBinding.fnKeyCode
+                ? configuration.withHoldBindingDisabled
+                : configuration
+
             let shouldConsumeBefore = shouldConsumeModifierEvent(
                 for: keyCode,
                 state: state,
-                configuration: configuration
+                configuration: consumeConfiguration
             )
 
             var nextState = state
@@ -107,7 +121,7 @@ enum ShortcutMatcher {
             let shouldConsumeAfter = shouldConsumeModifierEvent(
                 for: keyCode,
                 state: nextState,
-                configuration: configuration
+                configuration: consumeConfiguration
             )
             let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
             return ShortcutMatchResult(

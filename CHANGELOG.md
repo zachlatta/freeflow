@@ -8,6 +8,16 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Fixed
+
+- Fn/Globe hold-to-talk no longer swallows the Fn key: Fn events pass through
+  to macOS, so the system Globe action (e.g. "Press globe to: Change Input
+  Source") works on quick taps while sustained holds still drive dictation.
+  Hold-to-talk on Fn also gains a 200 ms minimum hold time so brief taps
+  don't start a recording. Toggle bindings on Fn are unchanged.
+
 ## [1.2.1] - 2026-08-11
 
 ### Improved

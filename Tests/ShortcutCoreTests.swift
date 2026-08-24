@@ -3,6 +3,8 @@ import Foundation
 enum ShortcutCoreTests {
     static func run() {
         testBareFnHoldLifecycle()
+        testBareFnToggleStillConsumes()
+        testFnHoldPassthroughUnlessToggleComboActive()
         testDefaultShortcutSpecificityOrdering()
         testRightOptionPresetIsSideSpecific()
         testExactModifierMatching()
@@ -31,9 +33,58 @@ enum ShortcutCoreTests {
         )
 
         TestSupport.expectEqual(down.emittedEvents, [.holdActivated])
-        TestSupport.expectEqual(down.consumeDecision, .consume)
+        // Fn hold-to-talk must not consume the key: macOS needs to see Fn
+        // events for the system Globe action (e.g. Change Input Source).
+        TestSupport.expectEqual(down.consumeDecision, .passthrough)
         TestSupport.expectEqual(up.emittedEvents, [.holdDeactivated])
-        TestSupport.expectEqual(up.consumeDecision, .consume)
+        TestSupport.expectEqual(up.consumeDecision, .passthrough)
+    }
+
+    private static func testBareFnToggleStillConsumes() {
+        let configuration = ShortcutConfiguration(
+            hold: .disabled,
+            toggle: ShortcutPreset.fnKey.binding
+        )
+        let down = ShortcutMatcher.reduce(
+            state: ShortcutInputState(),
+            event: .modifierChanged(keyCode: 63, isDown: true),
+            configuration: configuration
+        )
+
+        // A Fn tap is meaningful to both FreeFlow (toggle dictation) and
+        // macOS (Globe action); the user chose Fn for the toggle binding, so
+        // FreeFlow keeps consuming it.
+        TestSupport.expectEqual(down.emittedEvents, [.toggleActivated])
+        TestSupport.expectEqual(down.consumeDecision, .consume)
+    }
+
+    private static func testFnHoldPassthroughUnlessToggleComboActive() {
+        let configuration = ShortcutConfiguration(
+            hold: .defaultHold,
+            toggle: .defaultToggle
+        )
+        // Bare Fn: hold binding is excluded from consume decisions, and the
+        // Cmd+Fn toggle is not active without Cmd, so the tap passes through.
+        let fnDown = ShortcutMatcher.reduce(
+            state: ShortcutInputState(),
+            event: .modifierChanged(keyCode: 63, isDown: true),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(fnDown.emittedEvents, [.holdActivated])
+        TestSupport.expectEqual(fnDown.consumeDecision, .passthrough)
+
+        // With Cmd held, the Cmd+Fn toggle activates and Fn is consumed.
+        let cmdDown = ShortcutMatcher.reduce(
+            state: ShortcutInputState(),
+            event: .modifierChanged(keyCode: 55, isDown: true),
+            configuration: configuration
+        )
+        let fnDownWithCmd = ShortcutMatcher.reduce(
+            state: cmdDown.state,
+            event: .modifierChanged(keyCode: 63, isDown: true),
+            configuration: configuration
+        )
+        TestSupport.expectEqual(fnDownWithCmd.consumeDecision, .consume)
     }
 
     private static func testDefaultShortcutSpecificityOrdering() {
