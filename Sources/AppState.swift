@@ -1036,7 +1036,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             apiKey: resolvedTranscriptionAPIKey,
             baseURL: resolvedTranscriptionBaseURL,
             transcriptionModel: transcriptionModel,
-            language: resolvedTranscriptionLanguage
+            language: resolvedTranscriptionLanguage,
+            customVocabulary: customVocabulary
         )
     }
 
@@ -2928,6 +2929,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func startRealtimeStreamingIfEnabled() {
         guard realtimeStreamingEnabled else { return }
+        // Gemini transcription is file-based here: it streams over its own
+        // bidirectional endpoint, and its key cannot authenticate the realtime
+        // socket. Skip streaming rather than opening a doomed connection.
+        guard !GeminiTranscription.handlesModel(transcriptionModel) else {
+            os_log(.info, log: recordingLog, "realtime streaming skipped — Gemini transcription is file-based")
+            return
+        }
         let trimmedBase = resolvedTranscriptionBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBase.isEmpty else {
             os_log(.info, log: recordingLog, "realtime streaming requested but base URL is empty — skipping")

@@ -18,6 +18,7 @@ class TranscriptionService {
     private let baseURL: URL
     private let transcriptionModel: String
     private let language: String?
+    private let customVocabulary: String
     private var transcriptionResponseFormat: String {
         Self.responseFormat(forModel: transcriptionModel)
     }
@@ -30,14 +31,22 @@ class TranscriptionService {
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         transcriptionModel: String = "whisper-large-v3",
-        language: String? = nil
+        language: String? = nil,
+        customVocabulary: String = ""
     ) throws {
         self.apiKey = apiKey
-        self.baseURL = try Self.normalizedBaseURL(from: baseURL)
         let trimmedModel = transcriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
         self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
+        // Gemini transcription lives on Google's Interactions API. An existing
+        // install still carries a Groq provider URL here, so the Gemini host is
+        // substituted rather than requiring everyone to retype a provider URL.
+        let resolvedBaseURL = GeminiTranscription.handlesModel(self.transcriptionModel)
+            ? GeminiTranscription.resolvedBaseURL(from: baseURL)
+            : baseURL
+        self.baseURL = try Self.normalizedBaseURL(from: resolvedBaseURL)
         let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
+        self.customVocabulary = customVocabulary
     }
 
     static func responseFormat(forModel model: String) -> String {
@@ -111,7 +120,73 @@ class TranscriptionService {
 
     // Send audio file for transcription and return text
     private func transcribeAudio(fileURL: URL) async throws -> String {
+        if GeminiTranscription.handlesModel(transcriptionModel) {
+            return try await transcribeWithGemini(fileURL: fileURL)
+        }
         return try await transcribeAudioWithURLSession(fileURL: fileURL)
+    }
+
+    /// Gemini's smart mode returns prose that is already de-filled and
+    /// punctuated, so this single request covers what the Groq path splits
+    /// between Whisper and a follow-up cleanup model.
+    private func transcribeWithGemini(fileURL: URL) async throws -> String {
+        var request = URLRequest(url: GeminiTranscription.endpoint(baseURL: baseURL))
+        request.httpMethod = "POST"
+        request.timeoutInterval = transcriptionTimeoutSeconds
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        let audioData = try Data(contentsOf: fileURL)
+        let body = try GeminiTranscription.requestBody(
+            model: transcriptionModel,
+            audioData: audioData,
+            mimeType: audioContentType(for: fileURL.lastPathComponent),
+            customVocabulary: customVocabulary
+        )
+
+        do {
+            let (data, response) = try await LLMAPITransport.upload(for: request, from: body)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw TranscriptionError.submissionFailed("No response from server")
+            }
+
+            guard httpResponse.statusCode == 200 else {
+                let responseBody = String(data: data, encoding: .utf8) ?? ""
+                os_log(
+                    .error,
+                    log: transcriptionLog,
+                    "Gemini transcription returned HTTP %ld for %{public}@ (bytes=%{public}lld) body=%{public}@",
+                    httpResponse.statusCode,
+                    fileURL.lastPathComponent,
+                    fileSizeBytes(for: fileURL),
+                    responseBody
+                )
+                throw TranscriptionError.submissionFailed(GeminiTranscription.failureMessage(
+                    fromResponse: data,
+                    fallback: Self.friendlyHTTPMessage(
+                        status: httpResponse.statusCode,
+                        host: baseURL.host
+                    )
+                ))
+            }
+
+            return try GeminiTranscription.transcript(fromResponse: data)
+        } catch let error as TranscriptionError {
+            throw error
+        } catch {
+            let nsError = error as NSError
+            os_log(
+                .error,
+                log: transcriptionLog,
+                "Gemini transcription upload failed for %{public}@ (bytes=%{public}lld): domain=%{public}@ code=%ld desc=%{public}@",
+                fileURL.lastPathComponent,
+                fileSizeBytes(for: fileURL),
+                nsError.domain,
+                nsError.code,
+                error.localizedDescription
+            )
+            throw error
+        }
     }
 
     private func transcribeAudioWithURLSession(fileURL: URL) async throws -> String {

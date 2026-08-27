@@ -76,6 +76,34 @@ Then your response would be ONLY the cleaned up text, so here your response is O
 "Hey, I just wanted to follow up on the meeting from yesterday. I think we should definitely move the deadline to next Friday because the design team still needs more time to finish the mockups. Let me know if that works for you. Thanks."</code></pre>
 </details>
 
+## Using Gemini Transcribe
+
+Google's `gemini-3.5-transcribe` is available as a transcription model alongside
+the Whisper options. It is not OpenAI-compatible — it runs on Google's
+Interactions API — so FreeFlow talks to it directly rather than through the
+provider URL.
+
+To use it, open settings and:
+
+1. Set the transcription model to `gemini-3.5-transcribe`.
+2. Set the transcription API key to a [Google AI Studio](https://aistudio.google.com/apikey) key.
+   Leave the transcription API URL empty; FreeFlow routes Gemini to Google for you.
+
+The model transcribes in its smart mode, which removes filler words and false
+starts and repairs punctuation as part of transcription. Your custom vocabulary
+is sent along as recognition biasing, so names and jargon are more likely to
+come back spelled the way you wrote them.
+
+Because the transcript arrives already cleaned, you can turn on **preserve exact
+wording** to skip the separate cleanup model entirely and get a one-call
+dictation. Leave it off if you still want the cleanup pass to adapt the text to
+the app you are dictating into.
+
+Two limits are worth knowing: the language is auto-detected rather than pinned
+(pinning a language drops the model out of smart mode), and realtime streaming
+is skipped while a Gemini model is selected, since Gemini streams over its own
+endpoint.
+
 ## Using a Local Model
 
 FreeFlow can use OpenAI-compatible local or self-hosted providers instead of Groq. In settings, configure the API base URL and model IDs for your local LLM provider, such as Ollama, LM Studio, or another OpenAI-compatible server. If your transcription backend uses a different endpoint from your LLM backend, set the transcription API URL separately.
