@@ -78,31 +78,45 @@ Then your response would be ONLY the cleaned up text, so here your response is O
 
 ## Using Gemini Transcribe
 
-Google's `gemini-3.5-transcribe` is available as a transcription model alongside
-the Whisper options. It is not OpenAI-compatible — it runs on Google's
-Interactions API — so FreeFlow talks to it directly rather than through the
-provider URL.
+Google's Gemini transcription models are available alongside the Whisper
+options. They are not OpenAI-compatible, so FreeFlow talks to Google directly
+rather than through the provider URL. Both transcribe in smart mode, which
+removes filler words and false starts and repairs punctuation as part of
+transcription, and both accept your custom vocabulary as recognition biasing.
 
-To use it, open settings and:
+There are two models, and the difference that matters for daily dictation is
+quota, not quality:
 
-1. Set the transcription model to `gemini-3.5-transcribe`.
-2. Set the transcription API key to a [Google AI Studio](https://aistudio.google.com/apikey) key.
+| Model | API | Free-tier quota |
+| --- | --- | --- |
+| `gemini-3.5-transcribe` | file upload after recording | ~25 requests per day |
+| `gemini-3.5-transcribe-live` | streams while you speak | limited by tokens per minute |
+
+At roughly one request per dictation, the batch model's daily allowance runs out
+quickly. The live model is limited by audio throughput instead, which a single
+speaker will not reach, so prefer it unless you have a paid tier. Check your own
+limits in [AI Studio](https://aistudio.google.com/rate-limit).
+
+To use the live model, open settings and:
+
+1. Set the transcription API key to a [Google AI Studio](https://aistudio.google.com/apikey) key.
    Leave the transcription API URL empty; FreeFlow routes Gemini to Google for you.
+2. Enable realtime streaming and set the realtime model to
+   `gemini-3.5-transcribe-live`.
+3. Optionally set the transcription model to `gemini-3.5-transcribe`, which is
+   then used only as the fallback if the socket fails mid-dictation.
 
-The model transcribes in its smart mode, which removes filler words and false
-starts and repairs punctuation as part of transcription. Your custom vocabulary
-is sent along as recognition biasing, so names and jargon are more likely to
-come back spelled the way you wrote them.
+To use the batch model on its own, set the transcription model to
+`gemini-3.5-transcribe` and leave realtime streaming off.
 
 Because the transcript arrives already cleaned, you can turn on **preserve exact
 wording** to skip the separate cleanup model entirely and get a one-call
 dictation. Leave it off if you still want the cleanup pass to adapt the text to
 the app you are dictating into.
 
-Two limits are worth knowing: the language is auto-detected rather than pinned
-(pinning a language drops the model out of smart mode), and realtime streaming
-is skipped while a Gemini model is selected, since Gemini streams over its own
-endpoint.
+One limit is worth knowing: the language is auto-detected rather than pinned,
+because pinning a language drops both models out of smart mode. The
+transcription-language setting therefore has no effect on the Gemini paths.
 
 ## Using a Local Model
 

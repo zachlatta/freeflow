@@ -111,10 +111,14 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             interleaved: true
         )!
     }()
+    /// Sample rate of the out-of-band PCM stream handed to realtime sockets.
+    /// Exposed so a provider can declare the real rate in its own frames.
+    static let realtimeSampleRate = 24_000
+
     private let pcm16TargetFormat: AVAudioFormat = {
         AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: 24_000,
+            sampleRate: Double(AudioRecorder.realtimeSampleRate),
             channels: 1,
             interleaved: true
         )!

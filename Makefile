@@ -15,6 +15,7 @@ TEST_RUNNER = $(BUILD_DIR)/FreeFlowTests
 TEST_PRODUCTION_SOURCES = \
 	Sources/AppContextService.swift \
 	Sources/AppName.swift \
+	Sources/GeminiLiveTranscription.swift \
 	Sources/GeminiTranscription.swift \
 	Sources/LLMAPITransport.swift \
 	Sources/LLMCooldownManager.swift \
