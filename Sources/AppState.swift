@@ -3253,7 +3253,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .showSettings, object: nil)
     }
 
-    static let clipboardWaitingStatusText = "On clipboard — press Cmd-V"
+    static let clipboardWaitingStatusText = "On clipboard, press Cmd-V"
 
     /// Delivers a finished transcript back to the element the user was writing
     /// in when they stopped dictating. Never changes the frontmost app unless
@@ -3289,7 +3289,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     // Key events were posted but nothing confirms the app
                     // consumed them. Leave the transcript on the clipboard so
                     // Cmd-V still recovers it.
-                    let keystrokeStatus = "Sent to \(outcome.target) — still on clipboard"
+                    let keystrokeStatus = "Sent to \(outcome.target), still on clipboard"
                     self.statusText = keystrokeStatus
                     self.scheduleReadyStatusReset(after: 3, matching: [keystrokeStatus])
                     self.releaseClipboardSnapshotHold()
