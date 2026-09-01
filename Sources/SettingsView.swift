@@ -1205,6 +1205,43 @@ struct GeneralSettingsView: View {
 
     private var clipboardSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Toggle("Deliver back to where you were dictating", isOn: $appState.asyncDeliveryEnabled)
+
+            Text("The transcript goes to the text field you were writing in when you stopped, even if you have since switched app, window or Desktop. Your focus stays where it is.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("Keep dictating while earlier transcripts finish", isOn: $appState.overlappingDictationEnabled)
+                .disabled(!appState.asyncDeliveryEnabled)
+
+            Text("Start a new recording without waiting for the previous transcription. Each transcript still lands in the field it was dictated into.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("Send keystrokes to background apps", isOn: $appState.asyncDeliveryAllowProcessKeystroke)
+                .disabled(!appState.asyncDeliveryEnabled)
+
+            Text("Needed for terminals and other apps that refuse Accessibility text writes. The keys go to that app's process only, without bringing it forward.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("Last resort: bring the app forward and paste", isOn: $appState.asyncDeliveryAllowFocusSteal)
+                .disabled(!appState.asyncDeliveryEnabled)
+
+            Text("Off by default. When on, a transcript that cannot be delivered any other way pulls you back to the original app and its Desktop. When off, it waits on the clipboard instead.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if !appState.lastDeliveryDiagnostics.isEmpty {
+                Text("Last delivery: \(appState.lastDeliveryDiagnostics)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
+            Divider()
+                .padding(.vertical, 2)
+
             Toggle("Preserve clipboard after paste", isOn: $appState.preserveClipboard)
 
             Text("\(AppName.displayName) will temporarily place the transcript on your clipboard to paste it, then restore whatever was there before. If you copy something else before the restore happens, \(AppName.displayName) leaves it alone.")

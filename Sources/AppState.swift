@@ -556,6 +556,53 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var transcriptionAlertShown = false
     // App that was frontmost when the user pressed stop — paste target for async delivery.
     private var pasteTargetApp: NSRunningApplication?
+    // Element the user was writing in when they pressed stop. Delivery goes
+    // back to this element, so switching app, window or Space while the
+    // transcription runs does not send the text somewhere else.
+    private var pendingDeliveryTarget: DeliveryTarget?
+    private let deliveryService = TextDeliveryService()
+    @Published var lastDeliveryDiagnostics: String = ""
+
+    // Overlapping dictations. Each stop opens an independent transcription
+    // session with its own delivery target, so a second recording can start
+    // while the first is still being transcribed.
+    private var liveTranscriptionSessions: Set<UUID> = []
+    // With overlapping dictations several transcripts sit on the clipboard in
+    // turn. Only the first one may snapshot it — a later snapshot would
+    // capture an earlier transcript and restore that as "the user's clipboard".
+    private var outstandingClipboardSnapshot: PreservedPasteboardSnapshot?
+    private var outstandingClipboardRestores = 0
+    private var transcriptionTasksBySession: [UUID: Task<Void, Never>] = [:]
+
+    /// Allow starting a new recording while earlier transcriptions are still
+    /// running. Each one delivers to the element it was dictated into.
+    @Published var overlappingDictationEnabled: Bool = UserDefaults.standard.object(forKey: "overlapping_dictation_enabled") == nil
+        ? true
+        : UserDefaults.standard.bool(forKey: "overlapping_dictation_enabled") {
+        didSet { UserDefaults.standard.set(overlappingDictationEnabled, forKey: "overlapping_dictation_enabled") }
+    }
+
+    /// Deliver transcripts back to the pinned element instead of pasting into
+    /// whatever happens to be focused when the text is ready.
+    @Published var asyncDeliveryEnabled: Bool = UserDefaults.standard.object(forKey: "async_delivery_enabled") == nil
+        ? true
+        : UserDefaults.standard.bool(forKey: "async_delivery_enabled") {
+        didSet { UserDefaults.standard.set(asyncDeliveryEnabled, forKey: "async_delivery_enabled") }
+    }
+
+    /// Last resort: bring the target app forward and press Cmd-V. Off by
+    /// default because it drags the user back to that app and its Space.
+    @Published var asyncDeliveryAllowFocusSteal: Bool = UserDefaults.standard.bool(forKey: "async_delivery_focus_steal") {
+        didSet { UserDefaults.standard.set(asyncDeliveryAllowFocusSteal, forKey: "async_delivery_focus_steal") }
+    }
+
+    /// Middle tier: synthesised key events addressed to the target process.
+    /// Needed for terminals, which never accept Accessibility text writes.
+    @Published var asyncDeliveryAllowProcessKeystroke: Bool = UserDefaults.standard.object(forKey: "async_delivery_pid_keystroke") == nil
+        ? true
+        : UserDefaults.standard.bool(forKey: "async_delivery_pid_keystroke") {
+        didSet { UserDefaults.standard.set(asyncDeliveryAllowProcessKeystroke, forKey: "async_delivery_pid_keystroke") }
+    }
     @Published var retryingItemIDs: Set<UUID> = []
     @Published var lastTranscript: String = ""
     @Published var errorMessage: String?
@@ -598,7 +645,6 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var audioLevelCancellable: AnyCancellable?
     private var debugOverlayTimer: Timer?
     private var recordingInitializationTimer: DispatchSourceTimer?
-    private var transcriptionTask: Task<Void, Never>?
     private var transcribingAudioFileName: String?
     private var contextService: AppContextService
     private var contextCaptureTask: Task<AppContext?, Never>?
@@ -1685,7 +1731,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
 
-        guard let action = shortcutSessionController.handle(event: event, isTranscribing: isTranscribing) else {
+        guard let action = shortcutSessionController.handle(
+            event: event,
+            isTranscribing: overlappingDictationEnabled ? false : isTranscribing
+        ) else {
             return
         }
 
@@ -1786,8 +1835,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func cancelTranscription() {
         guard isTranscribing else { return }
 
-        transcriptionTask?.cancel()
-        transcriptionTask = nil
+        cancelAllTranscriptionSessions()
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         capturedContext = nil
@@ -1928,7 +1976,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func startRecording(triggerMode: RecordingTriggerMode) {
         let t0 = CFAbsoluteTimeGetCurrent()
         os_log(.info, log: recordingLog, "startRecording() entered")
-        guard !isRecording && !isTranscribing else { return }
+        guard !isRecording else { return }
+        guard overlappingDictationEnabled || !isTranscribing else { return }
         let scheduledSelectionSnapshot = pendingSelectionSnapshot
         let scheduledManualCommandInvocation = pendingManualCommandInvocation
         cancelPendingShortcutStart()
@@ -2122,6 +2171,41 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Tears the shared recorder down only when no dictation is running. An
+    /// earlier transcript finishing must not cut off the recording the user
+    /// started in the meantime.
+    private func cleanupAudioRecorderIfIdle() {
+        guard !isRecording else { return }
+        audioRecorder.cleanup()
+        refreshAvailableMicrophonesIfNeeded()
+    }
+
+    private func beginTranscriptionSession() -> UUID {
+        let id = UUID()
+        liveTranscriptionSessions.insert(id)
+        isTranscribing = true
+        return id
+    }
+
+    private func isSessionLive(_ id: UUID) -> Bool {
+        liveTranscriptionSessions.contains(id)
+    }
+
+    private func endTranscriptionSession(_ id: UUID) {
+        liveTranscriptionSessions.remove(id)
+        transcriptionTasksBySession[id] = nil
+        isTranscribing = !liveTranscriptionSessions.isEmpty
+    }
+
+    private func cancelAllTranscriptionSessions() {
+        for task in transcriptionTasksBySession.values {
+            task.cancel()
+        }
+        transcriptionTasksBySession.removeAll()
+        liveTranscriptionSessions.removeAll()
+        isTranscribing = false
+    }
+
     private func beginCriticalDictationActivity() {
         guard !automaticTerminationDisabled else { return }
         ProcessInfo.processInfo.disableAutomaticTermination("FreeFlow dictation in progress")
@@ -2237,8 +2321,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         restoreAudioInterruptionIfNeeded()
         isRecording = false
         isTranscribing = false
-        transcriptionTask?.cancel()
-        transcriptionTask = nil
+        cancelAllTranscriptionSessions()
         // Keep the saved audio file — it's available in the run log for retry.
         self.transcribingAudioFileName = nil
         activeRecordingTriggerMode = nil
@@ -2491,6 +2574,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         // app; fall back to the session-start context only when FreeFlow is already
         // frontmost (i.e. the user opened the menu to click stop).
         let stopTimeFrontmost = NSWorkspace.shared.frontmostApplication
+        pendingDeliveryTarget = TextDeliveryService.captureTarget(
+            ownBundleIdentifier: Bundle.main.bundleIdentifier,
+            fallbackBundleIdentifier: capturedContext?.bundleIdentifier
+        )
         if let front = stopTimeFrontmost, front.bundleIdentifier != Bundle.main.bundleIdentifier {
             pasteTargetApp = front
         } else if let bundleId = capturedContext?.bundleIdentifier, bundleId != Bundle.main.bundleIdentifier {
@@ -2525,7 +2612,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         lastContextScreenshotStatus = "No screenshot"
         isRecording = false
         restoreAudioInterruptionIfNeeded()
-        isTranscribing = true
+        let transcriptionSessionID = beginTranscriptionSession()
+        // Each session keeps its own target so a later dictation cannot
+        // redirect an earlier transcript.
+        let sessionDeliveryTarget = pendingDeliveryTarget
+        pendingDeliveryTarget = nil
         statusText = "Preparing audio..."
         errorMessage = nil
         playAlertSound(named: "Pop")
@@ -2533,7 +2624,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioRecorder.stopRecording { [weak self] fileURL in
             guard let self else { return }
             guard let fileURL else {
-                self.isTranscribing = false
+                self.endTranscriptionSession(transcriptionSessionID)
                 self.audioRecorder.cleanup()
                 self.endCriticalDictationActivity()
                 self.errorMessage = "No audio recorded"
@@ -2543,7 +2634,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 return
             }
 
-            guard self.isTranscribing else {
+            guard self.isSessionLive(transcriptionSessionID) else {
                 self.tearDownRealtimeService()
                 self.audioRecorder.cleanup()
                 self.refreshAvailableMicrophonesIfNeeded()
@@ -2569,8 +2660,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             let activePrefetch = self.prefetchTranscriber
             self.prefetchTranscriber = nil
             self.audioRecorder.onPCM16Samples = nil
-            self.transcriptionTask?.cancel()
-            guard self.isTranscribing else {
+            guard self.isSessionLive(transcriptionSessionID) else {
                 // Transcription was cancelled mid-flight. Keep the saved audio
                 // file so it remains available in the run log for retry.
                 self.transcribingAudioFileName = nil
@@ -2580,7 +2670,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.refreshAvailableMicrophonesIfNeeded()
                 return
             }
-            self.transcriptionTask = Task {
+            let sessionTask = Task {
                 defer {
                     activeRealtime?.cancel()
                 }
@@ -2662,10 +2752,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             intent: sessionIntent,
                             audioFileName: savedAudioFile?.fileName
                         )
-                        self.transcriptionTask = nil
+                        self.endTranscriptionSession(transcriptionSessionID)
                         self.transcribingAudioFileName = nil
                         self.lastTranscript = trimmedFinalTranscript
-                        self.isTranscribing = false
                         self.endCriticalDictationActivity()
                         self.debugStatusMessage = "Done"
                         let completionStatusText = self.preserveClipboard ? "Pasted at cursor!" : "Copied to clipboard!"
@@ -2701,7 +2790,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             }
 
                             let pendingClipboardRestore = self.writeTranscriptToPasteboard(trimmedFinalTranscript)
-                            self.pasteAtCursorWhenShortcutReleased {
+                            let afterDelivery: () -> Void = {
                                 if shouldPressEnterAfterPaste {
                                     self.pressEnterAfterPaste {
                                         self.restoreClipboardIfNeeded(pendingClipboardRestore)
@@ -2710,16 +2799,34 @@ final class AppState: ObservableObject, @unchecked Sendable {
                                     self.restoreClipboardIfNeeded(pendingClipboardRestore)
                                 }
                             }
+                            if self.asyncDeliveryEnabled {
+                                self.deliverTranscriptToPinnedTarget(
+                                    trimmedFinalTranscript,
+                                    target: sessionDeliveryTarget,
+                                    pressReturnAfter: shouldPressEnterAfterPaste
+                                ) {
+                                    self.restoreClipboardIfNeeded(pendingClipboardRestore)
+                                }
+                            } else {
+                                self.pasteAtCursorWhenShortcutReleased(completion: afterDelivery)
+                            }
                         }
 
-                        self.audioRecorder.cleanup()
-                        self.refreshAvailableMicrophonesIfNeeded()
+                        self.cleanupAudioRecorderIfIdle()
 
-                        self.scheduleReadyStatusReset(after: 3, matching: [completionStatusText, "Nothing to transcribe", enterOnlyStatusText])
+                        self.scheduleReadyStatusReset(
+                            after: 3,
+                            matching: [
+                                completionStatusText,
+                                "Nothing to transcribe",
+                                enterOnlyStatusText,
+                                Self.clipboardWaitingStatusText
+                            ]
+                        )
                     }
                 } catch is CancellationError {
                     await MainActor.run {
-                        self.transcriptionTask = nil
+                        self.endTranscriptionSession(transcriptionSessionID)
                         self.endCriticalDictationActivity()
                     }
                 } catch {
@@ -2732,11 +2839,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         resolvedContext = self.fallbackContextAtStop()
                     }
                     await MainActor.run {
-                        guard self.isTranscribing else { return }
-                        self.transcriptionTask = nil
+                        guard self.isSessionLive(transcriptionSessionID) else { return }
+                        self.endTranscriptionSession(transcriptionSessionID)
                         self.transcribingAudioFileName = nil
                         self.errorMessage = error.localizedDescription
-                        self.isTranscribing = false
                         self.endCriticalDictationActivity()
                         self.statusText = "Error"
                         self.overlayManager.dismiss()
@@ -2758,11 +2864,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             intent: sessionIntent,
                             audioFileName: savedAudioFile?.fileName
                         )
-                        self.audioRecorder.cleanup()
-                        self.refreshAvailableMicrophonesIfNeeded()
+                        self.cleanupAudioRecorderIfIdle()
                     }
                 }
             }
+            self.transcriptionTasksBySession[transcriptionSessionID] = sessionTask
         }
     }
 
@@ -3147,6 +3253,58 @@ final class AppState: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .showSettings, object: nil)
     }
 
+    static let clipboardWaitingStatusText = "On clipboard — press Cmd-V"
+
+    /// Delivers a finished transcript back to the element the user was writing
+    /// in when they stopped dictating. Never changes the frontmost app unless
+    /// the focus-steal fallback is explicitly enabled.
+    private func deliverTranscriptToPinnedTarget(
+        _ text: String,
+        target: DeliveryTarget?,
+        pressReturnAfter: Bool,
+        completion: @escaping () -> Void
+    ) {
+        pasteTargetApp = nil
+        deliveryService.allowFocusStealFallback = asyncDeliveryAllowFocusSteal
+        deliveryService.allowProcessKeystroke = asyncDeliveryAllowProcessKeystroke
+        deliveryService.deliver(text, to: target) { [weak self] outcome in
+            guard let self else { return }
+            let apply = {
+                self.lastDeliveryDiagnostics = outcome.attempts.joined(separator: " | ")
+                self.debugStatusMessage = "Delivery: \(outcome.summary)"
+                if outcome.succeeded {
+                    if pressReturnAfter, let target {
+                        self.deliveryService.pressReturn(target: target, tier: outcome.tier)
+                    }
+                } else {
+                    self.statusText = Self.clipboardWaitingStatusText
+                }
+
+                switch outcome.tier {
+                case .accessibilityInsert, .activateAndPaste:
+                    // The text is demonstrably in the target, so the previous
+                    // clipboard can come back.
+                    completion()
+                case .processKeystroke:
+                    // Key events were posted but nothing confirms the app
+                    // consumed them. Leave the transcript on the clipboard so
+                    // Cmd-V still recovers it.
+                    let keystrokeStatus = "Sent to \(outcome.target) — still on clipboard"
+                    self.statusText = keystrokeStatus
+                    self.scheduleReadyStatusReset(after: 3, matching: [keystrokeStatus])
+                    self.releaseClipboardSnapshotHold()
+                case .clipboardOnly:
+                    self.releaseClipboardSnapshotHold()
+                }
+            }
+            if Thread.isMainThread {
+                apply()
+            } else {
+                DispatchQueue.main.async(execute: apply)
+            }
+        }
+    }
+
     private func pasteAtCursor(completion: (() -> Void)? = nil) {
         guard let target = pasteTargetApp, !target.isTerminated else {
             pasteTargetApp = nil
@@ -3231,7 +3389,19 @@ final class AppState: ObservableObject, @unchecked Sendable {
     /// - Returns: A `PendingClipboardRestore` object if clipboard preservation is enabled, otherwise nil.
     private func writeTranscriptToPasteboard(_ transcript: String) -> PendingClipboardRestore? {
         let pasteboard = NSPasteboard.general
-        let snapshot = preserveClipboard ? PreservedPasteboardSnapshot(pasteboard: pasteboard) : nil
+        let snapshot: PreservedPasteboardSnapshot?
+        if preserveClipboard {
+            if let existing = outstandingClipboardSnapshot {
+                snapshot = existing
+            } else {
+                let fresh = PreservedPasteboardSnapshot(pasteboard: pasteboard)
+                outstandingClipboardSnapshot = fresh
+                snapshot = fresh
+            }
+            outstandingClipboardRestores += 1
+        } else {
+            snapshot = nil
+        }
 
         // Append a space when ending with sentence-ending punctuation so the
         // next dictation does not jam against the prior period.
@@ -3280,6 +3450,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func restoreClipboardIfNeeded(_ pendingRestore: PendingClipboardRestore?) {
         guard let pendingRestore else { return }
+        releaseClipboardSnapshotHold()
 
         // Some apps consume Cmd-V asynchronously, so restoring too quickly can paste
         // the pre-dictation clipboard instead of the transcript.
@@ -3296,6 +3467,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
             guard pasteboard.changeCount == pendingRestore.expectedChangeCount
                 || clipboardStillHoldsTranscript else { return }
             pendingRestore.snapshot.restore(to: pasteboard)
+        }
+    }
+
+    /// Called once per pasteboard write, whether or not that write is actually
+    /// restored, so the shared snapshot is dropped when nothing is pending.
+    private func releaseClipboardSnapshotHold() {
+        outstandingClipboardRestores = max(0, outstandingClipboardRestores - 1)
+        if outstandingClipboardRestores == 0 {
+            outstandingClipboardSnapshot = nil
         }
     }
 
