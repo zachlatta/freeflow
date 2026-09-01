@@ -1205,39 +1205,7 @@ struct GeneralSettingsView: View {
 
     private var clipboardSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Deliver back to where you were dictating", isOn: $appState.asyncDeliveryEnabled)
-
-            Text("The transcript goes to the text field you were writing in when you stopped, even if you have since switched app, window or Desktop. Your focus stays where it is.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Toggle("Keep dictating while earlier transcripts finish", isOn: $appState.overlappingDictationEnabled)
-                .disabled(!appState.asyncDeliveryEnabled)
-
-            Text("Start a new recording without waiting for the previous transcription. Each transcript still lands in the field it was dictated into.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Toggle("Send keystrokes to background apps", isOn: $appState.asyncDeliveryAllowProcessKeystroke)
-                .disabled(!appState.asyncDeliveryEnabled)
-
-            Text("Needed for terminals and other apps that refuse Accessibility text writes. The keys go to that app's process only, without bringing it forward.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Toggle("Last resort: bring the app forward and paste", isOn: $appState.asyncDeliveryAllowFocusSteal)
-                .disabled(!appState.asyncDeliveryEnabled)
-
-            Text("Off by default. When on, a transcript that cannot be delivered any other way pulls you back to the original app and its Desktop. When off, it waits on the clipboard instead.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if !appState.lastDeliveryDiagnostics.isEmpty {
-                Text("Last delivery: \(appState.lastDeliveryDiagnostics)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
+            asyncDeliverySection
 
             Divider()
                 .padding(.vertical, 2)
@@ -1256,6 +1224,49 @@ struct GeneralSettingsView: View {
             Text("When the transcription ends with \"press enter\", \(AppName.displayName) removes those words before cleanup, pastes the remaining transcript, then presses Return.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var asyncDeliverySection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Deliver back to where you were dictating", isOn: $appState.asyncDeliveryEnabled)
+
+            Text("The transcript goes to the text field you were writing in when you stopped, even if you have since switched app, window or Desktop. Your focus stays where it is.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            asyncDeliveryDetailToggles
+        }
+    }
+
+    @ViewBuilder
+    private var asyncDeliveryDetailToggles: some View {
+        Toggle("Keep dictating while earlier transcripts finish", isOn: $appState.overlappingDictationEnabled)
+            .disabled(!appState.asyncDeliveryEnabled)
+
+        Text("Start a new recording without waiting for the previous transcription. Each transcript still lands in the field it was dictated into.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        Toggle("Send keystrokes to background apps", isOn: $appState.asyncDeliveryAllowProcessKeystroke)
+            .disabled(!appState.asyncDeliveryEnabled)
+
+        Text("Needed for terminals and other apps that refuse Accessibility text writes. The keys go to that app's process only, without bringing it forward.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        Toggle("Last resort: bring the app forward and paste", isOn: $appState.asyncDeliveryAllowFocusSteal)
+            .disabled(!appState.asyncDeliveryEnabled)
+
+        Text("Off by default. When on, a transcript that cannot be delivered any other way pulls you back to the original app and its Desktop. When off, it waits on the clipboard instead.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        if !appState.lastDeliveryDiagnostics.isEmpty {
+            Text("Last delivery: \(appState.lastDeliveryDiagnostics)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
         }
     }
 
