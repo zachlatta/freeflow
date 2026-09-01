@@ -118,10 +118,10 @@ jobs:
 
       # --- Build universal ---
       - name: Build universal
-        run: make ARCH=universal APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
+        run: make ARCH=universal APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY" INCLUDE_LOCAL_ASR=1
 
       - name: Create universal DMG
-        run: make dmg ARCH=universal APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
+        run: make dmg ARCH=universal APP_NAME=FreeFlow BUNDLE_ID=com.zachlatta.freeflow CODESIGN_IDENTITY="$CODESIGN_IDENTITY" INCLUDE_LOCAL_ASR=1
 
       - name: Sign universal DMG
         run: codesign --force --sign "$CODESIGN_IDENTITY" build/FreeFlow.dmg

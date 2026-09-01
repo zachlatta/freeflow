@@ -1,0 +1,19 @@
+FreeFlow uses the following third-party components for on-device transcription:
+
+parakeet-coreml-swift
+Copyright its contributors; licensed under Apache License 2.0.
+Source: https://github.com/mweinbach/parakeet-coreml-swift
+Pinned version: v0.1.1 (75aec2a1c991319657ff4dec5f602c12da6c5012)
+
+swift-argument-parser
+Copyright Apple Inc. and the Swift project authors; licensed under Apache License 2.0.
+Source: https://github.com/apple/swift-argument-parser
+Pinned version: 1.8.2 (6a52f3251125d74daf04fcbd5e6f08a75d074382)
+
+Parakeet TDT 0.6B v3 model weights
+Copyright NVIDIA; licensed under Creative Commons Attribution 4.0.
+Source: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+Core ML conversion: https://huggingface.co/mweinbach1/parakeet-tdt-0.6b-v3-coreml
+
+The complete Apache 2.0 license texts for the bundled executable are included
+next to this notice in the app's ThirdPartyLicenses resource directory.

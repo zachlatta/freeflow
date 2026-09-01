@@ -18,12 +18,16 @@ class TranscriptionService {
     private let baseURL: URL
     private let transcriptionModel: String
     private let language: String?
+    private let localParakeetService: LocalParakeetTranscriptionService?
     private var transcriptionResponseFormat: String {
         Self.responseFormat(forModel: transcriptionModel)
     }
     private var transcriptionTimeoutSeconds: TimeInterval {
-        let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
-        return override > 0 ? override : 20
+        let key = localParakeetService == nil
+            ? "transcription_timeout_seconds"
+            : "local_transcription_timeout_seconds"
+        let override = UserDefaults.standard.double(forKey: key)
+        return override > 0 ? override : (localParakeetService == nil ? 20 : 120)
     }
 
     init(
@@ -38,6 +42,16 @@ class TranscriptionService {
         self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
         let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
+        self.localParakeetService = nil
+    }
+
+    init(localParakeetModelDirectory modelDirectory: URL, language: String? = nil) throws {
+        self.apiKey = ""
+        self.baseURL = URL(string: "http://127.0.0.1")!
+        self.transcriptionModel = "parakeet-tdt-0.6b-v3-coreml-int4"
+        let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
+        self.localParakeetService = try LocalParakeetTranscriptionService(modelDirectory: modelDirectory)
     }
 
     static func responseFormat(forModel model: String) -> String {
@@ -111,6 +125,9 @@ class TranscriptionService {
 
     // Send audio file for transcription and return text
     private func transcribeAudio(fileURL: URL) async throws -> String {
+        if let localParakeetService {
+            return try await localParakeetService.transcribe(fileURL: fileURL)
+        }
         return try await transcribeAudioWithURLSession(fileURL: fileURL)
     }
 

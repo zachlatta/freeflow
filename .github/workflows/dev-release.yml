@@ -106,10 +106,10 @@ jobs:
 
       # --- Build universal dev app ---
       - name: Build universal
-        run: make ARCH=universal CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
+        run: make ARCH=universal CODESIGN_IDENTITY="$CODESIGN_IDENTITY" INCLUDE_LOCAL_ASR=1
 
       - name: Create universal DMG
-        run: make dmg ARCH=universal CODESIGN_IDENTITY="$CODESIGN_IDENTITY"
+        run: make dmg ARCH=universal CODESIGN_IDENTITY="$CODESIGN_IDENTITY" INCLUDE_LOCAL_ASR=1
 
       - name: Sign universal DMG
         run: codesign --force --sign "$CODESIGN_IDENTITY" "build/FreeFlow Dev.dmg"

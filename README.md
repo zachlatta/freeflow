@@ -82,6 +82,26 @@ FreeFlow can use OpenAI-compatible local or self-hosted providers instead of Gro
 
 Local models are often slower than hosted providers, especially on cold start, long recordings, or busy hardware.
 
+### Built-in on-device transcription
+
+On Apple silicon Macs running macOS 15 or newer, enable **On-Device
+Transcription** in General Settings. FreeFlow downloads and verifies the
+approximately 459 MiB Parakeet TDT 0.6B v3 Core ML model, shows setup progress,
+and prepares it before the first dictation. The same Settings card can remove
+the model and its compiled cache. When a local recording starts, FreeFlow
+warms Core ML with generated silence so cold-start time overlaps the dictation.
+
+While on-device transcription is enabled, dictated audio and text do not go to
+a provider. Screenshot context, realtime streaming, translation, Edit Mode,
+and language-model cleanup are skipped at the code-path level. The raw local
+transcript is pasted directly, apart from a narrow deterministic repair for a
+known decoder punctuation artifact. Voice macros remain available because
+they are deterministic and local.
+
+Signed release workflows include the helper. Source builds remain
+network-independent by default; pass `INCLUDE_LOCAL_ASR=1` to `make` when you
+want to fetch, build, and bundle the pinned local helper.
+
 <details>
   <summary>Configure longer timeouts for local models</summary>
 

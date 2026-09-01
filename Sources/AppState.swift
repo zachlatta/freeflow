@@ -236,6 +236,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let realtimeStreamingEnabledStorageKey = "realtime_streaming_enabled"
     private let realtimeStreamingModelStorageKey = "realtime_streaming_model"
     private let dictationAudioInterruptionEnabledStorageKey = "dictation_audio_interruption_enabled"
+    private let localTranscriptionEnabledStorageKey = "local_transcription_enabled"
     private let pasteAfterShortcutReleaseDelay: TimeInterval = 0.03
     private let pressEnterAfterPasteDelay: TimeInterval = 0.08
     private let clipboardRestoreDelay: TimeInterval = 1.0
@@ -319,6 +320,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var transcriptionModel: String {
         didSet {
             UserDefaults.standard.set(transcriptionModel, forKey: transcriptionModelStorageKey)
+        }
+    }
+
+    @Published var localTranscriptionEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(localTranscriptionEnabled, forKey: localTranscriptionEnabledStorageKey)
         }
     }
 
@@ -594,11 +601,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
     let audioRecorder = AudioRecorder()
     let hotkeyManager = HotkeyManager()
     let overlayManager = RecordingOverlayManager()
+    let localParakeetModelManager = LocalParakeetModelManager()
     private var accessibilityTimer: Timer?
     private var audioLevelCancellable: AnyCancellable?
     private var debugOverlayTimer: Timer?
     private var recordingInitializationTimer: DispatchSourceTimer?
     private var transcriptionTask: Task<Void, Never>?
+    private var localTranscriptionWarmupTask: Task<Void, Never>?
     private var transcribingAudioFileName: String?
     private var contextService: AppContextService
     private var contextCaptureTask: Task<AppContext?, Never>?
@@ -634,6 +643,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let transcriptionModel = UserDefaults.standard.string(forKey: transcriptionModelStorageKey) ?? Self.defaultTranscriptionModel
         let transcriptionAPIURL = Self.loadOptionalStoredAPIValue(account: transcriptionAPIURLStorageKey)
         let transcriptionAPIKey = Self.loadStoredAPIKey(account: transcriptionAPIKeyStorageKey)
+        let localTranscriptionEnabled = UserDefaults.standard.bool(forKey: localTranscriptionEnabledStorageKey)
         let postProcessingModel = UserDefaults.standard.string(forKey: postProcessingModelStorageKey) ?? Self.defaultPostProcessingModel
         let postProcessingFallbackModel = Self.loadStoredPostProcessingFallbackModel(
             key: postProcessingFallbackModelStorageKey
@@ -739,6 +749,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.transcriptionAPIURL = transcriptionAPIURL
         self.transcriptionAPIKey = transcriptionAPIKey
         self.transcriptionModel = transcriptionModel
+        self.localTranscriptionEnabled = localTranscriptionEnabled
         self.postProcessingModel = postProcessingModel
         self.postProcessingFallbackModel = postProcessingFallbackModel
         self.contextModel = contextModel
@@ -1032,7 +1043,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     func makeTranscriptionService() throws -> TranscriptionService {
-        try TranscriptionService(
+        if localTranscriptionPolicy.isEnabled {
+            guard localParakeetModelManager.store.isInstalled else {
+                throw LocalParakeetError.modelUnavailable
+            }
+            return try TranscriptionService(
+                localParakeetModelDirectory: localParakeetModelManager.store.modelDirectory,
+                language: resolvedTranscriptionLanguage
+            )
+        }
+        return try TranscriptionService(
             apiKey: resolvedTranscriptionAPIKey,
             baseURL: resolvedTranscriptionBaseURL,
             transcriptionModel: transcriptionModel,
@@ -1043,6 +1063,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var resolvedTranscriptionLanguage: String? {
         let normalized = Self.normalizeTranscriptionLanguage(transcriptionLanguage)
         return normalized.isEmpty ? nil : normalized
+    }
+
+    private var localTranscriptionPolicy: LocalTranscriptionPolicy {
+        LocalTranscriptionPolicy(isEnabled: localTranscriptionEnabled)
+    }
+
+    var requiresScreenRecordingPermission: Bool {
+        localTranscriptionPolicy.allowsContextCapture
     }
 
     private func persistShortcut(_ binding: ShortcutBinding, key: String) {
@@ -1311,16 +1339,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
         accessibilityTimer?.invalidate()
         accessibilityTimer = nil
         hasAccessibility = AXIsProcessTrusted()
-        hasScreenRecordingPermission = hasScreenCapturePermission()
-        if hasAccessibility && hasScreenRecordingPermission {
+        if requiresScreenRecordingPermission {
+            hasScreenRecordingPermission = hasScreenCapturePermission()
+        }
+        if hasAccessibility && (!requiresScreenRecordingPermission || hasScreenRecordingPermission) {
             return
         }
         accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.hasAccessibility = AXIsProcessTrusted()
-                self.hasScreenRecordingPermission = self.hasScreenCapturePermission()
-                if self.hasAccessibility && self.hasScreenRecordingPermission {
+                if self.requiresScreenRecordingPermission {
+                    self.hasScreenRecordingPermission = self.hasScreenCapturePermission()
+                }
+                if self.hasAccessibility
+                    && (!self.requiresScreenRecordingPermission || self.hasScreenRecordingPermission) {
                     self.accessibilityTimer?.invalidate()
                     self.accessibilityTimer = nil
                 }
@@ -1811,6 +1844,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Cancelled"
         overlayManager.dismiss()
         tearDownRealtimeService()
+        cancelLocalTranscriptionWarmup()
         audioRecorder.cancelRecording()
         restoreAudioInterruptionIfNeeded()
         endCriticalDictationActivity()
@@ -1825,6 +1859,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        cancelLocalTranscriptionWarmup()
         contextCaptureTask?.cancel()
         contextCaptureTask = nil
         capturedContext = nil
@@ -1851,10 +1886,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func scheduleShortcutStart(mode: RecordingTriggerMode) {
         cancelPendingShortcutStart(resetMode: false)
-        pendingSelectionSnapshot = contextService.collectSelectionSnapshot()
-        pendingManualCommandInvocation = hotkeyManager.currentPressedModifiers.contains(
-            commandModeManualModifier.shortcutModifier
-        )
+        if localTranscriptionPolicy.allowsContextCapture {
+            pendingSelectionSnapshot = contextService.collectSelectionSnapshot()
+            pendingManualCommandInvocation = hotkeyManager.currentPressedModifiers.contains(
+                commandModeManualModifier.shortcutModifier
+            )
+        } else {
+            pendingSelectionSnapshot = nil
+            pendingManualCommandInvocation = false
+        }
         pendingShortcutStartMode = mode
         let delay = shortcutStartDelay
 
@@ -2008,6 +2048,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
             os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
         }
 
+        if localTranscriptionPolicy.isEnabled {
+            // On-device mode deliberately ignores Edit Mode and selected text:
+            // both would otherwise enter the cloud LLM/context path.
+            currentSessionIntent = .dictation
+            overlayManager.setRecordingTriggerMode(triggerMode, animated: false)
+            return true
+        }
+
         let selectionSnapshot = selectionSnapshot ?? contextService.collectSelectionSnapshot()
         let manualCommandRequested = manualCommandRequested
             ?? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
@@ -2061,7 +2109,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
             prepareForMicrophonePermissionPrompt(
                 triggerMode: triggerMode,
-                selectionSnapshot: pendingSelectionSnapshot ?? contextService.collectSelectionSnapshot(),
+                selectionSnapshot: localTranscriptionPolicy.allowsContextCapture
+                    ? (pendingSelectionSnapshot ?? contextService.collectSelectionSnapshot())
+                    : nil,
                 manualCommandRequested: currentSessionIntent.isManualCommand
             )
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
@@ -2173,6 +2223,29 @@ final class AppState: ObservableObject, @unchecked Sendable {
         automaticTerminationDisabled = false
     }
 
+    private func startLocalTranscriptionWarmupIfNeeded() {
+        guard localTranscriptionPolicy.isEnabled,
+              localParakeetModelManager.store.isInstalled,
+              localTranscriptionWarmupTask == nil,
+              let service = try? LocalParakeetTranscriptionService(
+                  modelDirectory: localParakeetModelManager.store.modelDirectory
+              ) else { return }
+        localTranscriptionWarmupTask = Task(priority: .userInitiated) {
+            try? await service.prewarm()
+        }
+    }
+
+    private func finishLocalTranscriptionWarmupIfNeeded() async {
+        guard let task = localTranscriptionWarmupTask else { return }
+        await task.value
+        localTranscriptionWarmupTask = nil
+    }
+
+    private func cancelLocalTranscriptionWarmup() {
+        localTranscriptionWarmupTask?.cancel()
+        localTranscriptionWarmupTask = nil
+    }
+
     private func beginRecording(triggerMode: RecordingTriggerMode) {
         os_log(.info, log: recordingLog, "beginRecording() entered")
         beginCriticalDictationActivity()
@@ -2182,6 +2255,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         isRecording = true
         statusText = "Starting..."
         hasShownScreenshotPermissionAlert = false
+        startLocalTranscriptionWarmupIfNeeded()
 
         // Show initializing dots only if engine takes longer than 0.2s to start
         var overlayShown = false
@@ -2271,6 +2345,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         contextCaptureTask = nil
         capturedContext = nil
         tearDownRealtimeService()
+        cancelLocalTranscriptionWarmup()
         audioRecorder.cleanup()
         restoreAudioInterruptionIfNeeded()
         isRecording = false
@@ -2516,6 +2591,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return ("", .skippedEmptyRawTranscript, "")
         }
 
+        // On-device transcription is a hard privacy boundary, not merely a UI preset.
+        // Never let a stored Edit Mode/output-language setting route audio or
+        // text into the cloud pipeline. Deterministic voice macros remain local.
+        if !localTranscriptionPolicy.allowsLanguageModelProcessing {
+            if let macro = findMatchingMacro(for: trimmedRawTranscript) {
+                return (macro.payload, .voiceMacro(command: macro.command), "")
+            }
+            return (trimmedRawTranscript, .preservedExactWording, "")
+        }
+
         if case .command(let invocation, let selectedText) = intent {
             do {
                 let result = try await postProcessingService.commandTransform(
@@ -2642,6 +2727,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioRecorder.stopRecording { [weak self] fileURL in
             guard let self else { return }
             guard let fileURL else {
+                self.cancelLocalTranscriptionWarmup()
                 self.isTranscribing = false
                 self.audioRecorder.cleanup()
                 self.endCriticalDictationActivity()
@@ -2653,6 +2739,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             }
 
             guard self.isTranscribing else {
+                self.cancelLocalTranscriptionWarmup()
                 self.tearDownRealtimeService()
                 self.audioRecorder.cleanup()
                 self.refreshAvailableMicrophonesIfNeeded()
@@ -2693,6 +2780,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     activeRealtime?.cancel()
                 }
                 do {
+                    await self.finishLocalTranscriptionWarmupIfNeeded()
+                    try Task.checkCancellation()
                     let transcriptionService = try self.makeTranscriptionService()
                     async let transcript = Self.resolveRawTranscript(
                         realtimeService: activeRealtime,
@@ -2716,7 +2805,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         }
                     }
                     let appContext: AppContext
-                    if let sessionContext {
+                    if !self.localTranscriptionPolicy.allowsContextCapture {
+                        appContext = self.onDeviceContext()
+                    } else if let sessionContext {
                         appContext = sessionContext
                     } else if let inFlightContext = await inFlightContextTask?.value {
                         appContext = inFlightContext
@@ -2833,7 +2924,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     }
                 } catch {
                     let resolvedContext: AppContext
-                    if let sessionContext {
+                    if !self.localTranscriptionPolicy.allowsContextCapture {
+                        resolvedContext = self.onDeviceContext()
+                    } else if let sessionContext {
                         resolvedContext = sessionContext
                     } else if let inFlightContext = await inFlightContextTask?.value {
                         resolvedContext = inFlightContext
@@ -2927,6 +3020,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func startRealtimeStreamingIfEnabled() {
+        guard localTranscriptionPolicy.allowsRealtimeStreaming else { return }
         guard realtimeStreamingEnabled else { return }
         let trimmedBase = resolvedTranscriptionBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBase.isEmpty else {
@@ -2960,6 +3054,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func startContextCapture() {
+        guard localTranscriptionPolicy.allowsContextCapture else {
+            capturedContext = nil
+            contextCaptureTask = nil
+            lastContextSummary = "On-device transcription; app context is disabled."
+            lastContextScreenshotDataURL = nil
+            lastContextScreenshotStatus = "Disabled for on-device transcription"
+            lastContextAppName = ""
+            lastContextBundleIdentifier = ""
+            lastContextWindowTitle = ""
+            lastContextSelectedText = ""
+            lastContextLLMPrompt = ""
+            lastPostProcessingStatus = "Cloud processing disabled"
+            return
+        }
         contextCaptureTask?.cancel()
         capturedContext = nil
         lastContextSummary = "Collecting app context..."
@@ -3002,6 +3110,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
             screenshotDataURL: nil,
             screenshotMimeType: nil,
             screenshotError: "No app context captured before stop"
+        )
+    }
+
+    private func onDeviceContext() -> AppContext {
+        AppContext(
+            appName: nil,
+            bundleIdentifier: nil,
+            windowTitle: nil,
+            selectedText: nil,
+            currentActivity: "On-device transcription; app context is disabled.",
+            contextSystemPrompt: nil,
+            contextPrompt: nil,
+            screenshotDataURL: nil,
+            screenshotMimeType: nil,
+            screenshotError: "Disabled for on-device transcription"
         )
     }
 
@@ -3054,6 +3177,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func handleScreenshotCaptureIssue(_ message: String?) {
+        guard localTranscriptionPolicy.allowsContextCapture else { return }
         guard let message, !message.isEmpty else {
             hasShownScreenshotPermissionAlert = false
             return

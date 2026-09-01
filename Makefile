@@ -9,6 +9,18 @@ empty :=
 space := $(empty) $(empty)
 APP_EXECUTABLE = $(MACOS_DIR)/$(APP_NAME)
 APP_EXECUTABLE_TARGET := $(subst $(space),\ ,$(APP_EXECUTABLE))
+LOCAL_ASR_DIR = $(BUILD_DIR)/local-asr
+LOCAL_ASR_HELPER = $(LOCAL_ASR_DIR)/freeflow-local-asr
+LOCAL_ASR_LICENSES = \
+	$(LOCAL_ASR_DIR)/licenses/parakeet-coreml-swift-APACHE-2.0.txt \
+	$(LOCAL_ASR_DIR)/licenses/swift-argument-parser-APACHE-2.0.txt
+LOCAL_ASR_BUILD_STAMP = $(LOCAL_ASR_DIR)/.built
+LOCAL_ASR_CONFIG_STAMP = $(BUILD_DIR)/.include-local-asr
+INCLUDE_LOCAL_ASR ?= 0
+
+ifeq ($(INCLUDE_LOCAL_ASR),1)
+LOCAL_ASR_PREREQUISITES = $(LOCAL_ASR_BUILD_STAMP) Resources/LocalASR-Third-Party-Notices.txt
+endif
 
 SOURCES = $(shell find Sources -name '*.swift' -type f | LC_ALL=C sort)
 TEST_RUNNER = $(BUILD_DIR)/FreeFlowTests
@@ -17,6 +29,9 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/AppName.swift \
 	Sources/LLMAPITransport.swift \
 	Sources/LLMCooldownManager.swift \
+	Sources/LocalParakeetModelManager.swift \
+	Sources/LocalParakeetTranscriptionService.swift \
+	Sources/LocalTranscriptionPolicy.swift \
 	Sources/ModelConfiguration.swift \
 	Sources/TranscriptTextCore.swift \
 	Sources/UpdateManager.swift \
@@ -24,7 +39,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/ShortcutCore/ShortcutMatcher.swift \
 	Sources/ShortcutCore/ShortcutModels.swift
 TEST_SOURCES = $(shell find Tests -name '*.swift' -type f | LC_ALL=C sort)
-SHELL_SCRIPTS = $(shell find .github/scripts .agents/skills -name '*.sh' -type f | LC_ALL=C sort)
+SHELL_SCRIPTS = $(shell find .github/scripts .agents/skills scripts -name '*.sh' -type f | LC_ALL=C sort)
 YAML_FILES = $(shell find .github -type f \( -name '*.yml' -o -name '*.yaml' \) | LC_ALL=C sort)
 RESOURCES = $(CONTENTS)/Resources
 ARCH ?= $(shell uname -m)
@@ -40,11 +55,29 @@ ICON_SOURCE = Resources/AppIcon-Source.png
 ICON_ICNS = Resources/AppIcon.icns
 endif
 
-.PHONY: all check clean run icon dmg codesign-dmg notarize test typecheck validate
+.PHONY: all check clean run icon local-asr dmg codesign-dmg notarize test typecheck validate FORCE
 
 all: $(APP_EXECUTABLE_TARGET)
 
-$(APP_EXECUTABLE_TARGET): $(SOURCES) Info.plist $(ICON_ICNS)
+FORCE:
+
+$(LOCAL_ASR_CONFIG_STAMP): FORCE
+	@mkdir -p "$(BUILD_DIR)"
+	@printf '%s\n' '$(INCLUDE_LOCAL_ASR)' | cmp -s - "$@" || printf '%s\n' '$(INCLUDE_LOCAL_ASR)' > "$@"
+
+$(LOCAL_ASR_BUILD_STAMP): FORCE scripts/build-local-asr-helper.sh Resources/LocalASR-Package.resolved
+	@if [ ! -x "$(LOCAL_ASR_HELPER)" ] \
+		|| [ ! -f "$(word 1,$(LOCAL_ASR_LICENSES))" ] \
+		|| [ ! -f "$(word 2,$(LOCAL_ASR_LICENSES))" ] \
+		|| [ ! -f "$@" ] \
+		|| [ scripts/build-local-asr-helper.sh -nt "$@" ] \
+		|| [ Resources/LocalASR-Package.resolved -nt "$@" ]; then \
+		./scripts/build-local-asr-helper.sh "$(LOCAL_ASR_DIR)" && touch "$@"; \
+	fi
+
+local-asr: $(LOCAL_ASR_BUILD_STAMP)
+
+$(APP_EXECUTABLE_TARGET): $(SOURCES) Info.plist $(ICON_ICNS) $(LOCAL_ASR_CONFIG_STAMP) $(LOCAL_ASR_PREREQUISITES)
 	@mkdir -p "$(MACOS_DIR)" "$(RESOURCES)"
 ifeq ($(ARCH),universal)
 	swiftc \
@@ -80,6 +113,18 @@ endif
 	@plutil -replace NSMicrophoneUsageDescription -string "$(APP_NAME) needs microphone access to transcribe your speech." "$(CONTENTS)/Info.plist"
 	@plutil -replace NSSpeechRecognitionUsageDescription -string "$(APP_NAME) needs speech recognition to convert your voice to text." "$(CONTENTS)/Info.plist"
 	@plutil -replace NSAccessibilityUsageDescription -string "$(APP_NAME) needs accessibility access to detect the text cursor position and paste transcribed text." "$(CONTENTS)/Info.plist"
+ifeq ($(INCLUDE_LOCAL_ASR),1)
+	@cp "$(LOCAL_ASR_HELPER)" "$(MACOS_DIR)/freeflow-local-asr"
+	@mkdir -p "$(RESOURCES)/ThirdPartyLicenses"
+	@cp -f "$(LOCAL_ASR_DIR)/licenses/"* "$(RESOURCES)/ThirdPartyLicenses/"
+	@cp -f Resources/LocalASR-Third-Party-Notices.txt "$(RESOURCES)/ThirdPartyLicenses/"
+	@codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" "$(MACOS_DIR)/freeflow-local-asr"
+else
+	@rm -f "$(MACOS_DIR)/freeflow-local-asr" \
+		"$(RESOURCES)/ThirdPartyLicenses/LocalASR-Third-Party-Notices.txt" \
+		"$(RESOURCES)/ThirdPartyLicenses/parakeet-coreml-swift-APACHE-2.0.txt" \
+		"$(RESOURCES)/ThirdPartyLicenses/swift-argument-parser-APACHE-2.0.txt"
+endif
 	@codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" --entitlements FreeFlow.entitlements "$(APP_BUNDLE)"
 	@echo "Built $(APP_BUNDLE)"
 

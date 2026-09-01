@@ -56,7 +56,7 @@ struct MenuBarView: View {
 
             Divider()
 
-            if !appState.hasScreenRecordingPermission {
+            if appState.requiresScreenRecordingPermission && !appState.hasScreenRecordingPermission {
                 Button {
                     appState.requestScreenCapturePermission()
                 } label: {

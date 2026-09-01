@@ -720,6 +720,12 @@ struct GeneralSettingsView: View {
                 SettingsCard("Output Language", icon: "globe") {
                     outputLanguageSection
                 }
+                .disabled(appState.localTranscriptionEnabled)
+                .opacity(appState.localTranscriptionEnabled ? 0.55 : 1)
+                SettingsCard("On-Device Transcription", icon: "lock.shield.fill") {
+                    LocalTranscriptionSettingsView(modelManager: appState.localParakeetModelManager)
+                        .environmentObject(appState)
+                }
                 SettingsCard("Dictation Shortcuts", icon: "keyboard.fill") {
                     hotkeySection
                 }
@@ -732,9 +738,13 @@ struct GeneralSettingsView: View {
                 SettingsCard("Edit Mode", icon: "pencil") {
                     commandModeSection
                 }
+                .disabled(appState.localTranscriptionEnabled)
+                .opacity(appState.localTranscriptionEnabled ? 0.55 : 1)
                 SettingsCard("Cleanup", icon: "sparkles") {
                     cleanupSection
                 }
+                .disabled(appState.localTranscriptionEnabled)
+                .opacity(appState.localTranscriptionEnabled ? 0.55 : 1)
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
                     clipboardSection
                 }
@@ -747,6 +757,8 @@ struct GeneralSettingsView: View {
                 SettingsCard("Custom Vocabulary", icon: "text.book.closed.fill") {
                     vocabularySection
                 }
+                .disabled(appState.localTranscriptionEnabled)
+                .opacity(appState.localTranscriptionEnabled ? 0.55 : 1)
                 SettingsCard("Permissions", icon: "lock.shield.fill") {
                     permissionsSection
                 }
@@ -1444,14 +1456,16 @@ struct GeneralSettingsView: View {
                 }
             )
 
-            permissionRow(
-                title: "Screen Recording",
-                icon: "camera.viewfinder",
-                granted: appState.hasScreenRecordingPermission,
-                action: {
-                    appState.requestScreenCapturePermission()
-                }
-            )
+            if !appState.localTranscriptionEnabled {
+                permissionRow(
+                    title: "Screen Recording",
+                    icon: "camera.viewfinder",
+                    granted: appState.hasScreenRecordingPermission,
+                    action: {
+                        appState.requestScreenCapturePermission()
+                    }
+                )
+            }
         }
     }
 

@@ -107,7 +107,21 @@ struct SetupView: View {
     @StateObject private var testHotkeyHarness = SetupTestHotkeyHarness()
     @AppStorage("use_compact_overlay") private var useCompactOverlay = true
 
-    private let totalSteps: [SetupStep] = SetupStep.allCases
+    private var totalSteps: [SetupStep] {
+        guard appState.localTranscriptionEnabled else { return SetupStep.allCases }
+        return [
+            .welcome,
+            .micPermission,
+            .accessibility,
+            .holdShortcut,
+            .toggleShortcut,
+            .copyAgainShortcut,
+            .launchAtLogin,
+            .overlayStyle,
+            .testTranscription,
+            .ready,
+        ]
+    }
     private var isCapturingShortcut: Bool {
         isCapturingHoldShortcut || isCapturingToggleShortcut || isCapturingCopyAgainShortcut
     }
@@ -202,8 +216,10 @@ struct SetupView: View {
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             checkAccessibility()
-            Task {
-                await githubCache.fetchIfNeeded()
+            if !appState.localTranscriptionEnabled {
+                Task {
+                    await githubCache.fetchIfNeeded()
+                }
             }
         }
         .onDisappear {
@@ -275,11 +291,24 @@ struct SetupView: View {
                 Text("Welcome to \(AppName.displayName)")
                     .font(.system(size: 30, weight: .bold, design: .rounded))
 
-                Text("Dictate text anywhere on your Mac.\nHold to talk or tap to toggle dictation.")
+                Text(appState.localTranscriptionEnabled
+                    ? "Dictate privately with a model that runs entirely on this Mac.\nNo screenshots, cleanup model, or cloud transcription."
+                    : "Dictate text anywhere on your Mac.\nHold to talk or tap to toggle dictation.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            LocalTranscriptionSettingsView(
+                modelManager: appState.localParakeetModelManager,
+                compact: true
+            )
+            .environmentObject(appState)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.6))
+            )
 
             VStack(spacing: 10) {
                 HStack(spacing: 8) {
@@ -1087,12 +1116,20 @@ struct SetupView: View {
 
     private var canContinueFromCurrentStep: Bool {
         switch currentStep {
+        case .welcome:
+            if case .unavailable = appState.localParakeetModelManager.state {
+                return !appState.localTranscriptionEnabled
+            }
+            return !appState.localParakeetModelManager.state.isBusy
+                && (!appState.localTranscriptionEnabled
+                    || appState.localParakeetModelManager.store.isInstalled)
         case .micPermission:
             return micPermissionGranted
         case .accessibility:
             return accessibilityGranted
         case .screenRecording:
-            return appState.hasScreenRecordingPermission
+            return !appState.requiresScreenRecordingPermission
+                || appState.hasScreenRecordingPermission
         case .testTranscription:
             return testPhase == .done && !testTranscript.isEmpty && testError == nil
         default:
@@ -1165,13 +1202,13 @@ struct SetupView: View {
     }
 
     private func previousStep(_ step: SetupStep) -> SetupStep {
-        let previous = SetupStep(rawValue: step.rawValue - 1)
-        return previous ?? .welcome
+        guard let index = totalSteps.firstIndex(of: step), index > 0 else { return .welcome }
+        return totalSteps[index - 1]
     }
 
     private func nextStep(_ step: SetupStep) -> SetupStep {
-        let next = SetupStep(rawValue: step.rawValue + 1)
-        return next ?? .ready
+        guard let index = totalSteps.firstIndex(of: step), index + 1 < totalSteps.count else { return .ready }
+        return totalSteps[index + 1]
     }
 
     func checkMicPermission() {
