@@ -2184,6 +2184,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let id = UUID()
         liveTranscriptionSessions.insert(id)
         isTranscribing = true
+        overlayManager.setPendingTranscriptionCount(liveTranscriptionSessions.count)
         return id
     }
 
@@ -2195,6 +2196,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
         liveTranscriptionSessions.remove(id)
         transcriptionTasksBySession[id] = nil
         isTranscribing = !liveTranscriptionSessions.isEmpty
+        overlayManager.setPendingTranscriptionCount(liveTranscriptionSessions.count)
+        // An earlier transcript finishing must not take the overlay away from
+        // the ones still running behind it.
+        if isTranscribing {
+            overlayManager.showTranscribing()
+        }
+    }
+
+    /// Takes the overlay down only when nothing is still being transcribed.
+    private func dismissOverlayIfIdle() {
+        guard liveTranscriptionSessions.isEmpty else {
+            overlayManager.showTranscribing()
+            return
+        }
+        overlayManager.dismiss()
     }
 
     private func cancelAllTranscriptionSessions() {
@@ -2204,6 +2220,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         transcriptionTasksBySession.removeAll()
         liveTranscriptionSessions.removeAll()
         isTranscribing = false
+        overlayManager.setPendingTranscriptionCount(0)
     }
 
     private func beginCriticalDictationActivity() {
@@ -2629,7 +2646,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.endCriticalDictationActivity()
                 self.errorMessage = "No audio recorded"
                 self.statusText = "Error"
-                self.overlayManager.dismiss()
+                self.dismissOverlayIfIdle()
                 self.refreshAvailableMicrophonesIfNeeded()
                 return
             }
@@ -2773,7 +2790,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             self.statusText = shouldPressEnterAfterPaste ? enterOnlyStatusText : "Nothing to transcribe"
                             self.clearPendingOverlayDismissToken()
                             if !self.showPostTranscriptionUpdateReminderIfNeeded() {
-                                self.overlayManager.dismiss()
+                                self.dismissOverlayIfIdle()
                             }
                             if shouldPressEnterAfterPaste {
                                 self.pressEnterWhenShortcutReleased()
@@ -2785,7 +2802,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             } else {
                                 self.clearPendingOverlayDismissToken()
                                 if !self.showPostTranscriptionUpdateReminderIfNeeded() {
-                                    self.overlayManager.dismiss()
+                                    self.dismissOverlayIfIdle()
                                 }
                             }
 
@@ -2845,7 +2862,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.errorMessage = error.localizedDescription
                         self.endCriticalDictationActivity()
                         self.statusText = "Error"
-                        self.overlayManager.dismiss()
+                        self.dismissOverlayIfIdle()
                         self.lastPostProcessedTranscript = ""
                         self.lastRawTranscript = ""
                         self.lastContextSummary = ""
@@ -3199,7 +3216,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         DispatchQueue.main.asyncAfter(deadline: .now() + postTranscriptionUpdateReminderDuration) { [weak self] in
             guard let self, self.pendingOverlayDismissToken == dismissToken else { return }
             self.pendingOverlayDismissToken = nil
-            self.overlayManager.dismiss()
+            self.dismissOverlayIfIdle()
         }
 
         return true
@@ -3219,7 +3236,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         DispatchQueue.main.asyncAfter(deadline: .now() + postTranscriptionUpdateReminderDuration) { [weak self] in
             guard let self, self.pendingOverlayDismissToken == dismissToken else { return }
             self.pendingOverlayDismissToken = nil
-            self.overlayManager.dismiss()
+            self.dismissOverlayIfIdle()
         }
     }
 
@@ -3244,7 +3261,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, self.pendingOverlayDismissToken == dismissToken else { return }
             self.pendingOverlayDismissToken = nil
-            self.overlayManager.dismiss()
+            self.dismissOverlayIfIdle()
         }
     }
 

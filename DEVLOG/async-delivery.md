@@ -123,6 +123,39 @@ which is why short test recordings produce 0-byte
 `prefetch_transcript_*.txt` files. Not waiting for any of it is the entire
 point of this fork.
 
+## Field results, 2026-09-02
+
+Works: Claude Code, pi, Brave, and across windows and apps, including
+continuing to type elsewhere while it delivers. Does not work: Tana, Paseo,
+and a bare shell prompt in Terminal, where the text simply disappears.
+
+Three changes came out of that session:
+
+- **Exact caret, not just the window.** `DeliveryTarget` now also pins
+  `kAXSelectedTextRange`, and the insert restores that range before writing.
+  Continuing to work at a different spot in the same document no longer sends
+  the transcript to wherever the caret happens to be.
+- **Verified writes.** An AX write into Chromium or Electron can return
+  `.success` while the text never reaches the editable surface, which is
+  precisely how a transcript vanishes in Tana. The insert now reads
+  `kAXNumberOfCharacters`, falling back to `kAXValue`, before and after, and
+  treats "no growth" as failure so the ladder falls through to the keystroke
+  tier. Elements exposing neither attribute are accepted unverified.
+- **The overlay outlives one session.** `dismissOverlayIfIdle()` only takes the
+  overlay down when no transcriptions remain, and
+  `pendingTranscriptionCount` drives a count badge to the left of the
+  processing bars, so a queue of several is legible.
+
+## Signing
+
+The bundle is signed with a stable self-signed identity, "FreeFlow Local
+Signing", created 2026-09-02 and trusted for code signing in the login
+keychain. Ad-hoc signing gave the bundle a new code identity on every rebuild,
+which made macOS silently invalidate the Accessibility grant while still
+showing the toggle as enabled; `tccutil reset Accessibility <bundle-id>` is the
+cure when that happens. Build with
+`SIGN_IDENTITY="FreeFlow Local Signing"` to keep the grant across rebuilds.
+
 ## Primary target: Paseo
 
 `@getpaseo/cli` 0.7.0, "control your AI coding agents from the command line",

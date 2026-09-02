@@ -11,6 +11,10 @@ final class RecordingOverlayState: ObservableObject {
     @Published var updateVersion: String = ""
     @Published var errorMessage: String?
     @Published var toastID: UUID?
+    /// How many transcriptions are still running. The overlay stays up until
+    /// this reaches zero, so a second dictation started while the first is
+    /// still transcribing does not leave you guessing.
+    @Published var pendingTranscriptionCount: Int = 0
 }
 
 enum OverlayPhase {
@@ -176,6 +180,14 @@ final class RecordingOverlayManager {
     func showTranscribing() {
         DispatchQueue.main.async {
             self.setTranscribingPhase()
+        }
+    }
+
+    /// Number of transcriptions still in flight, shown beside the processing
+    /// bars.
+    func setPendingTranscriptionCount(_ count: Int) {
+        DispatchQueue.main.async {
+            self.overlayState.pendingTranscriptionCount = max(0, count)
         }
     }
 
@@ -510,7 +522,9 @@ struct WingedRecordingView: View {
                         }
                         .transition(.opacity)
                     } else {
-                        CompactProcessingIndicatorView()
+                        CompactProcessingIndicatorView(
+                            pendingCount: state.pendingTranscriptionCount
+                        )
                             .transition(.opacity)
                     }
                 }
@@ -737,6 +751,28 @@ struct ProcessingWaveformView: View {
     }
 }
 
+/// The count of transcriptions still running, sitting to the left of the
+/// processing bars. Hidden when nothing is in flight.
+struct PendingTranscriptionBadge: View {
+    let count: Int
+
+    var body: some View {
+        if count > 0 {
+            Text("\(count)")
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(
+                    Capsule().fill(Color.white.opacity(0.22))
+                )
+                .transition(.opacity)
+                .accessibilityLabel("\(count) transcriptions still running")
+        }
+    }
+}
+
 private struct ProcessingPill: View {
     let amplitude: CGFloat
     let opacity: CGFloat
@@ -753,10 +789,18 @@ private struct ProcessingPill: View {
 }
 
 struct ProcessingIndicatorView: View {
+    var pendingCount: Int = 0
     @State private var showsExtendedSpinner = false
     @State private var rotation: Double = 0
 
     var body: some View {
+        HStack(spacing: 6) {
+            PendingTranscriptionBadge(count: pendingCount)
+            indicator
+        }
+    }
+
+    private var indicator: some View {
         ZStack {
             if showsExtendedSpinner {
                 Circle()
@@ -796,10 +840,18 @@ struct ProcessingIndicatorView: View {
 /// spinner so the indicator stays inside the wing without the jolt to
 /// oversized capsules that the full-size indicator produced.
 struct CompactProcessingIndicatorView: View {
+    var pendingCount: Int = 0
     @State private var showsExtendedSpinner = false
     @State private var rotation: Double = 0
 
     var body: some View {
+        HStack(spacing: 4) {
+            PendingTranscriptionBadge(count: pendingCount)
+            indicator
+        }
+    }
+
+    private var indicator: some View {
         ZStack {
             if showsExtendedSpinner {
                 Circle()
@@ -957,7 +1009,9 @@ struct RecordingOverlayView: View {
                             )
                                 .transition(.opacity)
                         } else {
-                            ProcessingIndicatorView()
+                            ProcessingIndicatorView(
+                                pendingCount: state.pendingTranscriptionCount
+                            )
                                 .transition(.opacity)
                         }
                     }

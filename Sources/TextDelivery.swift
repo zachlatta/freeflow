@@ -18,6 +18,10 @@ struct DeliveryTarget {
     /// not "whatever is focused now".
     let focusedElement: AXUIElement?
     let elementRole: String?
+    /// Where the caret sat inside that element, so delivery lands on the exact
+    /// spot rather than wherever the caret has since wandered within the same
+    /// document.
+    let selectedRange: AXValue?
     let capturedAt: Date
 
     var describedApp: String {
@@ -99,6 +103,7 @@ final class TextDeliveryService {
         AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         let focused = Self.copyElement(appElement, kAXFocusedUIElementAttribute as CFString)
         let role = focused.flatMap { Self.copyString($0, kAXRoleAttribute as CFString) }
+        let range = focused.flatMap { Self.copyAXValue($0, kAXSelectedTextRangeAttribute as CFString) }
 
         return DeliveryTarget(
             sessionID: sessionID,
@@ -107,6 +112,7 @@ final class TextDeliveryService {
             appName: app.localizedName,
             focusedElement: focused,
             elementRole: role,
+            selectedRange: range,
             capturedAt: Date()
         )
     }
@@ -275,6 +281,20 @@ final class TextDeliveryService {
             return .failure("selected text not settable (\(Self.describe(settableStatus)))")
         }
 
+        // Put the caret back where it was before writing, so continuing to
+        // work elsewhere in the same document does not move the insertion
+        // point. Best effort: an element that refuses the range still gets the
+        // text at its current caret.
+        if let selectedRange = target.selectedRange {
+            AXUIElementSetAttributeValue(
+                element,
+                kAXSelectedTextRangeAttribute as CFString,
+                selectedRange
+            )
+        }
+
+        let lengthBefore = Self.textLength(of: element)
+
         let setStatus = AXUIElementSetAttributeValue(
             element,
             kAXSelectedTextAttribute as CFString,
@@ -284,7 +304,44 @@ final class TextDeliveryService {
             return .failure("set failed (\(Self.describe(setStatus)))")
         }
 
+        // Chromium and Electron accept the write and report success while the
+        // text never reaches the editable surface, which is how a transcript
+        // silently vanishes. Only call it delivered if the element grew.
+        if let lengthBefore, let lengthAfter = Self.textLength(of: element) {
+            guard lengthAfter > lengthBefore else {
+                return .failure("set reported success but the text did not land")
+            }
+        }
+
         return .success
+    }
+
+    /// Character count of an element's text, when it exposes one. Nil means
+    /// the element gives no way to tell, in which case a write cannot be
+    /// verified either way.
+    private static func textLength(of element: AXUIElement) -> Int? {
+        var value: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXNumberOfCharactersAttribute as CFString, &value) == .success,
+           let number = value as? Int {
+            return number
+        }
+        value = nil
+        if AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
+           let string = value as? String {
+            return string.count
+        }
+        return nil
+    }
+
+    static func copyAXValue(_ element: AXUIElement, _ attribute: CFString) -> AXValue? {
+        var value: CFTypeRef?
+        let status = AXUIElementCopyAttributeValue(element, attribute, &value)
+        guard status == .success,
+              let raw = value,
+              CFGetTypeID(raw) == AXValueGetTypeID() else {
+            return nil
+        }
+        return unsafeBitCast(raw, to: AXValue.self)
     }
 
     // MARK: - Tier 2: key events to a process
