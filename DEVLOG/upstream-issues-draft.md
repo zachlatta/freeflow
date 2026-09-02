@@ -1,10 +1,26 @@
-# Draft issues for zachlatta/freeflow
+# Issues filed on zachlatta/freeflow
 
-Not posted. Each one is written as "here is a working implementation, take it or
-argue with it", with the branch as reference, rather than a feature request.
+Filed 2026-09-02 23:21. Branch pushed to
+`https://github.com/JaPossert/freeflow/tree/feat/async-target-paste` first so
+every issue can cite real code.
 
-Reference branch: `feat/async-target-paste` in the fork. Push it to
-`JaPossert/freeflow` first so the links resolve, then file these.
+| # | Issue |
+|---|---|
+| [308](https://github.com/zachlatta/freeflow/issues/308) | Caret-exact insertion is impossible inside terminals (unresolved, with findings) |
+| [309](https://github.com/zachlatta/freeflow/issues/309) | Deliver the transcript back to the element it was dictated into, without stealing focus |
+| [310](https://github.com/zachlatta/freeflow/issues/310) | Overlapping dictations: isTranscribing is single-flight |
+| [311](https://github.com/zachlatta/freeflow/issues/311) | Electron and Chromium: Accessibility writes report success and silently swallow the text |
+| [312](https://github.com/zachlatta/freeflow/issues/312) | Recording overlay disappears while other transcriptions are still running |
+| [313](https://github.com/zachlatta/freeflow/issues/313) | Recording overlay does not show input loudness |
+| [314](https://github.com/zachlatta/freeflow/issues/314) | First toggle-stop press is swallowed after a menu-bar start |
+
+Prior contributions upstream, for context: PR #250 merged (notification banner
+instead of a URLSession timeout), PR #252 open (background HTTP
+pre-transcription while recording). Related existing issue: #237, Edit Mode
+falling back to dictation in Electron and Chromium, which #311 explains the
+mechanism for.
+
+The drafts below are what was filed.
 
 ---
 
