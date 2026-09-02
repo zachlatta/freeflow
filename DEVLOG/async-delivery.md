@@ -161,6 +161,39 @@ through the cases below and note which tier each app resolves to.
 
 Record which tier each app resolves to; that table is the real deliverable.
 
+## First test run, 2026-09-02: recordings vanished at the transcribe step
+
+Symptom: pressing the toggle shortcut a second time made the recording
+disappear instead of producing text. Not the shortcut or the session refactor.
+The run log told the whole story:
+
+```
+1  13:10:40  com.zachlatta.freeflow.dev.async  Error: Submission failed: Endpoint not found at localhost (HTTP 404).
+2  13:10:42  com.apple.Terminal                Error: Submission failed: Endpoint not found at localhost (HTTP 404).
+3  13:11:50  com.apple.Terminal                Error: Submission failed: Endpoint not found at localhost (HTTP 404).
+4  13:12:18  com.apple.Terminal                Error: Submission failed: Endpoint not found at localhost (HTTP 404).
+```
+
+Four sessions reached "Transcribing audio" with audio files on disk, so
+recording, stop and session bookkeeping all worked. The transcription POST went
+to the wrong host.
+
+Cause: settings do not live in `UserDefaults`. `AppSettingsStorage`
+(`Sources/KeychainStorage.swift`) keeps them in a plain JSON file at
+`~/Library/Application Support/<CFBundleName>/.settings`, keyed by account, and
+`AppName.displayName` is the bundle name — so a differently *named* app gets a
+different settings file, and the new bundle started empty. Its
+`transcription_api_url` was unset, so `resolvedTranscriptionBaseURL` fell back
+to `api_base_url`, which is Ollama on :11434, which 404s on the transcription
+path.
+
+The local stack was healthy throughout: `~/qwen3_asr_rs/proxy.py` on
+127.0.0.1:8001 forwarding to `asr-serve` on 127.0.0.1:8000, which answers 200.
+
+Fix: copy `~/Library/Application Support/FreeFlow Dev/.settings` over the
+async app's copy (old one kept as a timestamped `.bak`), then relaunch. Note
+for any future side-by-side build: copy that file, not the `defaults` domain.
+
 ## Merge hazard
 
 This branch is based on `a8d2334` and therefore does **not** contain main's
