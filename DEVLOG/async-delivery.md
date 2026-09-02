@@ -97,6 +97,18 @@ starting a second dictation cancelled the first. Replaced with:
 - **Last resort: bring the app forward and paste** — default off. This is the
   old behaviour; turning it on reintroduces the focus steal.
 
+## Primary target: Paseo
+
+`@getpaseo/cli` 0.7.0, "control your AI coding agents from the command line",
+installed at `~/.npm-global/bin/paseo`, running as a Paseo Supervisor plus a
+Paseo Daemon that listens on 127.0.0.1:6767 and 127.0.0.1:51021. The daemon
+answers `/` with 404 and no content type, so it is an API/WebSocket endpoint,
+not a web UI. Paseo's interface is therefore the CLI itself, which means the
+delivery target is **Apple Terminal** (`com.apple.Terminal`), already in
+`isTerminalLike`, so it resolves to tier 2 (`pid-keystroke`) and skips the AX
+tier by design. If Apple Terminal turns out to drop background key events,
+Paseo has no no-focus-steal path and the honest fallback is clipboard + Cmd-V.
+
 ## Build and install
 
 ```
@@ -104,11 +116,21 @@ cd /Users/personal/Documents/code/other/freeflow-fork-wt-async
 make ARCH=arm64
 ```
 
-Install over the existing dev app (same bundle id, so it replaces it):
+Install **alongside** the existing dev app, as its own bundle:
 
 ```
-make install
+make ARCH=arm64 APP_NAME="FreeFlow Dev Async" BUNDLE_ID="com.zachlatta.freeflow.dev.async" install
 ```
+
+That is what is installed now, at `~/Applications/FreeFlow Dev Async.app`. It
+carries the release icon rather than the hammer dev icon, so the two are
+distinguishable in the menu bar. `FreeFlow Dev.app` is untouched.
+
+Because the bundle id is new, macOS treats it as a different app: it needs its
+own Accessibility and Microphone grants, and it starts from its own settings
+domain. `hasCompletedSetup` and `updateAutoCheckEnabled` were carried over with
+`defaults export | defaults import`; anything held in the Keychain was not, so
+the API key may need entering once.
 
 ⚠️ The bundle is ad-hoc signed, so a rebuild changes its cdhash and macOS may
 ask to re-grant Accessibility. Grant it before testing, otherwise every tier
@@ -116,7 +138,10 @@ silently degrades to clipboard.
 
 ## Test procedure (needs a person at the machine)
 
-Not yet run — the screen was locked when the branch was built.
+Not yet run. Order of operations: launch `FreeFlow Dev Async`, grant
+Accessibility and Microphone when asked, set a shortcut that does not collide
+with `FreeFlow Dev` (or keep `FreeFlow Dev` quit while testing), then work
+through the cases below and note which tier each app resolves to.
 
 1. **Same-app, no switch.** Dictate into TextEdit, release, stay put. Text
    should appear at the caret. Settings should show `ax-insert`.
@@ -124,7 +149,7 @@ Not yet run — the screen was locked when the branch was built.
    another app. Text must appear in TextEdit, and the front app must not change.
 3. **Switch Desktop.** Dictate into TextEdit, release, switch Space. Same
    result, and no Space switch.
-4. **Terminal.** Dictate into a Claude Code prompt in Terminal, release, switch
+4. **Terminal / Paseo.** Dictate into a Paseo or Claude Code prompt in Terminal, release, switch
    away. Expect `pid-keystroke`. If the diagnostics line says
    `pid-keystroke posted` but nothing appeared, tier 2 does not work for Apple
    Terminal and the honest answer for terminals is clipboard + Cmd-V.
