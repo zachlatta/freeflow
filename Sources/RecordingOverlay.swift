@@ -515,10 +515,13 @@ struct WingedRecordingView: View {
                                     .foregroundStyle(.white.opacity(0.92))
                                     .transition(.opacity)
                             }
-                            CompactWaveformView(
-                                audioLevel: state.audioLevel,
-                                showsActivityPulse: state.phase == .recording
-                            )
+                            HStack(spacing: 4) {
+                                PendingTranscriptionBadge(count: state.pendingTranscriptionCount)
+                                CompactWaveformView(
+                                    audioLevel: state.audioLevel,
+                                    showsActivityPulse: state.phase == .recording
+                                )
+                            }
                         }
                         .transition(.opacity)
                     } else {
@@ -1005,10 +1008,13 @@ struct RecordingOverlayView: View {
                             InitializingDotsView()
                                 .transition(.opacity)
                         } else if showsLiveRecordingContent {
-                            WaveformView(
-                                audioLevel: state.audioLevel,
-                                showsActivityPulse: state.phase == .recording
-                            )
+                            HStack(spacing: 6) {
+                                PendingTranscriptionBadge(count: state.pendingTranscriptionCount)
+                                WaveformView(
+                                    audioLevel: state.audioLevel,
+                                    showsActivityPulse: state.phase == .recording
+                                )
+                            }
                                 .transition(.opacity)
                         } else {
                             ProcessingIndicatorView(

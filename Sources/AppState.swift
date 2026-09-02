@@ -1818,6 +1818,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         capturedContext = nil
         currentSessionIntent = .dictation
         isRecording = false
+        refreshPendingSessionCount()
         errorMessage = nil
         debugStatusMessage = "Cancelled"
         statusText = "Cancelled"
@@ -2184,7 +2185,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let id = UUID()
         liveTranscriptionSessions.insert(id)
         isTranscribing = true
-        overlayManager.setPendingTranscriptionCount(liveTranscriptionSessions.count)
+        refreshPendingSessionCount()
         return id
     }
 
@@ -2196,12 +2197,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
         liveTranscriptionSessions.remove(id)
         transcriptionTasksBySession[id] = nil
         isTranscribing = !liveTranscriptionSessions.isEmpty
-        overlayManager.setPendingTranscriptionCount(liveTranscriptionSessions.count)
+        refreshPendingSessionCount()
         // An earlier transcript finishing must not take the overlay away from
         // the ones still running behind it.
         if isTranscribing {
             overlayManager.showTranscribing()
         }
+    }
+
+    /// How many dictations are in flight at once: every transcription still
+    /// running, plus the one being recorded right now. That is the number that
+    /// matters while speaking a second one over the top of the first.
+    private func refreshPendingSessionCount() {
+        let inFlight = liveTranscriptionSessions.count + (isRecording ? 1 : 0)
+        overlayManager.setPendingTranscriptionCount(inFlight)
     }
 
     /// Takes the overlay down only when nothing is still being transcribed.
@@ -2220,7 +2229,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         transcriptionTasksBySession.removeAll()
         liveTranscriptionSessions.removeAll()
         isTranscribing = false
-        overlayManager.setPendingTranscriptionCount(0)
+        refreshPendingSessionCount()
     }
 
     private func beginCriticalDictationActivity() {
@@ -2242,6 +2251,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         errorMessage = nil
 
         isRecording = true
+        refreshPendingSessionCount()
         statusText = "Starting..."
         hasShownScreenshotPermissionAlert = false
 

@@ -193,7 +193,7 @@ final class TextDeliveryService {
             attempts.append("ax-insert unverified: \(reason)")
             // The host lied about the write, so treat it as Chromium-like even
             // if its bundle id is not on the list.
-            if postCommandV(toProcess: target.processIdentifier) {
+            if canPasteInBackground(target), postCommandV(toProcess: target.processIdentifier) {
                 attempts.append("pid-paste posted (unverified ax host)")
                 completion(DeliveryOutcome(
                     tier: .processPaste,
@@ -207,7 +207,9 @@ final class TextDeliveryService {
         }
 
         // Chromium and Electron mangle injected unicode, so paste first.
-        if chromiumLike, postCommandV(toProcess: target.processIdentifier) {
+        if chromiumLike, !canPasteInBackground(target) {
+            attempts.append("pid-paste skipped: \(describedApp) is not frontmost and ignores background keys")
+        } else if chromiumLike, postCommandV(toProcess: target.processIdentifier) {
             attempts.append("pid-paste posted (chromium-like target)")
             completion(DeliveryOutcome(
                 tier: .processPaste,
@@ -238,7 +240,7 @@ final class TextDeliveryService {
         // Paste addressed to the process. No activation, and unlike unicode
         // injection it survives apps that read the virtual key code rather
         // than the attached characters.
-        if postCommandV(toProcess: target.processIdentifier) {
+        if canPasteInBackground(target), postCommandV(toProcess: target.processIdentifier) {
             attempts.append("pid-paste posted")
             completion(DeliveryOutcome(
                 tier: .processPaste,
@@ -478,6 +480,15 @@ final class TextDeliveryService {
         case .clipboardOnly:
             break
         }
+    }
+
+    /// Chromium only handles key events while it is the active application, so
+    /// a paste addressed to a backgrounded one is swallowed without a trace.
+    /// Better to say the text is on the clipboard than to claim a delivery that
+    /// did not happen.
+    private func canPasteInBackground(_ target: DeliveryTarget) -> Bool {
+        guard Self.isChromiumLike(target) else { return true }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier
     }
 
     /// Sends Cmd-V to one process without bringing it forward. The transcript
