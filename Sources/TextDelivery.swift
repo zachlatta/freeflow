@@ -94,6 +94,9 @@ final class TextDeliveryService {
         guard let app else { return nil }
 
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        // Chromium and Electron keep their accessibility tree switched off
+        // until something asks for it. Harmless everywhere else.
+        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
         let focused = Self.copyElement(appElement, kAXFocusedUIElementAttribute as CFString)
         let role = focused.flatMap { Self.copyString($0, kAXRoleAttribute as CFString) }
 
