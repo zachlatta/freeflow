@@ -3295,6 +3295,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     self.releaseClipboardSnapshotHold()
                 case .clipboardOnly:
                     self.releaseClipboardSnapshotHold()
+                    self.showClipboardWaitingPanel(outcome: outcome, transcript: text)
                 }
             }
             if Thread.isMainThread {
@@ -3591,6 +3592,48 @@ final class AppState: ObservableObject, @unchecked Sendable {
         panel.center()
         panel.orderFront(nil)
         transcriptionAlertPanel = panel
+    }
+
+    private weak var clipboardWaitingPanel: NSPanel?
+
+    /// Same presentation as the "still transcribing" panel: floating,
+    /// non-activating, visible on whichever Space the user is on now.
+    private func showClipboardWaitingPanel(outcome: DeliveryOutcome, transcript: String) {
+        dismissClipboardWaitingPanelIfShowing()
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 1),
+            styleMask: [.titled, .closable, .nonactivatingPanel, .utilityWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Transcript on the clipboard"
+        panel.level = .floating
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        let preview = transcript.count > 240
+            ? String(transcript.prefix(240)) + "..."
+            : transcript
+
+        let hostingView = NSHostingView(rootView: ClipboardWaitingPanel(
+            targetDescription: outcome.target,
+            reason: outcome.attempts.last,
+            transcriptPreview: preview,
+            onDismiss: { [weak panel] in panel?.orderOut(nil) }
+        ))
+        hostingView.frame = NSRect(x: 0, y: 0, width: 440, height: hostingView.fittingSize.height)
+        panel.contentView = hostingView
+        panel.setContentSize(hostingView.fittingSize)
+        panel.center()
+        panel.orderFront(nil)
+        clipboardWaitingPanel = panel
+    }
+
+    private func dismissClipboardWaitingPanelIfShowing() {
+        clipboardWaitingPanel?.orderOut(nil)
+        clipboardWaitingPanel = nil
     }
 
     private func dismissTranscriptionAlertPanelIfShowing() {

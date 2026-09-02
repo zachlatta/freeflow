@@ -34,7 +34,7 @@ live `AXUIElement` that had keyboard focus. Delivery then tries, in order:
 | 1 `ax-insert` | `AXUIElementSetAttributeValue(el, kAXSelectedText, text)` on the pinned element | none | native Cocoa apps; Electron only when it accepts the write |
 | 2 `pid-keystroke` | `CGEvent.postToPid()` with `keyboardSetUnicodeString`, chunked to 16 UTF-16 units | none | terminals and anything that refuses AX writes but processes background key events |
 | 3 `activate-paste` | `activate()` + poll frontmost + Cmd-V | yes | last resort, **off by default** |
-| 4 `clipboard` | text stays on the clipboard, status line says so | none | always |
+| 4 `clipboard` | text stays on the clipboard, floating panel says so | none | always |
 
 Every attempt is recorded. `lastDeliveryDiagnostics` shows the whole ladder for
 the last transcript in Settings → Clipboard, so a failure says *why* it went
@@ -96,6 +96,32 @@ starting a second dictation cancelled the first. Replaced with:
 - **Send keystrokes to background apps** — default on. Needed for terminals.
 - **Last resort: bring the app forward and paste** — default off. This is the
   old behaviour; turning it on reintroduces the focus steal.
+
+### The clipboard tier announces itself
+
+Tier 4 raises `ClipboardWaitingPanel`, built to the same pattern as the
+"still transcribing" panel: an `NSPanel` with `.nonactivatingPanel`, floating
+level, `canJoinAllSpaces`, ordered front without activating. It appears on
+whichever Space you are on, takes no focus, names the app the text could not
+reach, shows the first 240 characters waiting on the clipboard, and gives the
+reason from the last rung of the ladder.
+
+## How slow is transcription, really
+
+Measured 2026-09-02 by posting saved recordings straight at the proxy, so the
+app is out of the picture:
+
+| audio | wall clock | ratio |
+|-------|-----------|-------|
+| 73.9 s | 44.7 s | 0.61x realtime |
+| 133.1 s | 26.5 s | 0.20x realtime |
+
+The first call carries model warm-up. So a 30-second dictation costs roughly
+10 to 25 seconds after you stop, and that cost is `asr-serve`, not FreeFlow.
+Prefetch only helps past 28 seconds of audio, because that is the chunk size,
+which is why short test recordings produce 0-byte
+`prefetch_transcript_*.txt` files. Not waiting for any of it is the entire
+point of this fork.
 
 ## Primary target: Paseo
 
