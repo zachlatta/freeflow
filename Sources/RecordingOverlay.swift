@@ -15,6 +15,11 @@ final class RecordingOverlayState: ObservableObject {
     /// this reaches zero, so a second dictation started while the first is
     /// still transcribing does not leave you guessing.
     @Published var pendingTranscriptionCount: Int = 0
+    /// Recent input levels, newest last, so the overlay can show loudness over
+    /// time rather than a level-independent animation.
+    @Published var levelHistory: [Float] = []
+    /// Draw the scrolling loudness meter instead of the decorative waveform.
+    @Published var showsLoudnessMeter = true
 }
 
 enum OverlayPhase {
@@ -144,6 +149,7 @@ final class RecordingOverlayManager {
     }
 
     func showRecording(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
+        DispatchQueue.main.async { self.clearLevelHistory() }
         DispatchQueue.main.async {
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
@@ -171,10 +177,28 @@ final class RecordingOverlayManager {
         }
     }
 
+    private static let levelHistoryLength = 40
+
     func updateAudioLevel(_ level: Float) {
         DispatchQueue.main.async {
             self.overlayState.audioLevel = level
+            var history = self.overlayState.levelHistory
+            history.append(level)
+            if history.count > Self.levelHistoryLength {
+                history.removeFirst(history.count - Self.levelHistoryLength)
+            }
+            self.overlayState.levelHistory = history
         }
+    }
+
+    func setShowsLoudnessMeter(_ enabled: Bool) {
+        DispatchQueue.main.async {
+            self.overlayState.showsLoudnessMeter = enabled
+        }
+    }
+
+    private func clearLevelHistory() {
+        overlayState.levelHistory = []
     }
 
     func showTranscribing() {
@@ -517,10 +541,20 @@ struct WingedRecordingView: View {
                             }
                             HStack(spacing: 4) {
                                 PendingTranscriptionBadge(count: state.pendingTranscriptionCount)
-                                CompactWaveformView(
-                                    audioLevel: state.audioLevel,
-                                    showsActivityPulse: state.phase == .recording
-                                )
+                                if state.showsLoudnessMeter {
+                                    LoudnessMeterView(
+                                        levels: state.levelHistory,
+                                        barCount: 7,
+                                        height: 14,
+                                        barWidth: 2,
+                                        spacing: 2
+                                    )
+                                } else {
+                                    CompactWaveformView(
+                                        audioLevel: state.audioLevel,
+                                        showsActivityPulse: state.phase == .recording
+                                    )
+                                }
                             }
                         }
                         .transition(.opacity)
@@ -1010,10 +1044,14 @@ struct RecordingOverlayView: View {
                         } else if showsLiveRecordingContent {
                             HStack(spacing: 6) {
                                 PendingTranscriptionBadge(count: state.pendingTranscriptionCount)
-                                WaveformView(
-                                    audioLevel: state.audioLevel,
-                                    showsActivityPulse: state.phase == .recording
-                                )
+                                if state.showsLoudnessMeter {
+                                    LoudnessMeterView(levels: state.levelHistory)
+                                } else {
+                                    WaveformView(
+                                        audioLevel: state.audioLevel,
+                                        showsActivityPulse: state.phase == .recording
+                                    )
+                                }
                             }
                                 .transition(.opacity)
                         } else {

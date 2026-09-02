@@ -1229,6 +1229,15 @@ struct GeneralSettingsView: View {
 
     private var asyncDeliverySection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Toggle("Show loudness while recording", isOn: $appState.loudnessMeterEnabled)
+
+            Text("Draws a scrolling level meter instead of the decorative waveform, so you can see mid-sentence whether the microphone is actually picking you up.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+                .padding(.vertical, 2)
+
             Toggle("Deliver back to where you were dictating", isOn: $appState.asyncDeliveryEnabled)
 
             Text("The transcript goes to the text field you were writing in when you stopped, even if you have since switched app, window or Desktop. Your focus stays where it is.")

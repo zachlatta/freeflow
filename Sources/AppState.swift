@@ -582,6 +582,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         didSet { UserDefaults.standard.set(overlappingDictationEnabled, forKey: "overlapping_dictation_enabled") }
     }
 
+    /// Show a scrolling loudness meter while recording instead of the
+    /// decorative waveform, so it is obvious mid-sentence that the microphone
+    /// is actually picking you up.
+    @Published var loudnessMeterEnabled: Bool = UserDefaults.standard.object(forKey: "loudness_meter_enabled") == nil
+        ? true
+        : UserDefaults.standard.bool(forKey: "loudness_meter_enabled") {
+        didSet {
+            UserDefaults.standard.set(loudnessMeterEnabled, forKey: "loudness_meter_enabled")
+            overlayManager.setShowsLoudnessMeter(loudnessMeterEnabled)
+        }
+    }
+
     /// Deliver transcripts back to the pinned element instead of pasting into
     /// whatever happens to be focused when the text is ready.
     @Published var asyncDeliveryEnabled: Bool = UserDefaults.standard.object(forKey: "async_delivery_enabled") == nil
@@ -2251,6 +2263,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         errorMessage = nil
 
         isRecording = true
+        overlayManager.setShowsLoudnessMeter(loudnessMeterEnabled)
         refreshPendingSessionCount()
         statusText = "Starting..."
         hasShownScreenshotPermissionAlert = false
