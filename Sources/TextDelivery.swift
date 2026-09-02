@@ -189,6 +189,21 @@ final class TextDeliveryService {
             return true
         case .failure(let reason):
             attempts.append("ax-insert failed: \(reason)")
+        case .unverified(let reason):
+            attempts.append("ax-insert unverified: \(reason)")
+            // The host lied about the write, so treat it as Chromium-like even
+            // if its bundle id is not on the list.
+            if postCommandV(toProcess: target.processIdentifier) {
+                attempts.append("pid-paste posted (unverified ax host)")
+                completion(DeliveryOutcome(
+                    tier: .processPaste,
+                    succeeded: true,
+                    target: describedApp,
+                    attempts: attempts
+                ))
+                return true
+            }
+            attempts.append("pid-paste could not be posted")
         }
 
         // Chromium and Electron mangle injected unicode, so paste first.
@@ -282,7 +297,8 @@ final class TextDeliveryService {
             "notion.id",
             "com.spotify.client",
             "com.electron.logseq",
-            "com.logseq.logseq"
+            "com.logseq.logseq",
+            "com.anthropic.claudefordesktop"
         ]
         if let bundle = target.bundleIdentifier, chromiumBundles.contains(bundle) {
             return true
@@ -316,6 +332,11 @@ final class TextDeliveryService {
     private enum InsertResult {
         case success
         case failure(String)
+        /// The write returned success and the element did not grow. Only a
+        /// Chromium-style host does that, so paste rather than inject unicode:
+        /// such a host reads a synthesised event by its virtual key code and
+        /// turns injected characters into a stray keypress.
+        case unverified(String)
     }
 
     private func insertViaAccessibility(_ text: String, target: DeliveryTarget) -> InsertResult {
@@ -368,7 +389,7 @@ final class TextDeliveryService {
         // silently vanishes. Only call it delivered if the element grew.
         if let lengthBefore, let lengthAfter = Self.textLength(of: element) {
             guard lengthAfter > lengthBefore else {
-                return .failure("set reported success but the text did not land")
+                return .unverified("set reported success but the text did not land")
             }
         }
 
