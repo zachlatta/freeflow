@@ -3272,6 +3272,28 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     static let clipboardWaitingStatusText = "On clipboard, press Cmd-V"
 
+    /// Appends one line per delivery to a plain text log beside the run log, so
+    /// a misdelivery can be reconstructed after the fact instead of only being
+    /// visible in the live Settings pane.
+    private static func appendDeliveryLog(outcome: DeliveryOutcome, target: DeliveryTarget?) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let role = target?.elementRole ?? "no-element"
+        let bundle = target?.bundleIdentifier ?? "no-bundle"
+        let line = "\(stamp)\t\(outcome.tier.rawValue)\tsucceeded=\(outcome.succeeded)\t\(bundle)\t\(role)\t\(outcome.attempts.joined(separator: " | "))\n"
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
+        let url = appSupport
+            .appendingPathComponent(AppName.displayName, isDirectory: true)
+            .appendingPathComponent("delivery.log")
+        guard let data = line.data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
     /// Delivers a finished transcript back to the element the user was writing
     /// in when they stopped dictating. Never changes the frontmost app unless
     /// the focus-steal fallback is explicitly enabled.
@@ -3288,6 +3310,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             let apply = {
                 self.lastDeliveryDiagnostics = outcome.attempts.joined(separator: " | ")
+                Self.appendDeliveryLog(outcome: outcome, target: target)
                 self.debugStatusMessage = "Delivery: \(outcome.summary)"
                 if outcome.succeeded {
                     if pressReturnAfter, let target {
@@ -3302,7 +3325,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     // The text is demonstrably in the target, so the previous
                     // clipboard can come back.
                     completion()
-                case .processKeystroke:
+                case .processKeystroke, .processPaste:
                     // Key events were posted but nothing confirms the app
                     // consumed them. Leave the transcript on the clipboard so
                     // Cmd-V still recovers it.

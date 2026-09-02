@@ -37,6 +37,9 @@ enum DeliveryTier: String {
     /// Synthesised key events addressed to the target process. No activation,
     /// but the app only sees them if it processes background key events.
     case processKeystroke = "pid-keystroke"
+    /// Cmd-V addressed to the target process. No activation, and it leaves the
+    /// app to interpret its own paste rather than trusting injected unicode.
+    case processPaste = "pid-paste"
     /// Bring the app forward and press Cmd-V. Steals focus; opt-in only.
     case activateAndPaste = "activate-paste"
     /// Leave the text on the clipboard and tell the user it is waiting.
@@ -146,6 +149,7 @@ final class TextDeliveryService {
         // settable while the write only touches the display and never reaches
         // the tty. Send keys there first and treat the AX path as the fallback.
         let preferKeystroke = Self.isTerminalLike(target)
+        let chromiumLike = Self.isChromiumLike(target)
 
         if isTerminated(target) {
             attempts.append("target app no longer running")
@@ -187,6 +191,18 @@ final class TextDeliveryService {
             attempts.append("ax-insert failed: \(reason)")
         }
 
+        // Chromium and Electron mangle injected unicode, so paste first.
+        if chromiumLike, postCommandV(toProcess: target.processIdentifier) {
+            attempts.append("pid-paste posted (chromium-like target)")
+            completion(DeliveryOutcome(
+                tier: .processPaste,
+                succeeded: true,
+                target: describedApp,
+                attempts: attempts
+            ))
+            return true
+        }
+
         // Tier 2 — key events posted to the process, no activation.
         if allowProcessKeystroke && !preferKeystroke {
             if postUnicode(text, toProcess: target.processIdentifier) {
@@ -203,6 +219,21 @@ final class TextDeliveryService {
         } else {
             attempts.append("pid-keystroke disabled")
         }
+
+        // Paste addressed to the process. No activation, and unlike unicode
+        // injection it survives apps that read the virtual key code rather
+        // than the attached characters.
+        if postCommandV(toProcess: target.processIdentifier) {
+            attempts.append("pid-paste posted")
+            completion(DeliveryOutcome(
+                tier: .processPaste,
+                succeeded: true,
+                target: describedApp,
+                attempts: attempts
+            ))
+            return true
+        }
+        attempts.append("pid-paste could not be posted")
 
         // Tier 3 — focus steal, opt-in only.
         if allowFocusStealFallback, let app = runningApplication(for: target) {
@@ -228,6 +259,34 @@ final class TextDeliveryService {
             target: describedApp,
             attempts: attempts
         ))
+        return false
+    }
+
+    /// Chromium-based apps, including Electron. Their editable surfaces are
+    /// rendered rather than real AppKit text views, and they interpret a
+    /// synthesised key event by its virtual key code rather than the unicode
+    /// payload attached to it, which is how injected text arrives as a stray
+    /// keypress instead of characters.
+    static func isChromiumLike(_ target: DeliveryTarget) -> Bool {
+        let chromiumBundles: Set<String> = [
+            "inc.tana.desktop",
+            "com.brave.Browser",
+            "com.brave.Browser.beta",
+            "com.google.Chrome",
+            "com.microsoft.edgemac",
+            "com.microsoft.VSCode",
+            "com.todesktop.230313mzl4w4u92",  // Cursor
+            "md.obsidian",
+            "com.tinyspeck.slackmacgap",
+            "com.hnc.Discord",
+            "notion.id",
+            "com.spotify.client",
+            "com.electron.logseq",
+            "com.logseq.logseq"
+        ]
+        if let bundle = target.bundleIdentifier, chromiumBundles.contains(bundle) {
+            return true
+        }
         return false
     }
 
@@ -383,7 +442,7 @@ final class TextDeliveryService {
     /// Presses Return in the target, matching however the text got there.
     func pressReturn(target: DeliveryTarget, tier: DeliveryTier) {
         switch tier {
-        case .accessibilityInsert, .processKeystroke:
+        case .accessibilityInsert, .processKeystroke, .processPaste:
             guard let source = CGEventSource(stateID: .hidSystemState) else { return }
             let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: true)
             let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: false)
@@ -398,6 +457,23 @@ final class TextDeliveryService {
         case .clipboardOnly:
             break
         }
+    }
+
+    /// Sends Cmd-V to one process without bringing it forward. The transcript
+    /// must already be on the pasteboard.
+    private func postCommandV(toProcess pid: pid_t) -> Bool {
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return false }
+        let vKeyCode = Self.keyCodeForCharacter("v") ?? 9
+
+        guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: true),
+              let keyUp = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode, keyDown: false) else {
+            return false
+        }
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+        keyDown.postToPid(pid)
+        keyUp.postToPid(pid)
+        return true
     }
 
     // MARK: - Tier 3: activate and paste

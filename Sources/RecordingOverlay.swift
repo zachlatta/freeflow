@@ -757,7 +757,9 @@ struct PendingTranscriptionBadge: View {
     let count: Int
 
     var body: some View {
-        if count > 0 {
+        // Only worth showing once work is actually queued behind the current
+        // one. A lone "1" is just noise.
+        if count > 1 {
             Text("\(count)")
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .monospacedDigit()

@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FreeFlow subsystem delineation</title>
+<style>
+  :root {
+    --bg: #faf9f7;
+    --panel: #ffffff;
+    --ink: #1a1a1a;
+    --muted: #6b6b6b;
+    --line: #d8d5d0;
+    --core: #2f6f5e;
+    --core-soft: #e3f0ec;
+    --app: #6b5b95;
+    --app-soft: #ece8f4;
+    --keep: #8a6d3b;
+    --keep-soft: #f6efe2;
+    --accent: #b03a2e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --panel: #1f2124;
+      --ink: #ececec;
+      --muted: #9a9a9a;
+      --line: #34383d;
+      --core: #6fd3b4;
+      --core-soft: #1d3a33;
+      --app: #b3a4e0;
+      --app-soft: #2a2540;
+      --keep: #d9b874;
+      --keep-soft: #38301f;
+      --accent: #f08a7a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    padding: 32px 24px 64px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 28px; font-size: 14px; }
+  h2 { font-size: 17px; margin: 40px 0 10px; letter-spacing: -0.01em; }
+  p { margin: 0 0 12px; max-width: 74ch; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px;
+    overflow-x: auto;
+  }
+  svg { display: block; max-width: 100%; height: auto; }
+  .legend { display: flex; gap: 20px; flex-wrap: wrap; margin: 14px 0 0; font-size: 13px; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 13px; height: 13px; border-radius: 3px; display: inline-block; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin-top: 8px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12.5px; text-transform: uppercase; letter-spacing: .04em; }
+  code { font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: rgba(128,128,128,.13); padding: 1px 5px; border-radius: 4px; }
+  .note { border-left: 3px solid var(--accent); padding-left: 14px; color: var(--muted); font-size: 14px; }
+  ul { max-width: 74ch; padding-left: 20px; }
+  li { margin-bottom: 7px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Surgically delineating the FreeFlow subsystem</h1>
+<p class="sub">What the Tana note from 2026-08-22 would actually mean in code, and where TalkWeave would plug in. Nothing here is built yet.</p>
+
+<h2>Today: one app, seven concerns</h2>
+<p>Every box below is real code in the fork. The problem is not that any of it is bad, it is that the parts another app would want are wired directly to the parts only a dictation app needs: a global hotkey, an overlay near the notch, and pasting into whatever had focus.</p>
+
+<div class="panel">
+<svg viewBox="0 0 1000 330" role="img" aria-label="FreeFlow today: trigger, capture, transcription, enrichment, delivery, presentation and persistence all inside one app target">
+  <defs>
+    <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="8" y="8" width="984" height="314" rx="10" fill="none" stroke="var(--line)" stroke-dasharray="5 4"/>
+  <text x="24" y="30" font-size="12" fill="var(--muted)" letter-spacing="1.2">ONE APP TARGET — FreeFlow Dev Async</text>
+
+  <g font-size="12.5">
+    <!-- row: pipeline -->
+    <g>
+      <rect x="28" y="52" width="150" height="86" rx="8" fill="var(--keep-soft)" stroke="var(--keep)"/>
+      <text x="103" y="76" text-anchor="middle" font-weight="700" fill="var(--ink)">Trigger</text>
+      <text x="103" y="96" text-anchor="middle" fill="var(--muted)" font-size="11">HotkeyManager</text>
+      <text x="103" y="112" text-anchor="middle" fill="var(--muted)" font-size="11">GlobalShortcutBackend</text>
+      <text x="103" y="128" text-anchor="middle" fill="var(--muted)" font-size="11">ShortcutCore/*</text>
+    </g>
+
+    <g>
+      <rect x="208" y="52" width="150" height="86" rx="8" fill="var(--core-soft)" stroke="var(--core)" stroke-width="1.5"/>
+      <text x="283" y="76" text-anchor="middle" font-weight="700" fill="var(--ink)">Capture</text>
+      <text x="283" y="96" text-anchor="middle" fill="var(--muted)" font-size="11">AudioRecorder</text>
+      <text x="283" y="112" text-anchor="middle" fill="var(--muted)" font-size="11">LiveAudioLevelNormalizer</text>
+      <text x="283" y="128" text-anchor="middle" fill="var(--muted)" font-size="11">SystemAudioStatus</text>
+    </g>
+
+    <g>
+      <rect x="388" y="52" width="170" height="86" rx="8" fill="var(--core-soft)" stroke="var(--core)" stroke-width="1.5"/>
+      <text x="473" y="76" text-anchor="middle" font-weight="700" fill="var(--ink)">Transcription</text>
+      <text x="473" y="96" text-anchor="middle" fill="var(--muted)" font-size="11">TranscriptionService</text>
+      <text x="473" y="112" text-anchor="middle" fill="var(--muted)" font-size="11">RealtimeTranscriptionService</text>
+      <text x="473" y="128" text-anchor="middle" fill="var(--muted)" font-size="11">PrefetchTranscriber</text>
+    </g>
+
+    <g>
+      <rect x="588" y="52" width="160" height="86" rx="8" fill="var(--core-soft)" stroke="var(--core)" stroke-width="1.5"/>
+      <text x="668" y="76" text-anchor="middle" font-weight="700" fill="var(--ink)">Enrichment</text>
+      <text x="668" y="96" text-anchor="middle" fill="var(--muted)" font-size="11">PostProcessingService</text>
+      <text x="668" y="112" text-anchor="middle" fill="var(--muted)" font-size="11">AppContextService</text>
+      <text x="668" y="128" text-anchor="middle" fill="var(--muted)" font-size="11">ModelConfiguration</text>
+    </g>
+
+    <g>
+      <rect x="778" y="52" width="150" height="86" rx="8" fill="var(--keep-soft)" stroke="var(--keep)"/>
+      <text x="853" y="76" text-anchor="middle" font-weight="700" fill="var(--ink)">Delivery</text>
+      <text x="853" y="96" text-anchor="middle" fill="var(--muted)" font-size="11">TextDelivery</text>
+      <text x="853" y="112" text-anchor="middle" fill="var(--muted)" font-size="11">pasteboard snapshot</text>
+      <text x="853" y="128" text-anchor="middle" fill="var(--muted)" font-size="11">AX + CGEvent tiers</text>
+    </g>
+
+    <!-- arrows between pipeline stages -->
+    <g stroke="var(--muted)" fill="none" color="var(--muted)" stroke-width="1.3">
+      <line x1="180" y1="95" x2="204" y2="95" marker-end="url(#a1)"/>
+      <line x1="360" y1="95" x2="384" y2="95" marker-end="url(#a1)"/>
+      <line x1="560" y1="95" x2="584" y2="95" marker-end="url(#a1)"/>
+      <line x1="750" y1="95" x2="774" y2="95" marker-end="url(#a1)"/>
+    </g>
+
+    <!-- cross-cutting -->
+    <g>
+      <rect x="28" y="182" width="440" height="76" rx="8" fill="var(--app-soft)" stroke="var(--app)"/>
+      <text x="248" y="206" text-anchor="middle" font-weight="700" fill="var(--ink)">Presentation</text>
+      <text x="248" y="226" text-anchor="middle" fill="var(--muted)" font-size="11">RecordingOverlay · TranscriptionProgressPanel · ClipboardWaitingPanel</text>
+      <text x="248" y="242" text-anchor="middle" fill="var(--muted)" font-size="11">MenuBarView · SettingsView · SetupView</text>
+    </g>
+
+    <g>
+      <rect x="498" y="182" width="430" height="76" rx="8" fill="var(--app-soft)" stroke="var(--app)"/>
+      <text x="713" y="206" text-anchor="middle" font-weight="700" fill="var(--ink)">Persistence and orchestration</text>
+      <text x="713" y="226" text-anchor="middle" fill="var(--muted)" font-size="11">AppState (3500 lines) · PipelineHistoryStore · AppSettingsStorage</text>
+      <text x="713" y="242" text-anchor="middle" fill="var(--muted)" font-size="11">UpdateManager · KeychainStorage</text>
+    </g>
+
+    <g stroke="var(--app)" fill="none" stroke-dasharray="3 3" opacity=".65">
+      <line x1="103" y1="138" x2="103" y2="182"/>
+      <line x1="283" y1="138" x2="283" y2="182"/>
+      <line x1="473" y1="138" x2="560" y2="182"/>
+      <line x1="668" y1="138" x2="700" y2="182"/>
+      <line x1="853" y1="138" x2="800" y2="182"/>
+    </g>
+
+    <text x="500" y="294" text-anchor="middle" fill="var(--muted)" font-size="11.5">Everything routes through one AppState, so nothing can be lifted out on its own.</text>
+  </g>
+</svg>
+<div class="legend">
+  <span><i class="swatch" style="background:var(--core-soft);border:1.5px solid var(--core)"></i> would move into the core</span>
+  <span><i class="swatch" style="background:var(--keep-soft);border:1px solid var(--keep)"></i> stays app-specific</span>
+  <span><i class="swatch" style="background:var(--app-soft);border:1px solid var(--app)"></i> app shell and glue</span>
+</div>
+</div>
+
+<h2>After the cut: a headless core with two consumers</h2>
+<p>The delineation is one seam, drawn between <em>producing text from a microphone</em> and <em>deciding when to listen and where the text goes</em>. Everything above the seam has no opinion about hotkeys, overlays, Accessibility or the menu bar.</p>
+
+<div class="panel">
+<svg viewBox="0 0 1000 350" role="img" aria-label="After extraction: a headless VoiceCore package consumed by FreeFlow and TalkWeave">
+  <g font-size="12.5">
+    <rect x="250" y="20" width="500" height="128" rx="10" fill="var(--core-soft)" stroke="var(--core)" stroke-width="2"/>
+    <text x="500" y="46" text-anchor="middle" font-weight="700" font-size="15" fill="var(--ink)">VoiceCore — headless Swift package</text>
+    <text x="500" y="68" text-anchor="middle" fill="var(--muted)" font-size="11.5">no AppKit windows · no global hotkeys · no Accessibility · no pasteboard</text>
+
+    <rect x="272" y="82" width="140" height="50" rx="6" fill="var(--panel)" stroke="var(--core)"/>
+    <text x="342" y="102" text-anchor="middle" font-weight="600" fill="var(--ink)">Capture</text>
+    <text x="342" y="119" text-anchor="middle" fill="var(--muted)" font-size="10.5">audio + level stream</text>
+
+    <rect x="430" y="82" width="140" height="50" rx="6" fill="var(--panel)" stroke="var(--core)"/>
+    <text x="500" y="102" text-anchor="middle" font-weight="600" fill="var(--ink)">Transcribe</text>
+    <text x="500" y="119" text-anchor="middle" fill="var(--muted)" font-size="10.5">file · prefetch · realtime</text>
+
+    <rect x="588" y="82" width="140" height="50" rx="6" fill="var(--panel)" stroke="var(--core)"/>
+    <text x="658" y="102" text-anchor="middle" font-weight="600" fill="var(--ink)">Post-process</text>
+    <text x="658" y="119" text-anchor="middle" fill="var(--muted)" font-size="10.5">cleanup · vocabulary</text>
+
+    <!-- consumers -->
+    <rect x="80" y="222" width="330" height="104" rx="10" fill="var(--keep-soft)" stroke="var(--keep)" stroke-width="1.5"/>
+    <text x="245" y="248" text-anchor="middle" font-weight="700" font-size="14" fill="var(--ink)">FreeFlow</text>
+    <text x="245" y="270" text-anchor="middle" fill="var(--muted)" font-size="11">trigger: global hotkey</text>
+    <text x="245" y="288" text-anchor="middle" fill="var(--muted)" font-size="11">delivery: Accessibility, keystrokes, clipboard</text>
+    <text x="245" y="306" text-anchor="middle" fill="var(--muted)" font-size="11">surface: notch overlay, menu bar</text>
+
+    <rect x="590" y="222" width="330" height="104" rx="10" fill="var(--app-soft)" stroke="var(--app)" stroke-width="1.5"/>
+    <text x="755" y="248" text-anchor="middle" font-weight="700" font-size="14" fill="var(--ink)">TalkWeave</text>
+    <text x="755" y="270" text-anchor="middle" fill="var(--muted)" font-size="11">trigger: its own, per conversation</text>
+    <text x="755" y="288" text-anchor="middle" fill="var(--muted)" font-size="11">delivery: into its own document model</text>
+    <text x="755" y="306" text-anchor="middle" fill="var(--muted)" font-size="11">surface: its own UI</text>
+
+    <g stroke="var(--core)" fill="none" stroke-width="1.6" color="var(--core)">
+      <path d="M400,148 C400,190 250,182 245,218" marker-end="url(#a1)"/>
+      <path d="M600,148 C600,190 750,182 755,218" marker-end="url(#a1)"/>
+    </g>
+    <text x="330" y="196" text-anchor="middle" fill="var(--muted)" font-size="11">same package</text>
+    <text x="680" y="196" text-anchor="middle" fill="var(--muted)" font-size="11">same package</text>
+  </g>
+</svg>
+</div>
+
+<h2>What the surgery actually costs</h2>
+<table>
+  <tr><th>Seam</th><th>Why it does not cut cleanly today</th><th>Work</th></tr>
+  <tr>
+    <td><code>AppSettingsStorage</code></td>
+    <td>Resolves its file path from <code>AppName.displayName</code>, so the core would read whichever app happens to host it. Already bit us: renaming the app gave it an empty settings file.</td>
+    <td>Inject a storage location instead of deriving one.</td>
+  </tr>
+  <tr>
+    <td><code>AppState</code></td>
+    <td>3500 lines holding recording state, transcription sessions, settings, overlay control and delivery in one object. The core's state is tangled with the app's.</td>
+    <td>Lift session bookkeeping into the core; leave the SwiftUI-facing properties behind.</td>
+  </tr>
+  <tr>
+    <td><code>AudioRecorder</code></td>
+    <td>Callback properties assigned from AppState (<code>onRecordingReady</code>, <code>onPCM16Samples</code>) and reset from several places, which is what made overlapping dictations tear the recorder down mid-recording.</td>
+    <td>Expose an async sequence per session rather than shared mutable callbacks.</td>
+  </tr>
+  <tr>
+    <td><code>AppContextService</code></td>
+    <td>Reads the frontmost app, window title and a screenshot. Meaningful for dictation, meaningless for TalkWeave.</td>
+    <td>Make context an injected provider; the core takes whatever string it is handed.</td>
+  </tr>
+  <tr>
+    <td><code>PipelineHistoryStore</code></td>
+    <td>Core Data model shaped around dictation runs.</td>
+    <td>Either move it into the core as the canonical run log, or leave it in FreeFlow and give the core a delegate.</td>
+  </tr>
+</table>
+
+<h2>Why it is worth it, and why not yet</h2>
+<ul>
+  <li><strong>Worth it:</strong> the capture and transcription stack is the expensive part, and it already works against a local Qwen3 model with chunking, prefetch and a realtime path. Rebuilding that per project is the actual waste.</li>
+  <li><strong>Worth it:</strong> the seam would force the overlapping-session bookkeeping to be explicit rather than implied by two booleans, which is where today's bugs came from.</li>
+  <li><strong>Not yet:</strong> the delivery ladder is still being proven against real apps. Extracting a core while the layer above it is still moving means doing the surgery twice.</li>
+  <li><strong>Not yet:</strong> a merge upstream is easier from a shape Zach recognises. A package split is a much larger thing to ask him to take.</li>
+</ul>
+
+<p class="note">Status: nothing extracted, nothing started. This page is the map, drawn so the decision can be made on what it costs rather than on how it sounds.</p>
+
+</div>
+<!-- Artifact seen-state badge — paste before </body> in any handed-over local HTML page.
+     First visit: bright "NEW" chip. Every later visit: muted "opened <date>" chip and the
+     whole page steps back one notch (slightly lower contrast), so an artifact the user has
+     already read visibly recedes instead of looking freshly delivered.
+     Pure localStorage, per page path. No network, no storage outside the browser profile.
+     Requires nothing from the host page except a <header> (falls back to body-prepend). -->
+<style>
+  #seen-chip{display:inline-flex;align-items:center;gap:.4rem;font-size:.72rem;
+    letter-spacing:.06em;text-transform:uppercase;padding:.2rem .55rem;border-radius:1rem;
+    border:1px solid currentColor;margin-bottom:.6rem;opacity:0}
+  #seen-chip[data-state]{opacity:1;transition:opacity .25s ease}
+  #seen-chip[data-state="new"]{color:#1d7a52;background:rgba(29,122,82,.08)}
+  #seen-chip[data-state="seen"]{color:#8b938d;background:transparent;font-weight:400}
+  @media (prefers-color-scheme:dark){
+    #seen-chip[data-state="new"]{color:#7fc4a0;background:rgba(127,196,160,.1)}
+    #seen-chip[data-state="seen"]{color:#727b76}
+  }
+  html[data-seen="1"] body{filter:saturate(.72) contrast(.96)}
+  html[data-seen="1"] h1{opacity:.82}
+</style>
+<script>
+(function () {
+  var key = 'artifact-seen:' + location.pathname;
+  var chip = document.createElement('div');
+  chip.id = 'seen-chip';
+  var prior = null;
+  try { prior = localStorage.getItem(key); } catch (e) { /* private mode: stay "new" */ }
+
+  if (prior) {
+    document.documentElement.setAttribute('data-seen', '1');
+    chip.setAttribute('data-state', 'seen');
+    chip.textContent = 'opened ' + new Date(Number(prior)).toLocaleDateString();
+  } else {
+    chip.setAttribute('data-state', 'new');
+    chip.textContent = 'new — not opened before';
+  }
+  try { localStorage.setItem(key, String(Date.now())); } catch (e) {}
+
+  var host = document.querySelector('header') || document.body;
+  host.insertBefore(chip, host.firstChild);
+})();
+</script>
+</body>
+</html>
