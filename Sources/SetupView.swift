@@ -1317,6 +1317,8 @@ struct SetupView: View {
 
             case .switchedToToggle:
                 break
+            case .consumeOnly:
+                break
             }
         }
 

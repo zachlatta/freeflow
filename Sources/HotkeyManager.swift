@@ -8,7 +8,8 @@ final class HotkeyManager {
     )
     private var inputState = ShortcutInputState()
 
-    var onShortcutEvent: ((ShortcutEvent) -> Void)?
+    // Callback triggered on shortcut events; returns true to consume the system key event
+    var onShortcutEvent: ((ShortcutEvent) -> Bool)?
     var onEscapeKeyPressed: (() -> Bool)?
 
     var currentPressedModifiers: ShortcutModifiers {
@@ -49,6 +50,7 @@ final class HotkeyManager {
         stop()
     }
 
+    // Processes raw input events, triggers callbacks, and determines if the event should be consumed
     private func handleInputEvent(_ event: ShortcutInputEvent) -> ShortcutConsumeDecision {
         let result = ShortcutMatcher.reduce(
             state: inputState,
@@ -56,9 +58,12 @@ final class HotkeyManager {
             configuration: configuration
         )
         inputState = result.state
+        var shouldConsume = false
         for event in result.emittedEvents {
-            onShortcutEvent?(event)
+            if onShortcutEvent?(event) == true {
+                shouldConsume = true
+            }
         }
-        return result.consumeDecision
+        return (result.consumeDecision == .consume || shouldConsume) ? .consume : .passthrough
     }
 }

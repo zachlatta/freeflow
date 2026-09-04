@@ -17,6 +17,8 @@ struct ShortcutInputState: Equatable {
     var pressedModifierKeyCodes: Set<UInt16> = []
     var holdIsActive = false
     var toggleIsActive = false
+    /// True while any key or modifier belonging to the toggle shortcut is currently pressed.
+    var toggleComponentIsActive = false
     var copyAgainIsActive = false
 
     var currentModifiers: ShortcutModifiers {
@@ -59,6 +61,36 @@ struct ShortcutInputState: Equatable {
             return true
         }
 
+        return false
+    }
+
+    /// Returns true if the given key code belongs to a component of the toggle shortcut.
+    /// - Parameters:
+    ///   - keyCode: The raw key code of the input event.
+    ///   - kind: Whether the input is a regular key or a modifier key.
+    ///   - configuration: The active shortcut configuration to match against.
+    static func isToggleComponentInput(
+        keyCode: UInt16,
+        kind: ShortcutBindingKind,
+        configuration: ShortcutConfiguration
+    ) -> Bool {
+        let binding = configuration.toggle
+        guard !binding.isDisabled else { return false }
+
+        if kind == .key {
+            return binding.kind == .key && binding.keyCode == keyCode
+        } else if kind == .modifierKey {
+            if binding.kind == .modifierKey {
+                return binding.keyCode == keyCode
+            } else {
+                if let exactModifiers = binding.exactModifierKeyCodes {
+                    return exactModifiers.contains(keyCode)
+                } else if let modifier = ShortcutBinding.modifier(forKeyCode: keyCode) {
+                    // Safely extract the modifier and check intersection to prevent force-unwrap crashes
+                    return !binding.modifiers.isDisjoint(with: [modifier])
+                }
+            }
+        }
         return false
     }
 }
@@ -104,6 +136,14 @@ enum ShortcutMatcher {
                 nextState.pressedModifierKeyCodes.remove(keyCode)
             }
 
+            // Emit stateless event on pressed modifier if it is a toggle component
+            var statelessEvents: [ShortcutEvent] = []
+            if isDown {
+                if ShortcutInputState.isToggleComponentInput(keyCode: keyCode, kind: .modifierKey, configuration: configuration) {
+                    statelessEvents.append(.toggleComponentInputReceived)
+                }
+            }
+
             let shouldConsumeAfter = shouldConsumeModifierEvent(
                 for: keyCode,
                 state: nextState,
@@ -112,7 +152,7 @@ enum ShortcutMatcher {
             let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
             return ShortcutMatchResult(
                 state: nextState,
-                emittedEvents: emittedEvents,
+                emittedEvents: emittedEvents + statelessEvents,
                 consumeDecision: (shouldConsumeBefore || shouldConsumeAfter) ? .consume : .passthrough
             )
 
@@ -125,8 +165,9 @@ enum ShortcutMatcher {
 
             var nextState = state
             if isRepeat {
+                // Key repeats don't change state but might need consumption
                 return ShortcutMatchResult(
-                    state: nextState,
+                    state: state,
                     emittedEvents: [],
                     consumeDecision: shouldConsumeBefore ? .consume : .passthrough
                 )
@@ -138,6 +179,14 @@ enum ShortcutMatcher {
                 nextState.pressedKeyCodes.remove(keyCode)
             }
 
+            // Emit stateless event on pressed key if it is a toggle component
+            var statelessEvents: [ShortcutEvent] = []
+            if isDown {
+                if ShortcutInputState.isToggleComponentInput(keyCode: keyCode, kind: .key, configuration: configuration) {
+                    statelessEvents.append(.toggleComponentInputReceived)
+                }
+            }
+
             let shouldConsumeAfter = shouldConsumeKeyEvent(
                 for: keyCode,
                 state: nextState,
@@ -146,7 +195,7 @@ enum ShortcutMatcher {
             let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
             return ShortcutMatchResult(
                 state: nextState,
-                emittedEvents: emittedEvents,
+                emittedEvents: emittedEvents + statelessEvents,
                 consumeDecision: (shouldConsumeBefore || shouldConsumeAfter) ? .consume : .passthrough
             )
         }
@@ -167,6 +216,7 @@ enum ShortcutMatcher {
         )
     }
 
+    // Update the active states of all configured bindings and return triggered events
     private static func updateActiveBindings(
         in state: inout ShortcutInputState,
         configuration: ShortcutConfiguration
@@ -174,29 +224,36 @@ enum ShortcutMatcher {
         let previousHold = state.holdIsActive
         let previousToggle = state.toggleIsActive
         let previousCopyAgain = state.copyAgainIsActive
+        let previousToggleComponent = state.toggleComponentIsActive
 
         state.holdIsActive = bindingIsActive(configuration.hold, state: state, configuration: configuration)
         state.toggleIsActive = bindingIsActive(configuration.toggle, state: state, configuration: configuration)
         state.copyAgainIsActive = bindingIsActive(configuration.copyAgain, state: state, configuration: configuration)
+        state.toggleComponentIsActive = bindingHasAnyInputActive(configuration.toggle, state: state)
 
         return emitChanges(
             previousHold: previousHold,
             previousToggle: previousToggle,
             previousCopyAgain: previousCopyAgain,
+            previousToggleComponent: previousToggleComponent,
             currentHold: state.holdIsActive,
             currentToggle: state.toggleIsActive,
             currentCopyAgain: state.copyAgainIsActive,
+            currentToggleComponent: state.toggleComponentIsActive,
             configuration: configuration
         )
     }
 
+    // Determine the state transitions and emit corresponding shortcut events
     private static func emitChanges(
         previousHold: Bool,
         previousToggle: Bool,
         previousCopyAgain: Bool,
+        previousToggleComponent: Bool,
         currentHold: Bool,
         currentToggle: Bool,
         currentCopyAgain: Bool,
+        currentToggleComponent: Bool,
         configuration: ShortcutConfiguration
     ) -> [ShortcutEvent] {
         var activations: [(ShortcutEvent, Int)] = []
@@ -208,6 +265,10 @@ enum ShortcutMatcher {
         if !previousToggle && currentToggle {
             activations.append((.toggleActivated, configuration.toggle.specificityScore))
         }
+        // Emit event when any part of the toggle shortcut is pressed
+        if !previousToggleComponent && currentToggleComponent {
+            activations.append((.toggleComponentActivated, configuration.toggle.specificityScore))
+        }
         // Paste Again is a one-shot: fire on the leading edge only.
         if !previousCopyAgain && currentCopyAgain {
             activations.append((.copyAgainTriggered, configuration.copyAgain.specificityScore))
@@ -218,10 +279,45 @@ enum ShortcutMatcher {
         if previousToggle && !currentToggle {
             deactivations.append((.toggleDeactivated, configuration.toggle.specificityScore))
         }
+        // Emit event when all parts of the toggle shortcut are released
+        if previousToggleComponent && !currentToggleComponent {
+            deactivations.append((.toggleComponentDeactivated, configuration.toggle.specificityScore))
+        }
 
         let orderedActivations = activations.sorted(by: { $0.1 > $1.1 }).map(\.0)
         let orderedDeactivations = deactivations.sorted(by: { $0.1 < $1.1 }).map(\.0)
         return orderedActivations + orderedDeactivations
+    }
+
+    /// Returns true if any key or modifier belonging to the binding is currently pressed.
+    /// Unlike `bindingIsActive`, this matches a partial press of the shortcut, not the full combo.
+    /// - Parameters:
+    ///   - binding: The shortcut binding to test for partial activation.
+    ///   - state: The current pressed-input state.
+    private static func bindingHasAnyInputActive(
+        _ binding: ShortcutBinding,
+        state: ShortcutInputState
+    ) -> Bool {
+        guard !binding.isDisabled else { return false }
+        switch binding.kind {
+        case .disabled:
+            return false
+        case .key:
+            if state.pressedKeyCodes.contains(binding.keyCode) { return true }
+        case .modifierKey:
+            if state.pressedModifierKeyCodes.contains(binding.keyCode) { return true }
+        }
+        if let exactModifiers = binding.exactModifierKeyCodes {
+            if !exactModifiers.isDisjoint(with: state.pressedModifierKeyCodes) {
+                return true
+            }
+        } else {
+            let activeModifiers = state.currentModifiers
+            if !binding.modifiers.isDisjoint(with: activeModifiers) {
+                return true
+            }
+        }
+        return false
     }
 
     private static func bindingIsActive(
