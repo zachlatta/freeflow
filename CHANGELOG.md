@@ -8,6 +8,12 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [Unreleased]
+
+### Added
+
+- A contributing guide (`CONTRIBUTING.md`) documenting how to build, test, and submit changes.
+
 ## [1.2.1] - 2026-08-11
 
 ### Improved
