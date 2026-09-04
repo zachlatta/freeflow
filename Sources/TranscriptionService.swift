@@ -64,6 +64,57 @@ class TranscriptionService {
         }
     }
 
+    private static let providerHostMap: [(host: String, name: String)] = [
+        ("api.groq.com", "Groq"),
+        ("api.openai.com", "OpenAI"),
+        ("api.x.ai", "xAI (Grok)"),
+        ("api.anthropic.com", "Anthropic"),
+        ("api.cerebras.ai", "Cerebras"),
+        ("api.together.xyz", "Together AI"),
+        ("api.deepseek.com", "DeepSeek"),
+        ("api.mistral.ai", "Mistral"),
+        ("generativelanguage.googleapis.com", "Google AI (Gemini)"),
+        ("api.fireworks.ai", "Fireworks"),
+        ("api.perplexity.ai", "Perplexity"),
+        ("openrouter.ai", "OpenRouter"),
+        ("api.lemonfox.ai", "Lemonfox"),
+    ]
+
+    /// Provider name inferred from the base URL host. Most reliable signal
+    /// because the host is the actual endpoint the request will hit.
+    static func detectProviderFromHost(baseURL: String) -> String? {
+        let host = (try? normalizedBaseURL(from: baseURL))?.host?.lowercased() ?? ""
+        for (h, name) in providerHostMap where host.contains(h) {
+            return name
+        }
+        if host == "localhost" || host == "127.0.0.1" || host.hasSuffix(".local") {
+            return "Local server"
+        }
+        return nil
+    }
+
+    /// Provider name inferred from the API key's prefix. Distinct prefixes
+    /// only — generic `sk-` falls back to OpenAI-compatible since multiple
+    /// providers ship that shape.
+    static func detectProviderFromKey(key: String) -> String? {
+        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedKey.hasPrefix("gsk_") { return "Groq" }
+        if trimmedKey.hasPrefix("sk-ant-") { return "Anthropic" }
+        if trimmedKey.hasPrefix("xai-") { return "xAI (Grok)" }
+        if trimmedKey.hasPrefix("hf_") { return "Hugging Face" }
+        if trimmedKey.hasPrefix("csk-") { return "Cerebras" }
+        if trimmedKey.hasPrefix("sk-proj-") { return "OpenAI" }
+        if trimmedKey.hasPrefix("sk-") { return "OpenAI-compatible" }
+        return nil
+    }
+
+    /// Combined detection: prefer the host (definitive endpoint), fall back
+    /// to the key prefix when the host is unknown. Returns nil for unknown.
+    static func detectProvider(baseURL: String, key: String) -> String? {
+        if let host = detectProviderFromHost(baseURL: baseURL) { return host }
+        return detectProviderFromKey(key: key)
+    }
+
     // Upload audio file, submit for transcription, poll until done, return text
     func transcribe(fileURL: URL) async throws -> String {
         guard !Task.isCancelled else {

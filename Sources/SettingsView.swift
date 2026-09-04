@@ -543,6 +543,7 @@ struct GeneralSettingsView: View {
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
     @State private var keyValidationSuccess = false
+    @State private var keyValidationProviderLabel: String?
     @State private var customVocabularyInput: String = ""
     @FocusState private var customVocabularyFocused: Bool
     @State private var micPermissionGranted = false
@@ -977,34 +978,50 @@ struct GeneralSettingsView: View {
 
     private var apiKeySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(AppName.displayName) uses the configured transcription model with your selected OpenAI-compatible provider.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // Status banner sits above the field — the prominent slot.
+            // Priority: validation error > validation success > live provider
+            // status (host + key prefix detection) > caption fallback.
+            if let error = keyValidationError {
+                Label(error, systemImage: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if keyValidationSuccess {
+                let successText: String = {
+                    if let provider = keyValidationProviderLabel {
+                        return "API key saved — Validated as \(provider)"
+                    }
+                    return "API key saved"
+                }()
+                Label(successText, systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+            } else if let status = providerStatusLabel {
+                Label(status.text, systemImage: status.isMismatch ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(status.isMismatch ? .orange : .green)
+                    .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("\(AppName.displayName) uses the configured transcription model with your selected OpenAI-compatible provider.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
+                SecureField("Paste your API key", text: $apiKeyInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .disabled(isValidatingKey)
                     .onChange(of: apiKeyInput) { _ in
                         keyValidationError = nil
                         keyValidationSuccess = false
+                        keyValidationProviderLabel = nil
                     }
 
                 Button(isValidatingKey ? "Validating..." : "Save") {
                     validateAndSaveKey()
                 }
                 .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
-            }
-
-            if let error = keyValidationError {
-                Label(error, systemImage: "xmark.circle.fill")
-                    .foregroundStyle(.red)
-                    .font(.caption)
-            } else if keyValidationSuccess {
-                Label("API key saved", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.caption)
             }
 
             DisclosureGroup(isExpanded: $advancedProviderSettingsExpanded) {
@@ -1034,25 +1051,70 @@ struct GeneralSettingsView: View {
     private func validateAndSaveKey() {
         let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedBaseURL = baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
         isValidatingKey = true
         keyValidationError = nil
         keyValidationSuccess = false
+        keyValidationProviderLabel = nil
 
         Task {
-            let valid = await TranscriptionService.validateAPIKey(
-                key,
-                baseURL: baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
-            )
+            let valid = await TranscriptionService.validateAPIKey(key, baseURL: resolvedBaseURL)
             await MainActor.run {
                 isValidatingKey = false
                 if valid {
                     appState.apiKey = key
                     keyValidationSuccess = true
+                    keyValidationProviderLabel = TranscriptionService.detectProvider(baseURL: resolvedBaseURL, key: key)
                 } else {
                     keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
                 }
             }
         }
+    }
+
+    /// Live status line above the API key field. Returns `nil` when there is
+    /// no input and no saved key (the caption fallback shows). When a saved
+    /// or in-progress key is present, returns:
+    ///   - `(text: "Configured for Groq", isMismatch: false)` when the
+    ///     configured Base URL host maps to a known provider, optionally with
+    ///     a key preview when both are non-empty
+    ///   - `(text: "OpenAI key with Groq Base URL — open Advanced Provider Settings to switch.", isMismatch: true)`
+    ///     when the typed key's provider does not match the host's
+    private var providerStatusLabel: (text: String, isMismatch: Bool)? {
+        let trimmedKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedBaseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedBaseURL = trimmedBaseURL.isEmpty ? AppState.defaultAPIBaseURL : trimmedBaseURL
+
+        let savedKey = appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidateKey = trimmedKey.isEmpty ? savedKey : trimmedKey
+        if candidateKey.isEmpty { return nil }
+
+        let hostProvider = TranscriptionService.detectProviderFromHost(baseURL: resolvedBaseURL)
+        let keyProvider = TranscriptionService.detectProviderFromKey(key: candidateKey)
+
+        if let hostProvider, let keyProvider,
+           keyProvider != hostProvider,
+           keyProvider != "OpenAI-compatible" {
+            return ("\(keyProvider) key with \(hostProvider) Base URL — open Advanced Provider Settings to switch.", true)
+        }
+
+        if let hostProvider {
+            if !candidateKey.isEmpty, let preview = providerKeyPreview(candidateKey) {
+                return ("Configured for \(hostProvider) — \(preview)", false)
+            }
+            return ("Configured for \(hostProvider).", false)
+        }
+
+        return nil
+    }
+
+    /// Six-and-six preview of an API key — `gsk_5B…zX9p2c`. Returns nil if
+    /// the key is too short to preview without revealing the middle.
+    private func providerKeyPreview(_ key: String) -> String? {
+        guard key.count >= 14 else { return nil }
+        let prefix = key.prefix(6)
+        let suffix = key.suffix(6)
+        return "\(prefix)…\(suffix)"
     }
 
     // MARK: Output Language
