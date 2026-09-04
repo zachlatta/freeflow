@@ -4,6 +4,8 @@ import Foundation
 struct FreeFlowTests {
     static func main() {
         AppContextServiceTests.run()
+        GeminiLiveTranscriptionTests.run()
+        GeminiTranscriptionTests.run()
         ModelConfigurationTests.run()
         ShortcutCoreTests.run()
         SemanticVersionTests.run()
