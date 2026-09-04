@@ -543,6 +543,7 @@ struct GeneralSettingsView: View {
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
     @State private var keyValidationSuccess = false
+    @FocusState private var apiKeyFocused: Bool
     @State private var customVocabularyInput: String = ""
     @FocusState private var customVocabularyFocused: Bool
     @State private var micPermissionGranted = false
@@ -982,14 +983,42 @@ struct GeneralSettingsView: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .disabled(isValidatingKey)
-                    .onChange(of: apiKeyInput) { _ in
-                        keyValidationError = nil
-                        keyValidationSuccess = false
+                ZStack {
+                    TextField("Paste your API key", text: editableMaskedKeyBinding)
+                        .focused($apiKeyFocused)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .disabled(isValidatingKey)
+                        .onChange(of: apiKeyInput) { _ in
+                            keyValidationError = nil
+                            keyValidationSuccess = false
+                        }
+                        .opacity(shouldRevealMaskedKey ? 0 : 1)
+                        .allowsHitTesting(!shouldRevealMaskedKey)
+
+                    if shouldRevealMaskedKey {
+                        HStack {
+                            Text(maskedDisplayKey(apiKeyInput) ?? apiKeyInput)
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(nsColor: .textBackgroundColor))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color.primary.opacity(0.15), lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            apiKeyFocused = true
+                        }
                     }
+                }
 
                 Button(isValidatingKey ? "Validating..." : "Save") {
                     validateAndSaveKey()
@@ -1029,6 +1058,40 @@ struct GeneralSettingsView: View {
             }
             .padding(.top, 4)
         }
+    }
+
+    /// Renders an API key as `prefix6 + 16 chars + suffix6` so the user can
+    /// identify which key is loaded without exposing the middle. Default uses
+    /// bullet for the read-only display; callers pass an asterisk for the
+    /// editable display so clicking into the field does not flood it with
+    /// heavy dots.
+    private func maskedDisplayKey(_ key: String, char: Character = "•") -> String? {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 16 else { return nil }
+        let middle = String(repeating: char, count: 16)
+        return "\(trimmed.prefix(6))\(middle)\(trimmed.suffix(6))"
+    }
+
+    /// Editable binding that shows the key as `prefix6 + 16 asterisks + suffix6`
+    /// while still letting the user Cmd-A and paste a fresh value over the top.
+    /// Any input still containing an asterisk is rejected — that signals the
+    /// user typed mid-mask rather than doing a full replacement.
+    private var editableMaskedKeyBinding: Binding<String> {
+        Binding(
+            get: { maskedDisplayKey(apiKeyInput, char: "*") ?? apiKeyInput },
+            set: { newValue in
+                if newValue.contains("*") { return }
+                apiKeyInput = newValue
+            }
+        )
+    }
+
+    /// Show the masked-preview view (instead of the editable field) when the
+    /// field is unfocused AND has enough content to safely mask.
+    private var shouldRevealMaskedKey: Bool {
+        guard !apiKeyFocused else { return false }
+        let typed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.count >= 16
     }
 
     private func validateAndSaveKey() {
