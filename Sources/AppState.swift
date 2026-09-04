@@ -1849,6 +1849,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Minimum hold time before an Fn/Globe hold-to-talk press starts
+    /// dictation. Fn events pass through to macOS (see ShortcutMatcher), so a
+    /// quick tap can perform the system Globe action (e.g. Change Input
+    /// Source). A short floor keeps brief taps from also starting a recording
+    /// on key-down; releasing before the floor cancels the pending start.
+    private static let minimumFnHoldStartDelay: TimeInterval = 0.2
+
+    private func effectiveShortcutStartDelay(for mode: RecordingTriggerMode) -> TimeInterval {
+        guard mode == .hold, activeShortcutConfiguration.hold.usesFnKey else {
+            return shortcutStartDelay
+        }
+        return max(shortcutStartDelay, Self.minimumFnHoldStartDelay)
+    }
+
     private func scheduleShortcutStart(mode: RecordingTriggerMode) {
         cancelPendingShortcutStart(resetMode: false)
         pendingSelectionSnapshot = contextService.collectSelectionSnapshot()
@@ -1856,7 +1870,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             commandModeManualModifier.shortcutModifier
         )
         pendingShortcutStartMode = mode
-        let delay = shortcutStartDelay
+        let delay = effectiveShortcutStartDelay(for: mode)
 
         guard delay > 0 else {
             pendingShortcutStartMode = nil
