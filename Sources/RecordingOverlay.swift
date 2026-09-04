@@ -11,6 +11,11 @@ final class RecordingOverlayState: ObservableObject {
     @Published var updateVersion: String = ""
     @Published var errorMessage: String?
     @Published var toastID: UUID?
+    /// Icon of the app that was frontmost when this recording session began —
+    /// i.e. the app the user is dictating into. Captured once per session
+    /// (see `RecordingOverlayManager.captureFrontmostAppIconIfNeeded`) since
+    /// FreeFlow's overlay panel never activates and steals focus.
+    @Published var frontmostAppIcon: NSImage?
 }
 
 enum OverlayPhase {
@@ -19,6 +24,31 @@ enum OverlayPhase {
     case transcribing
     case feedback
     case updateAvailable
+}
+
+/// The three selectable looks for the recording indicator. Persisted as a
+/// String under the `overlay_style` UserDefaults key (AppStorage-compatible
+/// via RawRepresentable). See `migrateLegacyOverlayPreferenceIfNeeded()` for
+/// the one-time upgrade from the old `use_compact_overlay` Bool.
+enum OverlayStyle: String, CaseIterable {
+    case minimalist
+    case pill
+    case notch
+
+    /// One-time migration from the legacy `use_compact_overlay` Bool
+    /// (true = minimalist wings, false = drop-down pill) to the new
+    /// three-way `overlay_style` String key. Safe to call on every launch —
+    /// it no-ops once `overlay_style` has been written.
+    static func migrateLegacyOverlayPreferenceIfNeeded() {
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: "overlay_style") == nil else { return }
+        guard let legacyCompact = defaults.object(forKey: "use_compact_overlay") as? Bool else { return }
+        defaults.set((legacyCompact ? OverlayStyle.minimalist : .pill).rawValue, forKey: "overlay_style")
+    }
+
+    static var current: OverlayStyle {
+        OverlayStyle(rawValue: UserDefaults.standard.string(forKey: "overlay_style") ?? "") ?? .minimalist
+    }
 }
 
 // MARK: - NSScreen Helpers
@@ -70,15 +100,175 @@ private func makeNotchContent<V: View>(
     return hosting
 }
 
+/// Content builder for the `.notch` overlay style. Fully transparent at the
+/// window level — `NotchIndicatorView` draws the app-icon badge and the
+/// waveform pill as two independent shapes with a gap between them, rather
+/// than one shared capsule, so they read as separate floating elements.
+private func makeTransparentFloatingContent<V: View>(
+    width: CGFloat,
+    height: CGFloat,
+    rootView: V
+) -> NSView {
+    let hosting = NSHostingView(rootView: rootView.frame(width: width, height: height))
+    hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
+    hosting.autoresizingMask = [.width, .height]
+    return hosting
+}
+
+/// Shared "floating glass" chip style for both the icon badge and the
+/// waveform pill in the `.notch` style — same translucent fill + subtle
+/// top-lit stroke on both so they read as one cohesive, minimal design
+/// language despite being visually separate shapes.
+private extension View {
+    func notchChipStyle<S: InsettableShape>(_ shape: S) -> some View {
+        self
+            .background(shape.fill(.black.opacity(0.82)))
+            .overlay(
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(0.20), .white.opacity(0.02)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.75
+                )
+            )
+            .clipShape(shape)
+    }
+}
+
 // MARK: - Manager
+
+/// Whether the `.notch` style is currently drawing its always-on idle
+/// hairline (nothing happening) or has expanded into the full indicator
+/// (recording/transcribing/feedback). Only relevant when `OverlayStyle.current
+/// == .notch` — the other two styles never show anything while idle.
+private enum NotchDisplayMode {
+    case idleLine
+    case active
+}
 
 final class RecordingOverlayManager {
     private var overlayWindow: NSPanel?
     private let overlayState = RecordingOverlayState()
     private var lockedOverlayWidth: CGFloat?
+    private var notchDisplayMode: NotchDisplayMode = .idleLine
+    /// Set by Settings/Setup (and at launch) to mirror `OverlayStyle.current
+    /// == .notch`. Gates whether the idle hairline is kept alive at all —
+    /// the other two overlay styles have no persistent idle presence.
+    private var notchIdleEnabled = false
 
     var onStopButtonPressed: (() -> Void)?
     var onUpdateOverlayPressed: (() -> Void)?
+
+    /// Ultra-thin "listening" hairline width/height for the `.notch` style's
+    /// idle state — deliberately much smaller than any active-state frame so
+    /// the expand-on-record transition reads as the indicator "opening up."
+    private static let idleLineWidth: CGFloat = 56
+    private static let idleLineHeight: CGFloat = 4
+
+    /// Breathing room between the true top of the screen and the `.notch`
+    /// style's content (both the idle hairline and the active capsule/badge)
+    /// — floats a few points clear of the edge instead of sitting flush
+    /// against it.
+    private static let notchTopGap: CGFloat = 10
+
+    init() {
+        // The idle hairline is long-lived (unlike the active indicator, which
+        // only re-evaluates targetScreen at the start of each new recording
+        // session) — reposition it if a monitor is plugged/unplugged so it's
+        // never left stranded on a display that moved or disappeared.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleScreenParametersChanged()
+        }
+    }
+
+    /// Call whenever the user's overlay-style preference may have changed
+    /// (app launch, or live from the Settings/Setup picker). Turning this on
+    /// immediately shows the idle hairline; turning it off tears down any
+    /// idle-only panel so the other styles' "nothing shown until recording"
+    /// behavior is preserved.
+    func setNotchIdleEnabled(_ enabled: Bool) {
+        DispatchQueue.main.async {
+            self.notchIdleEnabled = enabled
+            if enabled, OverlayStyle.current == .notch, self.overlayWindow == nil {
+                self.showIdleNotchLine(animated: false)
+            } else if !enabled, self.notchDisplayMode == .idleLine, self.overlayWindow != nil {
+                self.dismissAll()
+            }
+        }
+    }
+
+    /// Repositions the idle hairline for the current `targetScreen`. Call
+    /// when the display arrangement changes (monitor plugged/unplugged) —
+    /// unlike the active indicator, which only re-evaluates its screen at
+    /// the start of each new recording session, the hairline is long-lived
+    /// and would otherwise be stranded on a display that moved or vanished.
+    func handleScreenParametersChanged() {
+        DispatchQueue.main.async {
+            guard self.notchDisplayMode == .idleLine, self.overlayWindow != nil else { return }
+            self.showIdleNotchLine(animated: false)
+        }
+    }
+
+    private func showIdleNotchLine(animated: Bool) {
+        notchDisplayMode = .idleLine
+        let frame = idleLineFrame
+        guard let screen = targetScreen else { return }
+
+        if let panel = overlayWindow {
+            panel.hasShadow = false
+            panel.ignoresMouseEvents = true
+            panel.contentView = makeIdleLineContent(frame: frame)
+            resize(panel: panel, to: frame, animated: animated)
+            panel.alphaValue = 1
+            panel.orderFrontRegardless()
+            return
+        }
+
+        let panel = makeOverlayPanel(width: frame.width, height: frame.height)
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.contentView = makeIdleLineContent(frame: frame)
+        panel.setFrame(frame, display: true)
+        panel.alphaValue = 1
+        panel.orderFrontRegardless()
+        overlayWindow = panel
+        _ = screen
+    }
+
+    /// Top edge for `.notch`-style content of the given height: a few points
+    /// clear of the true screen edge (`notchTopGap`), and — on a notched
+    /// display, which has no physical pixels flush with the true top edge
+    /// outside the notch cutout itself — measured down from the menu bar
+    /// rather than the screen frame, so the content renders into real pixels.
+    private func notchTopY(forContentHeight height: CGFloat, on screen: NSScreen) -> CGFloat {
+        let referenceMaxY = screenHasNotch ? screen.visibleFrame.maxY : screen.frame.maxY
+        return referenceMaxY - Self.notchTopGap - height
+    }
+
+    private var idleLineFrame: NSRect {
+        guard let screen = targetScreen else { return .zero }
+        let width = Self.idleLineWidth
+        let height = Self.idleLineHeight
+        let x = screen.frame.midX - width / 2
+        let y = notchTopY(forContentHeight: height, on: screen)
+        return NSRect(x: x, y: y, width: width, height: height)
+    }
+
+    private func makeIdleLineContent(frame: NSRect) -> NSView {
+        let rootView = IdleNotchLineView()
+            .frame(width: frame.width, height: frame.height)
+            .clipShape(Capsule())
+        let hosting = NSHostingView(rootView: rootView)
+        hosting.frame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height)
+        hosting.autoresizingMask = [.width, .height]
+        return hosting
+    }
 
     /// The screen the overlay should drop down on. The user picks one of
     /// three modes in Settings, stored in UserDefaults under
@@ -130,24 +320,40 @@ final class RecordingOverlayManager {
 
     func showInitializing(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
         DispatchQueue.main.async {
+            self.notchDisplayMode = .active
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .initializing
             self.overlayState.audioLevel = 0
-            self.showOverlayPanel(animatedResize: false)
+            self.captureFrontmostAppIconIfNeeded()
+            self.showOverlayPanel(animatedResize: true)
         }
     }
 
     func showRecording(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
         DispatchQueue.main.async {
+            self.notchDisplayMode = .active
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
             self.overlayState.phase = .recording
             self.overlayState.audioLevel = 0
+            self.captureFrontmostAppIconIfNeeded()
             self.showOverlayPanel(animatedResize: true)
         }
+    }
+
+    /// Grabs the icon of the currently-frontmost app so the `.notch` overlay
+    /// can show "which app you're dictating into," Superwhisper-style. Only
+    /// meaningful right as a session starts — FreeFlow's overlay panel is
+    /// non-activating, so the frontmost app stays the user's target app for
+    /// the whole session. Skipped if we already captured one this session
+    /// (the initializing → recording handoff would otherwise refetch and
+    /// briefly flash FreeFlow's own icon if focus is ever mid-transition).
+    private func captureFrontmostAppIconIfNeeded() {
+        guard overlayState.frontmostAppIcon == nil else { return }
+        overlayState.frontmostAppIcon = NSWorkspace.shared.frontmostApplication?.icon
     }
 
     func transitionToRecording(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
@@ -203,6 +409,7 @@ final class RecordingOverlayManager {
             return String(message[..<cutoff]) + "…"
         }()
         DispatchQueue.main.async {
+            self.notchDisplayMode = .active
             let toastID = UUID()
             self.overlayState.errorMessage = truncated
             self.overlayState.toastID = toastID
@@ -218,13 +425,14 @@ final class RecordingOverlayManager {
                 }
                 self.overlayState.errorMessage = nil
                 self.overlayState.toastID = nil
-                self.dismissAll()
+                self.dismissOrReturnToIdle()
             }
         }
     }
 
     func showUpdateAvailable(version: String) {
         DispatchQueue.main.async {
+            self.notchDisplayMode = .active
             self.lockedOverlayWidth = nil
             self.overlayState.isCommandMode = false
             self.overlayState.updateVersion = version
@@ -235,14 +443,31 @@ final class RecordingOverlayManager {
 
     func dismiss() {
         DispatchQueue.main.async {
-            self.dismissAll()
+            self.dismissOrReturnToIdle()
         }
+    }
+
+    /// Shared by `dismiss()` and the error-toast auto-hide timer: for the
+    /// `.notch` style with idle mode on, "dismiss" means shrink back to the
+    /// listening hairline rather than tearing the panel down completely.
+    private func dismissOrReturnToIdle() {
+        guard notchIdleEnabled, OverlayStyle.current == .notch else {
+            dismissAll()
+            return
+        }
+        overlayState.errorMessage = nil
+        overlayState.toastID = nil
+        overlayState.isCommandMode = false
+        overlayState.updateVersion = ""
+        overlayState.frontmostAppIcon = nil
+        showIdleNotchLine(animated: true)
     }
 
     private func showOverlayPanel(animatedResize: Bool) {
         let frame = overlayFrame
 
         if let panel = overlayWindow {
+            panel.hasShadow = useNotchStyleLayout
             panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
             panel.contentView = makeOverlayContent(frame: frame)
             resize(panel: panel, to: frame, animated: animatedResize)
@@ -252,7 +477,7 @@ final class RecordingOverlayManager {
         }
 
         let panel = makeOverlayPanel(width: frame.width, height: frame.height)
-        panel.hasShadow = false
+        panel.hasShadow = useNotchStyleLayout
         panel.ignoresMouseEvents = !overlayAcceptsMouseEvents
         panel.contentView = makeOverlayContent(frame: frame)
 
@@ -281,12 +506,27 @@ final class RecordingOverlayManager {
     }
 
     private func setTranscribingPhase() {
+        notchDisplayMode = .active
         lockedOverlayWidth = overlayWindow?.frame.width ?? overlayWidth
         overlayState.phase = .transcribing
         showOverlayPanel(animatedResize: true)
     }
 
     private func makeOverlayContent(frame: NSRect) -> NSView {
+        if useNotchStyleLayout {
+            let rootView = NotchIndicatorView(
+                state: overlayState,
+                onStopButtonPressed: { [weak self] in
+                    self?.onStopButtonPressed?()
+                }
+            )
+            return makeTransparentFloatingContent(
+                width: frame.width,
+                height: frame.height,
+                rootView: rootView
+            )
+        }
+
         if useWingedLayout {
             // Winged layout: notch x-range stays solid black so the cutout masks it.
             let rootView = WingedRecordingView(
@@ -339,13 +579,28 @@ final class RecordingOverlayManager {
         }
     }
 
-    /// True iff the overlay renders as wings flanking the notch (notched display
-    /// + use_compact_overlay on). updateAvailable and error toasts still use
-    /// the drop-down pill.
+    /// True iff the overlay renders as wings flanking the notch (notched
+    /// display + the "minimalist" style selected). updateAvailable and error
+    /// toasts still use the drop-down pill.
     private var useWingedLayout: Bool {
-        guard screenHasNotch else { return false }
-        let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
-        guard useCompact else { return false }
+        guard screenHasNotch, OverlayStyle.current == .minimalist else { return false }
+        switch overlayState.phase {
+        case .recording, .initializing, .transcribing:
+            return true
+        case .feedback:
+            return overlayState.errorMessage?.isEmpty ?? true
+        case .updateAvailable:
+            return false
+        }
+    }
+
+    /// True iff the overlay renders as the floating "notch" capsule (icon +
+    /// waveform). Only while it has something active to show — the bare
+    /// idle hairline is drawn by `showIdleNotchLine` instead, never through
+    /// this path. Error toasts with a message and updateAvailable keep using
+    /// the wider drop-down pill so the text stays readable.
+    private var useNotchStyleLayout: Bool {
+        guard OverlayStyle.current == .notch, notchDisplayMode == .active else { return false }
         switch overlayState.phase {
         case .recording, .initializing, .transcribing:
             return true
@@ -362,8 +617,23 @@ final class RecordingOverlayManager {
     static let leftWingWidth: CGFloat = wingWidth
     static let rightWingWidth: CGFloat = wingWidth
 
+    /// Fixed height for the active `.notch` icon badge and waveform pill —
+    /// deliberately device-independent (unlike minimalist/pill, which key
+    /// off `notchOverlap`), since the whole point of this style is looking
+    /// the same slim shape on notched and non-notched Macs alike. Both
+    /// elements share this height so their two separate shapes line up.
+    private static let notchActiveHeight: CGFloat = 28
+
     private var overlayFrame: NSRect {
         guard let screen = targetScreen else { return .zero }
+
+        if useNotchStyleLayout {
+            let width = overlayWidth
+            let height = Self.notchActiveHeight
+            let x = screen.frame.midX - width / 2
+            let y = notchTopY(forContentHeight: height, on: screen)
+            return NSRect(x: x, y: y, width: width, height: height)
+        }
 
         if useWingedLayout {
             // Anchor to the screen's auxiliary-area boundaries of the notch;
@@ -381,7 +651,7 @@ final class RecordingOverlayManager {
         }
 
         let width = overlayWidth
-        let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
+        let useCompact = OverlayStyle.current == .minimalist
         let forceDropDownPill = overlayState.phase == .feedback
             && !(overlayState.errorMessage?.isEmpty ?? true)
         // Compact mode: overlay sits flush with the menu bar on every display.
@@ -401,6 +671,10 @@ final class RecordingOverlayManager {
     private var overlayWidth: CGFloat {
         if let lockedOverlayWidth, overlayState.phase == .transcribing {
             return lockedOverlayWidth
+        }
+
+        if useNotchStyleLayout {
+            return notchActiveWidth
         }
 
         if overlayState.phase == .feedback {
@@ -444,6 +718,40 @@ final class RecordingOverlayManager {
         return max(notchWidth, baseWidth)
     }
 
+    /// Width of the whole `.notch` layout — the app-icon badge and the
+    /// waveform pill are two independent shapes with a gap between them
+    /// (see `NotchIndicatorView`), so this is their combined bounding width,
+    /// not one shared capsule. Unlike the other styles, never widened to fit
+    /// a physical notch: this style is meant to look like the same pair of
+    /// slim floating elements everywhere.
+    private var notchActiveWidth: CGFloat {
+        // Bare failure X reuses the same round badge shape as the icon, no
+        // separate pill alongside it.
+        if overlayState.phase == .feedback {
+            return Self.notchActiveHeight
+        }
+
+        return Self.notchActiveHeight + Self.notchElementGap + notchPillWidth
+    }
+
+    /// Gap between the icon badge and the waveform pill.
+    private static let notchElementGap: CGFloat = 10
+
+    private var notchPillWidth: CGFloat {
+        let horizontalPadding: CGFloat = 24
+        let waveformWidth: CGFloat = 26
+        let itemSpacing: CGFloat = 8
+
+        var width = horizontalPadding + waveformWidth
+        if overlayState.isCommandMode {
+            width += itemSpacing + 14
+        }
+        if overlayState.phase == .recording && overlayState.recordingTriggerMode == .toggle {
+            width += itemSpacing + 14
+        }
+        return width
+    }
+
     private func showFeedbackPanel() {
         lockedOverlayWidth = nil
         overlayState.phase = .feedback
@@ -454,6 +762,11 @@ final class RecordingOverlayManager {
         lockedOverlayWidth = nil
         overlayState.isCommandMode = false
         overlayState.updateVersion = ""
+        overlayState.frontmostAppIcon = nil
+        // Full teardown always leaves the notch style ready to reopen as a
+        // fresh idle hairline next time — never stranded in .active with no
+        // panel behind it (see setNotchIdleEnabled for why that matters).
+        notchDisplayMode = .idleLine
         if let panel = overlayWindow {
             panel.orderOut(nil)
             // orderOut alone leaves the panel retained in NSApp.windows with its
@@ -565,6 +878,202 @@ struct WingedRecordingView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
+    }
+}
+
+// MARK: - Notch Style Views
+
+/// Always-on idle state for the `.notch` overlay style — a slow "breathing"
+/// hairline showing FreeFlow is listening for the dictation shortcut. Owns
+/// its own fill (rather than a static background applied by the caller) so
+/// the opacity animation is actually visible.
+struct IdleNotchLineView: View {
+    @State private var isBreathing = false
+
+    var body: some View {
+        Capsule()
+            .fill(Color.white.opacity(isBreathing ? 0.14 : 0.30))
+            .onAppear {
+                withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) {
+                    isBreathing = true
+                }
+            }
+    }
+}
+
+/// Small icon for the app the user is dictating into. Falls back to a
+/// generic waveform glyph if no frontmost-app icon was captured (e.g. no
+/// frontmost app, or it has no `.icon`).
+struct FrontmostAppIconView: View {
+    let icon: NSImage?
+
+    var body: some View {
+        Group {
+            if let icon {
+                Image(nsImage: icon)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "waveform")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .frame(width: 16, height: 16)
+    }
+}
+
+/// Gradient-filled bar for the `.notch` style's waveform — same amplitude
+/// math as `CompactWaveformView`/`CompactWaveformBar`, restyled with a
+/// blue-white glow instead of flat white capsules.
+struct NotchWaveformBar: View {
+    let amplitude: CGFloat
+
+    private let minHeight: CGFloat = 3
+    private let maxHeight: CGFloat = 16
+
+    var body: some View {
+        Capsule()
+            .fill(
+                LinearGradient(
+                    colors: [.white, Color(red: 0.55, green: 0.78, blue: 1.0)],
+                    startPoint: .bottom,
+                    endPoint: .top
+                )
+            )
+            .frame(width: 2.5, height: minHeight + (maxHeight - minHeight) * amplitude)
+    }
+}
+
+struct NotchWaveformView: View {
+    let audioLevel: Float
+    var showsActivityPulse = false
+
+    private static let barCount = 7
+    private static let multipliers: [CGFloat] = [0.35, 0.55, 0.8, 1.0, 0.8, 0.55, 0.35]
+    private static let centerIndex = CGFloat((barCount - 1) / 2)
+
+    var body: some View {
+        Group {
+            if showsActivityPulse {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+                    bars(pulseTime: context.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                bars(pulseTime: nil)
+            }
+        }
+        .frame(height: 18)
+        // One glow for the whole group rather than per-bar — cheaper, and
+        // reads as a single cohesive bloom instead of seven separate halos.
+        .shadow(color: Color(red: 0.45, green: 0.72, blue: 1.0).opacity(0.5), radius: 4)
+    }
+
+    private func bars(pulseTime: TimeInterval?) -> some View {
+        HStack(spacing: 2) {
+            ForEach(0..<Self.barCount, id: \.self) { index in
+                NotchWaveformBar(amplitude: amplitude(for: index, pulseTime: pulseTime))
+                    .animation(.spring(response: 0.18, dampingFraction: 0.88), value: audioLevel)
+            }
+        }
+    }
+
+    private func amplitude(for index: Int, pulseTime: TimeInterval?) -> CGFloat {
+        let level = CGFloat(max(audioLevel, 0))
+        let base = min(level * Self.multipliers[index], 1.0)
+        guard let pulseTime else { return base }
+        let traveling = CGFloat(0.5 + 0.5 * sin((pulseTime * 6.2) - Double(index) * 0.78))
+        let shimmer = CGFloat(0.5 + 0.5 * sin((pulseTime * 3.1) + Double(index) * 0.5))
+        let pulse = traveling * 0.22 + shimmer * 0.06
+        let saturationRelief = base * (0.74 + pulse)
+        let quietPulse = (1.0 - base) * (0.04 + pulse * 0.28)
+        return min(saturationRelief + quietPulse, 1.0)
+    }
+}
+
+/// Active-state content for the `.notch` overlay style: frontmost-app icon
+/// plus a live waveform (or dots/spinner/X depending on phase), all inside
+/// one floating capsule — this is what the idle hairline "opens up" into
+/// when a dictation session starts.
+struct NotchIndicatorView: View {
+    @ObservedObject var state: RecordingOverlayState
+    let onStopButtonPressed: () -> Void
+
+    /// Both chips share this height so their two separate shapes line up —
+    /// keep in sync with `RecordingOverlayManager.notchActiveHeight`.
+    private static let chipHeight: CGFloat = 28
+
+    private var showsLiveRecordingContent: Bool {
+        state.phase == .recording
+    }
+
+    private var showsStopButton: Bool {
+        showsLiveRecordingContent && state.recordingTriggerMode == .toggle
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if state.phase != .feedback {
+                iconBadge
+                    .transition(.opacity)
+            }
+            statusPill
+                .transition(.opacity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
+        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.isCommandMode)
+        .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.recordingTriggerMode)
+    }
+
+    /// The app-icon badge — its own round chip, separate from the waveform
+    /// pill, so "which app you're dictating into" reads as a distinct piece
+    /// of information rather than being fused into the status indicator.
+    private var iconBadge: some View {
+        FrontmostAppIconView(icon: state.frontmostAppIcon)
+            .frame(width: Self.chipHeight, height: Self.chipHeight)
+            .notchChipStyle(Circle())
+    }
+
+    @ViewBuilder
+    private var statusPill: some View {
+        if state.phase == .feedback {
+            Image(systemName: "xmark")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: Self.chipHeight, height: Self.chipHeight)
+                .background(Circle().fill(Color.red.opacity(0.92)))
+        } else {
+            Group {
+                if state.phase == .initializing {
+                    InitializingDotsView()
+                } else if showsLiveRecordingContent {
+                    HStack(spacing: 6) {
+                        if state.isCommandMode {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.92))
+                        }
+                        NotchWaveformView(audioLevel: state.audioLevel, showsActivityPulse: true)
+                        if showsStopButton {
+                            Button(action: onStopButtonPressed) {
+                                Image(systemName: "stop.fill")
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundStyle(.white)
+                                    .frame(width: 14, height: 14)
+                                    .background(Circle().fill(Color.red.opacity(0.92)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                } else {
+                    CompactProcessingIndicatorView()
+                }
+            }
+            .padding(.horizontal, 12)
+            .frame(height: Self.chipHeight)
+            .notchChipStyle(Capsule())
+        }
     }
 }
 

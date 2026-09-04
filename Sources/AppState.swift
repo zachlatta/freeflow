@@ -1849,9 +1849,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Skips the cross-process accessibility round-trip entirely when Edit
+    /// Mode is off, since `resolveSessionIntent` ignores the snapshot's
+    /// contents in that case anyway — keeps a slow AX query (some apps,
+    /// notably Electron/Chromium, can take tens of ms to respond) out of the
+    /// hotkey-to-overlay latency path for the common case.
+    private func collectSelectionSnapshotIfNeeded() -> AppSelectionSnapshot {
+        isCommandModeEnabled ? contextService.collectSelectionSnapshot() : .empty
+    }
+
     private func scheduleShortcutStart(mode: RecordingTriggerMode) {
         cancelPendingShortcutStart(resetMode: false)
-        pendingSelectionSnapshot = contextService.collectSelectionSnapshot()
+        pendingSelectionSnapshot = collectSelectionSnapshotIfNeeded()
         pendingManualCommandInvocation = hotkeyManager.currentPressedModifiers.contains(
             commandModeManualModifier.shortcutModifier
         )
@@ -2008,7 +2017,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             os_log(.info, log: recordingLog, "accessibility check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
         }
 
-        let selectionSnapshot = selectionSnapshot ?? contextService.collectSelectionSnapshot()
+        let selectionSnapshot = selectionSnapshot ?? collectSelectionSnapshotIfNeeded()
         let manualCommandRequested = manualCommandRequested
             ?? hotkeyManager.currentPressedModifiers.contains(commandModeManualModifier.shortcutModifier)
         guard let resolvedIntent = resolveSessionIntent(
@@ -2061,7 +2070,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
             prepareForMicrophonePermissionPrompt(
                 triggerMode: triggerMode,
-                selectionSnapshot: pendingSelectionSnapshot ?? contextService.collectSelectionSnapshot(),
+                selectionSnapshot: pendingSelectionSnapshot ?? collectSelectionSnapshotIfNeeded(),
                 manualCommandRequested: currentSessionIntent.isManualCommand
             )
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
@@ -2183,52 +2192,29 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Starting..."
         hasShownScreenshotPermissionAlert = false
 
-        // Show initializing dots only if engine takes longer than 0.2s to start
-        var overlayShown = false
+        // Show the overlay immediately so the hotkey feels instant — the
+        // waveform just sits flat until the first real audio buffer arrives,
+        // rather than making the whole overlay wait on mic/session startup.
         cancelRecordingInitializationTimer()
-        let initTimer = DispatchSource.makeTimerSource(queue: .main)
-        recordingInitializationTimer = initTimer
-        initTimer.schedule(deadline: .now() + 0.2)
-        initTimer.setEventHandler { [weak self] in
-            guard let self, !overlayShown else { return }
-            overlayShown = true
-            os_log(.info, log: recordingLog, "engine slow — showing initializing overlay")
-            self.clearPendingOverlayDismissToken()
-            self.overlayManager.showInitializing(
-                mode: self.activeRecordingTriggerMode ?? triggerMode,
-                isCommandMode: self.currentSessionIntent.isCommandMode
-            )
-        }
-        initTimer.resume()
+        overlayManager.showRecording(
+            mode: activeRecordingTriggerMode ?? triggerMode,
+            isCommandMode: currentSessionIntent.isCommandMode
+        )
 
-        // Transition to waveform when first real audio arrives (any non-zero RMS)
+        // Flip the status text once first real audio arrives (any non-zero RMS)
         let deviceUID = selectedMicrophoneID
         audioRecorder.onRecordingReady = { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.cancelRecordingInitializationTimer()
-                os_log(.info, log: recordingLog, "first real audio — transitioning to waveform")
+                os_log(.info, log: recordingLog, "first real audio")
                 self.statusText = "Recording..."
                 self.clearPendingOverlayDismissToken()
-                if overlayShown {
-                    self.overlayManager.transitionToRecording(
-                        mode: self.activeRecordingTriggerMode ?? triggerMode,
-                        isCommandMode: self.currentSessionIntent.isCommandMode
-                    )
-                } else {
-                    self.overlayManager.showRecording(
-                        mode: self.activeRecordingTriggerMode ?? triggerMode,
-                        isCommandMode: self.currentSessionIntent.isCommandMode
-                    )
-                }
-                overlayShown = true
                 self.playAlertSound(named: "Tink")
             }
         }
         audioRecorder.onRecordingFailure = { [weak self] error in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.cancelRecordingInitializationTimer()
                 self.handleRecordingFailure(error)
             }
         }
