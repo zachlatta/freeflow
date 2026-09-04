@@ -2222,7 +2222,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     )
                 }
                 overlayShown = true
+                let isMuted = self.alertSoundsEnabled && SystemAudioStatus.isDefaultOutputMuted()
                 self.playAlertSound(named: "Tink")
+                if isMuted {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                        guard let self, self.isRecording else { return }
+                        self.overlayManager.showError("Unmute to hear sound", dismissAfter: 3.0)
+                    }
+                }
             }
         }
         audioRecorder.onRecordingFailure = { [weak self] error in
