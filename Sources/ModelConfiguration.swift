@@ -8,10 +8,16 @@ public struct ModelConfig {
 }
 
 public struct ModelConfiguration {
+    public static let atlasCloudAPIBaseURL = "https://api.atlascloud.ai/v1"
+    public static let atlasCloudPrimaryModel = "qwen/qwen3.5-flash"
+    public static let atlasCloudReasoningModel = "deepseek-ai/deepseek-v4-pro"
+
     public static let llmModels = [
         "openai/gpt-oss-20b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-safeguard-20b",
+        atlasCloudPrimaryModel,
+        atlasCloudReasoningModel,
         "qwen/qwen3.6-27b",
         "groq/compound",
         "groq/compound-mini"
@@ -31,6 +37,14 @@ public struct ModelConfiguration {
 
     public static func config(for model: String) -> ModelConfig {
         var cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        if cleanModel.hasPrefix("atlascloud/") {
+            cleanModel.removeFirst("atlascloud/".count)
+        } else if cleanModel.hasPrefix("atlas-cloud/") {
+            cleanModel.removeFirst("atlas-cloud/".count)
+        } else if cleanModel.hasPrefix("atlas/") {
+            cleanModel.removeFirst("atlas/".count)
+        }
         
         // Normalize providerless aliases
         if cleanModel == "qwen3-32b" { cleanModel = "qwen/qwen3-32b" }
@@ -38,6 +52,8 @@ public struct ModelConfiguration {
         else if cleanModel == "gpt-oss-20b" { cleanModel = "openai/gpt-oss-20b" }
         else if cleanModel == "gpt-oss-120b" { cleanModel = "openai/gpt-oss-120b" }
         else if cleanModel == "gpt-oss-safeguard-20b" { cleanModel = "openai/gpt-oss-safeguard-20b" }
+        else if cleanModel == "qwen3.5-flash" { cleanModel = atlasCloudPrimaryModel }
+        else if cleanModel == "deepseek-v4-pro" { cleanModel = atlasCloudReasoningModel }
         
         if cleanModel == "openai/gpt-oss-20b" {
             return ModelConfig(
@@ -59,6 +75,20 @@ public struct ModelConfiguration {
                 reasoningEffort: nil,
                 includeReasoning: nil,
                 shouldStripThinkTags: false
+            )
+        } else if cleanModel == Self.atlasCloudPrimaryModel {
+            return ModelConfig(
+                maxCompletionTokens: nil,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
+            )
+        } else if cleanModel == Self.atlasCloudReasoningModel {
+            return ModelConfig(
+                maxCompletionTokens: 4096,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
             )
         } else if cleanModel == "qwen/qwen3-32b" {
             // Model that requires sanitization of thought tags

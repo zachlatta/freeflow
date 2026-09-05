@@ -150,6 +150,39 @@ struct ProviderSettingsFields: View {
         appState.transcriptionAPIKey = trimmed
     }
 
+    private func applyAtlasCloudLLMPreset() {
+        let previousBaseURL = appState.apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let transcriptionBaseURL = previousBaseURL.isEmpty ? AppState.defaultAPIBaseURL : previousBaseURL
+        let canPreserveTranscriptionProvider = transcriptionBaseURL != ModelConfiguration.atlasCloudAPIBaseURL
+        let trimmedTranscriptionURL = appState.transcriptionAPIURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTranscriptionKey = appState.transcriptionAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmedTranscriptionURL.isEmpty && canPreserveTranscriptionProvider {
+            appState.transcriptionAPIURL = transcriptionBaseURL
+            transcriptionAPIURLInput = transcriptionBaseURL
+        }
+
+        if trimmedTranscriptionKey.isEmpty && canPreserveTranscriptionProvider {
+            let currentAPIKey = appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !currentAPIKey.isEmpty {
+                appState.transcriptionAPIKey = currentAPIKey
+                transcriptionAPIKeyInput = currentAPIKey
+            }
+        }
+
+        apiBaseURLInput = ModelConfiguration.atlasCloudAPIBaseURL
+        appState.apiBaseURL = ModelConfiguration.atlasCloudAPIBaseURL
+
+        postProcessingModelDraft = ModelConfiguration.atlasCloudPrimaryModel
+        appState.postProcessingModel = ModelConfiguration.atlasCloudPrimaryModel
+
+        postProcessingFallbackModelDraft = ModelConfiguration.atlasCloudReasoningModel
+        appState.postProcessingFallbackModel = ModelConfiguration.atlasCloudReasoningModel
+
+        contextModelDraft = ModelConfiguration.atlasCloudPrimaryModel
+        appState.contextModel = ModelConfiguration.atlasCloudPrimaryModel
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("API Base URL")
@@ -176,6 +209,11 @@ struct ProviderSettingsFields: View {
                 Button("Reset to Default") {
                     apiBaseURLInput = AppState.defaultAPIBaseURL
                     appState.apiBaseURL = AppState.defaultAPIBaseURL
+                }
+                .font(.caption)
+
+                Button("Atlas Cloud") {
+                    applyAtlasCloudLLMPreset()
                 }
                 .font(.caption)
             }
@@ -982,7 +1020,7 @@ struct GeneralSettingsView: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
+                SecureField("Enter your API key", text: $apiKeyInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .disabled(isValidatingKey)

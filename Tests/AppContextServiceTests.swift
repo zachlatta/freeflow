@@ -7,6 +7,9 @@ enum AppContextServiceTests {
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
+        testAtlasCloudModelsArePredefined()
+        testAtlasCloudAliasesUseAtlasModelConfig()
+        testAtlasCloudQwenOutputIsStripped()
     }
 
     private static func testQwenRawOutputIsSummarized() {
@@ -68,7 +71,57 @@ enum AppContextServiceTests {
     private static func testQwenCleanupDisablesReasoning() {
         let config = ModelConfiguration.config(for: "qwen/qwen3.6-27b")
 
-        TestSupport.expect(config.reasoningEffort == "none", "Qwen cleanup should disable reasoning")
-        TestSupport.expect(config.includeReasoning == false, "Qwen cleanup should exclude reasoning output")
+        expect(config.reasoningEffort == "none", "Qwen cleanup should disable reasoning")
+        expect(config.includeReasoning == false, "Qwen cleanup should exclude reasoning output")
+    }
+
+    private static func testAtlasCloudModelsArePredefined() {
+        expect(
+            ModelConfiguration.llmModels.contains(ModelConfiguration.atlasCloudPrimaryModel),
+            "Atlas Cloud primary model is missing from picker"
+        )
+        expect(
+            ModelConfiguration.llmModels.contains(ModelConfiguration.atlasCloudReasoningModel),
+            "Atlas Cloud reasoning model is missing from picker"
+        )
+    }
+
+    private static func testAtlasCloudAliasesUseAtlasModelConfig() {
+        let qwenConfig = ModelConfiguration.config(for: "atlascloud/qwen/qwen3.5-flash")
+        expect(qwenConfig.shouldStripThinkTags, "Atlas Cloud Qwen output should strip think tags")
+
+        let shortQwenConfig = ModelConfiguration.config(for: "atlas/qwen3.5-flash")
+        expect(shortQwenConfig.shouldStripThinkTags, "Atlas Cloud short Qwen alias should strip think tags")
+
+        let reasoningConfig = ModelConfiguration.config(for: "atlas-cloud/deepseek-ai/deepseek-v4-pro")
+        expect(reasoningConfig.maxCompletionTokens == 4096, "Atlas Cloud reasoning model should set output budget")
+        expect(reasoningConfig.shouldStripThinkTags, "Atlas Cloud reasoning output should strip think tags")
+    }
+
+    private static func testAtlasCloudQwenOutputIsStripped() {
+        let output = """
+        <think>
+        Hidden reasoning should not be included.
+        </think>
+        The user is editing a note in FreeFlow. They likely want a concise rewrite.
+        """
+
+        let summary = AppContextService.activitySummary(from: output, model: "atlas/qwen/qwen3.5-flash")
+
+        expectEqual(
+            summary,
+            "The user is editing a note in FreeFlow. They likely want a concise rewrite."
+        )
+        expect(summary?.contains("Hidden reasoning") == false, "Atlas Cloud Qwen reasoning leaked into summary")
+    }
+
+    private static func expectEqual(_ actual: String?, _ expected: String, file: StaticString = #file, line: UInt = #line) {
+        expect(actual == expected, "Expected \(expected.debugDescription), got \((actual ?? "nil").debugDescription)", file: file, line: line)
+    }
+
+    private static func expect(_ condition: Bool, _ message: String, file: StaticString = #file, line: UInt = #line) {
+        if !condition {
+            fatalError("\(file):\(line): \(message)")
+        }
     }
 }
