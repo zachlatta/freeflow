@@ -526,7 +526,9 @@ Selected text: \(selectedText ?? "None")
 
         let candidateWindows = windows.compactMap { windowInfo -> ScreenshotWindowCandidate? in
             guard let ownerPID = windowInfo[ownerPIDKey] as? Int else { return nil }
-            guard let isOnScreen = windowInfo[onScreenKey] as? Bool, isOnScreen else { return nil }
+            // The list is fetched with .optionOnScreenOnly, and kCGWindowIsOnscreen
+            // is an optional key, so a missing key still means onscreen.
+            if let isOnScreen = windowInfo[onScreenKey] as? Bool, !isOnScreen { return nil }
             guard let windowIDValue = windowInfo[windowIDKey] as? Int else { return nil }
             let layer = (windowInfo[layerKey] as? Int) ?? 0
             let bounds = boundsRect(windowInfo[boundsKey])
