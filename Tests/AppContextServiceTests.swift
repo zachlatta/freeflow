@@ -2,11 +2,119 @@ import Foundation
 
 enum AppContextServiceTests {
     static func run() {
+        testScreenshotFallbackRejectsWindowsFromOtherProcesses()
+        testScreenshotSelectionPrefersFocusedWindowBounds()
+        testScreenshotSelectionUsesFocusedWindowTitleWhenBoundsAreUnavailable()
+        testScreenshotFallbackUsesBestFrontmostProcessWindow()
         testQwenRawOutputIsSummarized()
         testQwenReasoningOutputIsStripped()
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
+    }
+
+    private static func testScreenshotFallbackRejectsWindowsFromOtherProcesses() {
+        let selectedWindowID = AppContextService.screenshotWindowID(
+            processIdentifier: 42,
+            focusedWindowBounds: nil,
+            focusedWindowTitle: nil,
+            candidates: [
+                ScreenshotWindowCandidate(
+                    id: 9001,
+                    processIdentifier: 84,
+                    layer: 0,
+                    bounds: CGRect(x: 0, y: 0, width: 1280, height: 720),
+                    title: "Synthetic unrelated window"
+                )
+            ]
+        )
+
+        TestSupport.expectEqual(selectedWindowID, nil)
+    }
+
+    private static func testScreenshotSelectionPrefersFocusedWindowBounds() {
+        let selectedWindowID = AppContextService.screenshotWindowID(
+            processIdentifier: 42,
+            focusedWindowBounds: CGRect(x: 500, y: 100, width: 400, height: 300),
+            focusedWindowTitle: nil,
+            candidates: [
+                ScreenshotWindowCandidate(
+                    id: 100,
+                    processIdentifier: 42,
+                    layer: 0,
+                    bounds: CGRect(x: 0, y: 0, width: 1600, height: 900),
+                    title: "Synthetic background window"
+                ),
+                ScreenshotWindowCandidate(
+                    id: 101,
+                    processIdentifier: 42,
+                    layer: 0,
+                    bounds: CGRect(x: 500, y: 100, width: 400, height: 300),
+                    title: "Synthetic focused window"
+                )
+            ]
+        )
+
+        TestSupport.expectEqual(selectedWindowID, 101)
+    }
+
+    private static func testScreenshotSelectionUsesFocusedWindowTitleWhenBoundsAreUnavailable() {
+        let selectedWindowID = AppContextService.screenshotWindowID(
+            processIdentifier: 42,
+            focusedWindowBounds: nil,
+            focusedWindowTitle: "Synthetic focused document",
+            candidates: [
+                ScreenshotWindowCandidate(
+                    id: 200,
+                    processIdentifier: 42,
+                    layer: 0,
+                    bounds: CGRect(x: 0, y: 0, width: 1400, height: 900),
+                    title: "Synthetic unrelated document"
+                ),
+                ScreenshotWindowCandidate(
+                    id: 201,
+                    processIdentifier: 42,
+                    layer: 0,
+                    bounds: CGRect(x: 100, y: 100, width: 800, height: 600),
+                    title: "Synthetic focused document — Edited"
+                )
+            ]
+        )
+
+        TestSupport.expectEqual(selectedWindowID, 201)
+    }
+
+    private static func testScreenshotFallbackUsesBestFrontmostProcessWindow() {
+        let selectedWindowID = AppContextService.screenshotWindowID(
+            processIdentifier: 42,
+            focusedWindowBounds: nil,
+            focusedWindowTitle: nil,
+            candidates: [
+                ScreenshotWindowCandidate(
+                    id: 300,
+                    processIdentifier: 42,
+                    layer: 1,
+                    bounds: CGRect(x: 0, y: 0, width: 1200, height: 800),
+                    title: nil
+                ),
+                ScreenshotWindowCandidate(
+                    id: 301,
+                    processIdentifier: 42,
+                    layer: 0,
+                    bounds: CGRect(x: 20, y: 20, width: 900, height: 700),
+                    title: nil
+                ),
+                ScreenshotWindowCandidate(
+                    id: 302,
+                    processIdentifier: 84,
+                    layer: 0,
+                    bounds: CGRect(x: 0, y: 0, width: 1600, height: 1000),
+                    title: nil
+                )
+            ]
+        )
+
+        TestSupport.expectEqual(selectedWindowID, 301)
     }
 
     private static func testQwenRawOutputIsSummarized() {

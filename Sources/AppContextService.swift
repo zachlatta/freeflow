@@ -26,6 +26,14 @@ struct AppContext {
     }
 }
 
+struct ScreenshotWindowCandidate {
+    let id: Int
+    let processIdentifier: Int
+    let layer: Int
+    let bounds: CGRect?
+    let title: String?
+}
+
 final class AppContextService {
     static let defaultContextModel = "qwen/qwen3.6-27b"
     static let defaultContextPrompt = """
@@ -70,6 +78,77 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     private func resolveContextPrompt() -> String {
         let trimmedPrompt = customContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedPrompt.isEmpty ? Self.defaultContextPrompt : trimmedPrompt
+    }
+
+    static func screenshotWindowID(
+        processIdentifier: Int,
+        focusedWindowBounds: CGRect?,
+        focusedWindowTitle: String?,
+        candidates: [ScreenshotWindowCandidate]
+    ) -> Int? {
+        let processCandidates = candidates.filter {
+            $0.processIdentifier == processIdentifier
+        }
+        guard !processCandidates.isEmpty else { return nil }
+
+        if let focusedWindowBounds, !focusedWindowBounds.isNull {
+            let overlappingCandidates = processCandidates.compactMap { candidate -> (ScreenshotWindowCandidate, CGFloat)? in
+                guard let candidateBounds = candidate.bounds else { return nil }
+                let intersection = candidateBounds.intersection(focusedWindowBounds)
+                guard !intersection.isNull else { return nil }
+                return (candidate, intersection.width * intersection.height)
+            }
+
+            if let focusedCandidate = overlappingCandidates.sorted(by: { lhs, rhs in
+                if lhs.0.layer == rhs.0.layer {
+                    if lhs.1 != rhs.1 {
+                        return lhs.1 > rhs.1
+                    }
+                    let lhsArea = (lhs.0.bounds?.width ?? 1) * (lhs.0.bounds?.height ?? 1)
+                    let rhsArea = (rhs.0.bounds?.width ?? 1) * (rhs.0.bounds?.height ?? 1)
+                    return lhsArea < rhsArea
+                }
+                return lhs.0.layer < rhs.0.layer
+            }).first?.0 {
+                return focusedCandidate.id
+            }
+        }
+
+        let normalizedFocusedTitle = focusedWindowTitle?
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalizedFocusedTitle, !normalizedFocusedTitle.isEmpty {
+            let titleMatches = processCandidates.filter { candidate in
+                guard let normalizedTitle = candidate.title?
+                    .lowercased()
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                      !normalizedTitle.isEmpty else {
+                    return false
+                }
+                return normalizedTitle == normalizedFocusedTitle
+                    || normalizedTitle.contains(normalizedFocusedTitle)
+            }
+
+            if let focusedCandidate = sortedScreenshotCandidates(titleMatches).first {
+                return focusedCandidate.id
+            }
+        }
+
+        return sortedScreenshotCandidates(processCandidates).first?.id
+    }
+
+    private static func sortedScreenshotCandidates(
+        _ candidates: [ScreenshotWindowCandidate]
+    ) -> [ScreenshotWindowCandidate] {
+        candidates.sorted { lhs, rhs in
+            if lhs.layer != rhs.layer {
+                return lhs.layer < rhs.layer
+            }
+
+            let lhsArea = (lhs.bounds?.width ?? 1) * (lhs.bounds?.height ?? 1)
+            let rhsArea = (rhs.bounds?.width ?? 1) * (rhs.bounds?.height ?? 1)
+            return lhsArea > rhsArea
+        }
     }
 
     func collectSelectionSnapshot() -> AppSelectionSnapshot {
@@ -445,120 +524,44 @@ Selected text: \(selectedText ?? "None")
         let boundsKey = kCGWindowBounds as String
         let nameKey = kCGWindowName as String
 
-        struct CandidateWindow {
-            let id: CGWindowID
-            let layer: Int
-            let area: Int
-            let bounds: CGRect?
-            let name: String?
-        }
-
-        let candidateWindows = windows.compactMap { windowInfo -> CandidateWindow? in
-            guard let ownerPID = windowInfo[ownerPIDKey] as? Int,
-                  ownerPID == processIdentifier else {
-                return nil
-            }
-            guard let isOnScreen = windowInfo[onScreenKey] as? Bool, isOnScreen else { return nil }
+        let candidateWindows = windows.compactMap { windowInfo -> ScreenshotWindowCandidate? in
+            guard let ownerPID = windowInfo[ownerPIDKey] as? Int else { return nil }
+            // The list is fetched with .optionOnScreenOnly, and kCGWindowIsOnscreen
+            // is an optional key, so a missing key still means onscreen.
+            if let isOnScreen = windowInfo[onScreenKey] as? Bool, !isOnScreen { return nil }
             guard let windowIDValue = windowInfo[windowIDKey] as? Int else { return nil }
             let layer = (windowInfo[layerKey] as? Int) ?? 0
             let bounds = boundsRect(windowInfo[boundsKey])
-            let width = bounds?.width ?? 1
-            let height = bounds?.height ?? 1
-            let area = Int(width * height)
-            let name = trimmedText(windowInfo[nameKey] as? String)
 
-            return CandidateWindow(
-                id: CGWindowID(windowIDValue),
+            return ScreenshotWindowCandidate(
+                id: windowIDValue,
+                processIdentifier: ownerPID,
                 layer: layer,
-                area: area,
                 bounds: bounds,
-                name: name
+                title: trimmedText(windowInfo[nameKey] as? String)
             )
         }
 
-        if let focusedWindowBounds = focusedWindowBounds(from: appElement), !focusedWindowBounds.isNull {
-            if let activeWindow = candidateWindows
-                .compactMap({ candidate -> (CandidateWindow, CGFloat)? in
-                    guard let candidateBounds = candidate.bounds else { return nil }
-                    let intersection = candidateBounds.intersection(focusedWindowBounds)
-                    guard !intersection.isNull else { return nil }
-                    let overlap = intersection.width * intersection.height
-                    return (candidate, overlap)
-                })
-                .sorted(by: { lhs, rhs in
-                    if lhs.0.layer == rhs.0.layer {
-                        return lhs.1 > rhs.1
-                    }
-                    return lhs.0.layer < rhs.0.layer
-                })
-                    .first?.0 {
-                if let dataURL = captureWindowImage(
-                    windowID: activeWindow.id,
-                    fileType: .jpeg,
-                    mimeType: "image/jpeg",
-                    compression: screenshotCompressionPrimary,
-                    maxDimension: screenshotMaxDimension
-                ) {
-                    return (dataURL, "image/jpeg", nil)
-                }
-            }
-
-            if let focusedWindowTitle,
-               let activeWindow = candidateWindows
-                   .filter({ candidate in
-                       let normalizedName = candidate.name?
-                           .lowercased()
-                           .trimmingCharacters(in: .whitespacesAndNewlines)
-                       let normalizedTarget = focusedWindowTitle
-                           .lowercased()
-                           .trimmingCharacters(in: .whitespacesAndNewlines)
-                       guard let normalizedName, !normalizedName.isEmpty,
-                             !normalizedTarget.isEmpty else {
-                           return false
-                       }
-
-                       return normalizedName == normalizedTarget || normalizedName.contains(normalizedTarget)
-                   })
-                   .sorted(by: { lhs, rhs in
-                       if lhs.layer == rhs.layer {
-                           return lhs.area > rhs.area
-                       }
-                       return lhs.layer < rhs.layer
-                   })
-                   .first {
-                if let dataURL = captureWindowImage(
-                    windowID: activeWindow.id,
-                    fileType: .jpeg,
-                    mimeType: "image/jpeg",
-                    compression: screenshotCompressionPrimary,
-                    maxDimension: screenshotMaxDimension
-                ) {
-                    return (dataURL, "image/jpeg", nil)
-                }
-            }
-        }
-
-        guard let fullScreenImage = CGWindowListCreateImage(
-            CGRect.infinite,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.bestResolution]
+        guard let windowID = Self.screenshotWindowID(
+            processIdentifier: Int(processIdentifier),
+            focusedWindowBounds: focusedWindowBounds(from: appElement),
+            focusedWindowTitle: focusedWindowTitle,
+            candidates: candidateWindows
         ) else {
-            return (nil, nil, "Could not capture screenshot from the active window")
+            return (nil, nil, "Could not find an on-screen window for the active application")
         }
 
-        if let croppedImage = croppedWhitespaceImage(from: fullScreenImage),
-           let dataURL = convertImageToDataURL(
-            croppedImage,
-            mimeType: "image/jpeg",
+        if let dataURL = captureWindowImage(
+            windowID: CGWindowID(windowID),
             fileType: .jpeg,
+            mimeType: "image/jpeg",
             compression: screenshotCompressionPrimary,
             maxDimension: screenshotMaxDimension
         ) {
             return (dataURL, "image/jpeg", nil)
         }
 
-        return (nil, nil, "Could not capture screenshot within size limits")
+        return (nil, nil, "Could not capture screenshot from the active window within size limits")
     }
 
     private func captureWindowImage(
@@ -661,74 +664,6 @@ Selected text: \(selectedText ?? "None")
         }
 
         return nil
-    }
-
-    private func croppedWhitespaceImage(from image: CGImage) -> CGImage? {
-        let width = image.width
-        let height = image.height
-        guard width > 0, height > 0 else { return nil }
-
-        let bytesPerPixel = 4
-        let bytesPerRow = width * bytesPerPixel
-        let byteCount = bytesPerRow * height
-        var pixelData = Array(repeating: UInt8(0), count: byteCount)
-
-        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(
-                data: &pixelData,
-                width: width,
-                height: height,
-                bitsPerComponent: 8,
-                bytesPerRow: bytesPerRow,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-              ) else {
-            return image
-        }
-
-        let drawRect = CGRect(origin: .zero, size: CGSize(width: width, height: height))
-        context.draw(image, in: drawRect)
-
-        let whiteThreshold: UInt8 = 245
-        let alphaThreshold: UInt8 = 5
-        var minX = width
-        var minY = height
-        var maxX: Int = -1
-        var maxY: Int = -1
-        var hasContent = false
-
-        for y in 0..<height {
-            let rowOffset = y * bytesPerRow
-            for x in 0..<width {
-                let offset = rowOffset + x * bytesPerPixel
-                let r = pixelData[offset]
-                let g = pixelData[offset + 1]
-                let b = pixelData[offset + 2]
-                let a = pixelData[offset + 3]
-
-                if a <= alphaThreshold { continue }
-                if r >= whiteThreshold && g >= whiteThreshold && b >= whiteThreshold {
-                    continue
-                }
-
-                hasContent = true
-                minX = min(minX, x)
-                minY = min(minY, y)
-                maxX = max(maxX, x)
-                maxY = max(maxY, y)
-            }
-        }
-
-        guard hasContent else { return image }
-
-        let cropRect = CGRect(
-            x: CGFloat(minX),
-            y: CGFloat(minY),
-            width: CGFloat(maxX - minX + 1),
-            height: CGFloat(maxY - minY + 1)
-        )
-
-        return image.cropping(to: cropRect) ?? image
     }
 
     private func resizedImage(for image: CGImage, maxDimension: CGFloat) -> CGImage? {
