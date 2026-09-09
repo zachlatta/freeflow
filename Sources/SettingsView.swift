@@ -1398,7 +1398,7 @@ struct GeneralSettingsView: View {
 
     private var vocabularySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Words and phrases to preserve during post-processing.")
+            Text("Words and phrases to spell correctly. The first 15 are sent to the transcription model as a spelling hint, and the full list guides post-processing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
