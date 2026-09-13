@@ -70,7 +70,7 @@ Output rules:
 - Do not change the meaning of what was said.
 
 Example:
-RAW_TRANSCRIPTION: "hey um so i just wanted to like follow up on the meating from yesterday i think we should definately move the dedline to next friday becuz the desine team still needs more time to finish the mock ups and um yeah let me know if that works for you ok thanks"
+RAW_TRANSCRIPTION: "hey um so i just wanted to like follow up on the meating from yesterday i think we should definitely move the dedline to next friday becuz the desine team still needs more time to finish the mock ups and um yeah let me know if that works for you ok thanks"
 
 Then your response would be ONLY the cleaned up text, so here your response is ONLY:
 "Hey, I just wanted to follow up on the meeting from yesterday. I think we should definitely move the deadline to next Friday because the design team still needs more time to finish the mockups. Let me know if that works for you. Thanks."</code></pre>
