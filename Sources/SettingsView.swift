@@ -534,6 +534,7 @@ struct GeneralSettingsView: View {
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
     @AppStorage("use_compact_overlay") private var useCompactOverlay = true
+    @AppStorage("recording_overlay_position") private var overlayPositionRaw = "notch"
     @State private var screensVersion = 0
     @State private var apiKeyInput: String = ""
     @State private var apiBaseURLInput: String = ""
@@ -1139,6 +1140,28 @@ struct GeneralSettingsView: View {
                 isMinimalist: false,
                 selection: $useCompactOverlay
             )
+
+            Divider()
+
+            HStack {
+                Text("Position")
+                    .font(.system(size: 13))
+                Spacer()
+                Picker("", selection: $overlayPositionRaw) {
+                    Text("Top / Notch (default)").tag("notch")
+                    Text("Bottom Center (Floating)").tag("bottom_center")
+                    Text("Bottom Right").tag("bottom_right")
+                    Text("Top Right").tag("top_right")
+                }
+                .pickerStyle(.menu)
+                .frame(width: 220)
+            }
+
+            if overlayPositionRaw != "notch" {
+                Text("Floating overlay avoids covering the camera notch and third-party notch bars like Dynamic Island / Atoll.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             Divider()
 

@@ -35,6 +35,30 @@ extension NSScreen {
 
 // MARK: - Panel Helpers
 
+// MARK: - Position Options
+
+enum RecordingOverlayPosition: String, CaseIterable, Identifiable {
+    case notch = "notch"
+    case bottomCenter = "bottom_center"
+    case bottomRight = "bottom_right"
+    case topRight = "top_right"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .notch: return "Notch / Top Center"
+        case .bottomCenter: return "Bottom Center (Floating)"
+        case .bottomRight: return "Bottom Right"
+        case .topRight: return "Top Right"
+        }
+    }
+
+    var isFloating: Bool {
+        self != .notch
+    }
+}
+
 private func makeOverlayPanel(width: CGFloat, height: CGFloat) -> NSPanel {
     let panel = NSPanel(
         contentRect: NSRect(x: 0, y: 0, width: width, height: height),
@@ -53,18 +77,51 @@ private func makeOverlayPanel(width: CGFloat, height: CGFloat) -> NSPanel {
     return panel
 }
 
+private struct NotchContentWrapper<V: View>: View {
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+    let isFloating: Bool
+    let rootView: V
+
+    var body: some View {
+        if isFloating {
+            rootView
+                .frame(width: width, height: height)
+                .background(
+                    RoundedRectangle(cornerRadius: 19, style: .continuous)
+                        .fill(Color.black.opacity(0.92))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 19, style: .continuous)
+                                .stroke(Color.white.opacity(0.15), lineWidth: 0.8)
+                        )
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 19, style: .continuous))
+        } else {
+            rootView
+                .frame(width: width, height: height)
+                .background(Color.black)
+                .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: cornerRadius, bottomTrailingRadius: cornerRadius))
+        }
+    }
+}
+
 private func makeNotchContent<V: View>(
     width: CGFloat,
     height: CGFloat,
     cornerRadius: CGFloat,
+    isFloating: Bool = false,
     rootView: V
 ) -> NSView {
-    let shaped = rootView
-        .frame(width: width, height: height)
-        .background(Color.black)
-        .clipShape(UnevenRoundedRectangle(bottomLeadingRadius: cornerRadius, bottomTrailingRadius: cornerRadius))
+    let content = NotchContentWrapper(
+        width: width,
+        height: height,
+        cornerRadius: cornerRadius,
+        isFloating: isFloating,
+        rootView: rootView
+    )
 
-    let hosting = NSHostingView(rootView: shaped)
+    let hosting = NSHostingView(rootView: content)
     hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
     hosting.autoresizingMask = [.width, .height]
     return hosting
@@ -258,7 +315,12 @@ final class RecordingOverlayManager {
 
         guard let screen = targetScreen else { return }
 
-        let hiddenFrame = NSRect(x: frame.origin.x, y: screen.frame.maxY, width: frame.width, height: frame.height)
+        let hiddenFrame: NSRect
+        if overlayPosition.isFloating && (overlayPosition == .bottomCenter || overlayPosition == .bottomRight) {
+            hiddenFrame = NSRect(x: frame.origin.x, y: screen.visibleFrame.minY - frame.height - 10, width: frame.width, height: frame.height)
+        } else {
+            hiddenFrame = NSRect(x: frame.origin.x, y: screen.frame.maxY, width: frame.width, height: frame.height)
+        }
         panel.setFrame(hiddenFrame, display: true)
         panel.alphaValue = 1
         panel.orderFrontRegardless()
@@ -303,6 +365,7 @@ final class RecordingOverlayManager {
                 width: frame.width,
                 height: frame.height,
                 cornerRadius: 14,
+                isFloating: false,
                 rootView: AnyView(rootView)
             )
         }
@@ -310,7 +373,8 @@ final class RecordingOverlayManager {
         return makeNotchContent(
             width: frame.width,
             height: frame.height,
-            cornerRadius: screenHasNotch ? 18 : 12,
+            cornerRadius: overlayPosition.isFloating ? 19 : (screenHasNotch ? 18 : 12),
+            isFloating: overlayPosition.isFloating,
             rootView: AnyView(
                 RecordingOverlayView(
                     state: overlayState,
@@ -321,7 +385,7 @@ final class RecordingOverlayManager {
                         self?.onUpdateOverlayPressed?()
                     }
                 )
-                .padding(.top, screenHasNotch ? notchOverlap : 0)
+                .padding(.top, (screenHasNotch && !overlayPosition.isFloating) ? notchOverlap : 0)
             )
         )
     }
@@ -339,10 +403,16 @@ final class RecordingOverlayManager {
         }
     }
 
+    var overlayPosition: RecordingOverlayPosition {
+        let raw = UserDefaults.standard.string(forKey: "recording_overlay_position") ?? "notch"
+        return RecordingOverlayPosition(rawValue: raw) ?? .notch
+    }
+
     /// True iff the overlay renders as wings flanking the notch (notched display
     /// + use_compact_overlay on). updateAvailable and error toasts still use
     /// the drop-down pill.
     private var useWingedLayout: Bool {
+        guard !overlayPosition.isFloating else { return false }
         guard screenHasNotch else { return false }
         let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
         guard useCompact else { return false }
@@ -365,6 +435,33 @@ final class RecordingOverlayManager {
     private var overlayFrame: NSRect {
         guard let screen = targetScreen else { return .zero }
 
+        let width = overlayWidth
+
+        if overlayPosition.isFloating {
+            let height: CGFloat = 38
+            let padding: CGFloat = 28
+
+            switch overlayPosition {
+            case .bottomCenter:
+                let x = screen.visibleFrame.midX - width / 2
+                let y = screen.visibleFrame.minY + padding
+                return NSRect(x: x, y: y, width: width, height: height)
+
+            case .bottomRight:
+                let x = screen.visibleFrame.maxX - width - padding
+                let y = screen.visibleFrame.minY + padding
+                return NSRect(x: x, y: y, width: width, height: height)
+
+            case .topRight:
+                let x = screen.visibleFrame.maxX - width - padding
+                let y = screen.visibleFrame.maxY - height - 12
+                return NSRect(x: x, y: y, width: width, height: height)
+
+            case .notch:
+                break
+            }
+        }
+
         if useWingedLayout {
             // Anchor to the screen's auxiliary-area boundaries of the notch;
             // panel height matches the menu-bar overlap so nothing protrudes below.
@@ -380,7 +477,6 @@ final class RecordingOverlayManager {
             return NSRect(x: panelX, y: panelY, width: panelWidth, height: panelHeight)
         }
 
-        let width = overlayWidth
         let useCompact = (UserDefaults.standard.object(forKey: "use_compact_overlay") as? Bool) ?? true
         let forceDropDownPill = overlayState.phase == .feedback
             && !(overlayState.errorMessage?.isEmpty ?? true)
