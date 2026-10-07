@@ -18,6 +18,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/LLMAPITransport.swift \
 	Sources/LLMCooldownManager.swift \
 	Sources/ModelConfiguration.swift \
+	Sources/RealtimeFinalizationAwaiter.swift \
 	Sources/TranscriptionErrorPresentationCore.swift \
 	Sources/TranscriptTextCore.swift \
 	Sources/UpdateManager.swift \
