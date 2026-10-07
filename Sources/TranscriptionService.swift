@@ -18,6 +18,7 @@ class TranscriptionService {
     private let baseURL: URL
     private let transcriptionModel: String
     private let language: String?
+    private let prompt: String?
     private var transcriptionResponseFormat: String {
         Self.responseFormat(forModel: transcriptionModel)
     }
@@ -30,7 +31,8 @@ class TranscriptionService {
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         transcriptionModel: String = "whisper-large-v3",
-        language: String? = nil
+        language: String? = nil,
+        prompt: String? = nil
     ) throws {
         self.apiKey = apiKey
         self.baseURL = try Self.normalizedBaseURL(from: baseURL)
@@ -38,6 +40,30 @@ class TranscriptionService {
         self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
         let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
+        self.prompt = Self.whisperPrompt(fromVocabulary: prompt)
+    }
+
+    /// Whisper accepts a free-text `prompt` (max 224 tokens) that steers spelling.
+    /// Only the first few vocabulary terms are sent, bounded by term count and by
+    /// characters, because a long list dilutes the hint (verified against Groq: 70
+    /// terms fixed nothing, 10 terms fixed most misspellings) and an oversized prompt
+    /// fails the request. Put the most-misheard terms first in Custom Vocabulary.
+    /// ponytail: fixed caps; make them settings if someone needs more.
+    static func whisperPrompt(fromVocabulary raw: String?, maxTerms: Int = 15, maxCharacters: Int = 600) -> String? {
+        guard let raw else { return nil }
+        var seen = Set<String>()
+        let terms = raw
+            .split(whereSeparator: { $0 == "\n" || $0 == "," || $0 == ";" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+            .prefix(maxTerms)
+        var prompt = ""
+        for term in terms {
+            let candidate = prompt.isEmpty ? term : prompt + ", " + term
+            guard candidate.count < maxCharacters else { break }
+            prompt = candidate
+        }
+        return prompt.isEmpty ? nil : prompt + "."
     }
 
     static func responseFormat(forModel model: String) -> String {
@@ -132,6 +158,7 @@ class TranscriptionService {
             model: transcriptionModel,
             responseFormat: transcriptionResponseFormat,
             language: language,
+            prompt: prompt,
             boundary: boundary
         )
 
@@ -202,6 +229,7 @@ class TranscriptionService {
         model: String,
         responseFormat: String,
         language: String?,
+        prompt: String?,
         boundary: String
     ) -> Data {
         var body = Data()
@@ -222,6 +250,12 @@ class TranscriptionService {
             append("--\(boundary)\r\n")
             append("Content-Disposition: form-data; name=\"language\"\r\n\r\n")
             append("\(language)\r\n")
+        }
+
+        if let prompt, !prompt.isEmpty {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n")
+            append("\(prompt)\r\n")
         }
 
         append("--\(boundary)\r\n")

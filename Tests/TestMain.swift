@@ -9,6 +9,7 @@ struct FreeFlowTests {
         SemanticVersionTests.run()
         LLMCooldownManagerTests.run()
         TranscriptionErrorPresentationCoreTests.run()
+        TranscriptionServiceTests.run()
         TranscriptTextCoreTests.run()
         print("FreeFlowTests passed")
     }
