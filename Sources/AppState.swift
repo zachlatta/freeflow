@@ -2242,7 +2242,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             do {
                 try self.audioRecorder.startRecording(deviceUID: deviceUID)
                 os_log(.info, log: recordingLog, "audioRecorder.startRecording() done: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
-                DispatchQueue.main.async {
+                DispatchQueue.main.async { [self] in
                     guard self.isRecording, self.activeRecordingTriggerMode != nil else { return }
                     self.startContextCapture()
                     self.audioLevelCancellable = self.audioRecorder.$audioLevel
