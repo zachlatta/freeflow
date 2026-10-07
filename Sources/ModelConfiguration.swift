@@ -26,7 +26,11 @@ public struct ModelConfiguration {
 
     public static let transcriptionModels = [
         "whisper-large-v3",
-        "whisper-large-v3-turbo"
+        "whisper-large-v3-turbo",
+        // Google's transcribe model needs its own key and provider URL, set in
+        // the transcription overrides. Its smart mode also cleans up the text,
+        // so the post-processing pass has less left to do.
+        "gemini-3.5-transcribe"
     ]
 
     public static func config(for model: String) -> ModelConfig {

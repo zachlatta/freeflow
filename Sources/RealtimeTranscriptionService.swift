@@ -19,7 +19,7 @@ enum RealtimeTranscriptionError: LocalizedError {
     }
 }
 
-final class RealtimeTranscriptionService {
+final class RealtimeTranscriptionService: RealtimeTranscriptBackend {
     struct Configuration {
         let baseURL: String
         let apiKey: String

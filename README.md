@@ -76,6 +76,48 @@ Then your response would be ONLY the cleaned up text, so here your response is O
 "Hey, I just wanted to follow up on the meeting from yesterday. I think we should definitely move the deadline to next Friday because the design team still needs more time to finish the mockups. Let me know if that works for you. Thanks."</code></pre>
 </details>
 
+## Using Gemini Transcribe
+
+Google's Gemini transcription models are available alongside the Whisper
+options. They are not OpenAI-compatible, so FreeFlow talks to Google directly
+rather than through the provider URL. Both transcribe in smart mode, which
+removes filler words and false starts and repairs punctuation as part of
+transcription, and both accept your custom vocabulary as recognition biasing.
+
+There are two models, and the difference that matters for daily dictation is
+quota, not quality:
+
+| Model | API | Free-tier quota |
+| --- | --- | --- |
+| `gemini-3.5-transcribe` | file upload after recording | ~25 requests per day |
+| `gemini-3.5-transcribe-live` | streams while you speak | limited by tokens per minute |
+
+At roughly one request per dictation, the batch model's daily allowance runs out
+quickly. The live model is limited by audio throughput instead, which a single
+speaker will not reach, so prefer it unless you have a paid tier. Check your own
+limits in [AI Studio](https://aistudio.google.com/rate-limit).
+
+To use the live model, open settings and:
+
+1. Set the transcription API key to a [Google AI Studio](https://aistudio.google.com/apikey) key.
+   Leave the transcription API URL empty; FreeFlow routes Gemini to Google for you.
+2. Enable realtime streaming and set the realtime model to
+   `gemini-3.5-transcribe-live`.
+3. Optionally set the transcription model to `gemini-3.5-transcribe`, which is
+   then used only as the fallback if the socket fails mid-dictation.
+
+To use the batch model on its own, set the transcription model to
+`gemini-3.5-transcribe` and leave realtime streaming off.
+
+Because the transcript arrives already cleaned, you can turn on **preserve exact
+wording** to skip the separate cleanup model entirely and get a one-call
+dictation. Leave it off if you still want the cleanup pass to adapt the text to
+the app you are dictating into.
+
+One limit is worth knowing: the language is auto-detected rather than pinned,
+because pinning a language drops both models out of smart mode. The
+transcription-language setting therefore has no effect on the Gemini paths.
+
 ## Using a Local Model
 
 FreeFlow can use OpenAI-compatible local or self-hosted providers instead of Groq. In settings, configure the API base URL and model IDs for your local LLM provider, such as Ollama, LM Studio, or another OpenAI-compatible server. If your transcription backend uses a different endpoint from your LLM backend, set the transcription API URL separately.

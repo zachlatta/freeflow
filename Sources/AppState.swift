@@ -614,7 +614,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var pendingManualCommandInvocation = false
     private var pendingShortcutStartTask: Task<Void, Never>?
     private var pendingShortcutStartMode: RecordingTriggerMode?
-    private var realtimeService: RealtimeTranscriptionService?
+    private var realtimeService: (any RealtimeTranscriptBackend)?
     private var automaticTerminationDisabled = false
     private var activeAudioInterruption: ActiveAudioInterruption?
     private var pendingOverlayDismissToken: UUID?
@@ -1036,7 +1036,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             apiKey: resolvedTranscriptionAPIKey,
             baseURL: resolvedTranscriptionBaseURL,
             transcriptionModel: transcriptionModel,
-            language: resolvedTranscriptionLanguage
+            language: resolvedTranscriptionLanguage,
+            customVocabulary: customVocabulary
         )
     }
 
@@ -2543,7 +2544,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     /// gets a transcript. Runs the realtime commit and file upload in that
     /// strict order to avoid paying for both when realtime succeeds.
     private static func resolveRawTranscript(
-        realtimeService: RealtimeTranscriptionService?,
+        realtimeService: (any RealtimeTranscriptBackend)?,
         fileService: TranscriptionService,
         fileURL: URL
     ) async throws -> String {
@@ -2884,19 +2885,48 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func startRealtimeStreamingIfEnabled() {
         guard realtimeStreamingEnabled else { return }
+        let model = realtimeStreamingModel.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Gemini's live model is the one worth streaming to: its quota is
+        // measured in tokens per minute rather than requests per day, unlike
+        // the batch transcribe model.
+        if GeminiLiveTranscription.handlesModel(model) {
+            startGeminiLiveStreaming(model: model)
+            return
+        }
+
+        // An OpenAI-compatible socket cannot authenticate with a Gemini
+        // transcription key, so skip rather than opening a doomed connection.
+        guard !GeminiTranscription.handlesModel(transcriptionModel) else {
+            os_log(.info, log: recordingLog, "realtime streaming skipped — Gemini transcription is file-based")
+            return
+        }
         let trimmedBase = resolvedTranscriptionBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedBase.isEmpty else {
             os_log(.info, log: recordingLog, "realtime streaming requested but base URL is empty — skipping")
             return
         }
-        let model = realtimeStreamingModel.trimmingCharacters(in: .whitespacesAndNewlines)
         let config = RealtimeTranscriptionService.Configuration(
             baseURL: trimmedBase,
             apiKey: resolvedTranscriptionAPIKey,
             model: model,
             language: resolvedTranscriptionLanguage
         )
-        let service = RealtimeTranscriptionService(config: config)
+        start(service: RealtimeTranscriptionService(config: config))
+    }
+
+    private func startGeminiLiveStreaming(model: String) {
+        let config = GeminiLiveTranscriptionService.Configuration(
+            baseURL: resolvedTranscriptionBaseURL,
+            apiKey: resolvedTranscriptionAPIKey,
+            model: model,
+            customVocabulary: customVocabulary,
+            sampleRate: AudioRecorder.realtimeSampleRate
+        )
+        start(service: GeminiLiveTranscriptionService(config: config))
+    }
+
+    private func start(service: any RealtimeTranscriptBackend) {
         do {
             try service.start()
         } catch {
