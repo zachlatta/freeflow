@@ -76,6 +76,7 @@ struct SetupView: View {
     @State private var micPermissionGranted = false
     @State private var accessibilityGranted = false
     @State private var apiKeyInput: String = ""
+    @FocusState private var apiKeyFocused: Bool
     @State private var apiBaseURLInput: String = ""
     @State private var transcriptionAPIURLInput: String = ""
     @State private var transcriptionAPIKeyInput: String = ""
@@ -422,13 +423,41 @@ struct SetupView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("API Key")
                             .font(.headline)
-                        SecureField("Paste your API key", text: $apiKeyInput)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                            .disabled(isValidatingKey)
-                            .onChange(of: apiKeyInput) { _ in
-                                keyValidationError = nil
+                        ZStack {
+                            TextField("Paste your API key", text: editableMaskedKeyBinding)
+                                .focused($apiKeyFocused)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(.body, design: .monospaced))
+                                .disabled(isValidatingKey)
+                                .onChange(of: apiKeyInput) { _ in
+                                    keyValidationError = nil
+                                }
+                                .opacity(shouldRevealMaskedKey ? 0 : 1)
+                                .allowsHitTesting(!shouldRevealMaskedKey)
+
+                            if shouldRevealMaskedKey {
+                                HStack {
+                                    Text(maskedDisplayKey(apiKeyInput) ?? apiKeyInput)
+                                        .font(.system(.body, design: .monospaced))
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 5)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color(nsColor: .textBackgroundColor))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.primary.opacity(0.15), lineWidth: 1)
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    apiKeyFocused = true
+                                }
                             }
+                        }
 
                         if let error = keyValidationError {
                             Label(error, systemImage: "xmark.circle.fill")
@@ -1355,6 +1384,38 @@ struct SetupView: View {
             }
             testAudioRecorder = nil
         }
+    }
+
+    /// Renders an API key as `prefix6 + 16 chars + suffix6` so the user can
+    /// identify which key is loaded without exposing the middle. Default
+    /// uses bullet for the read-only display; callers pass an asterisk for
+    /// the editable display.
+    private func maskedDisplayKey(_ key: String, char: Character = "•") -> String? {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 16 else { return nil }
+        let middle = String(repeating: char, count: 16)
+        return "\(trimmed.prefix(6))\(middle)\(trimmed.suffix(6))"
+    }
+
+    /// Editable binding that shows the key as `prefix6 + 16 asterisks + suffix6`
+    /// while still letting the user Cmd-A and paste a fresh value over the top.
+    /// Any input still containing an asterisk is rejected.
+    private var editableMaskedKeyBinding: Binding<String> {
+        Binding(
+            get: { maskedDisplayKey(apiKeyInput, char: "*") ?? apiKeyInput },
+            set: { newValue in
+                if newValue.contains("*") { return }
+                apiKeyInput = newValue
+            }
+        )
+    }
+
+    /// Show the masked-preview view (instead of the editable field) when the
+    /// field is unfocused AND has enough content to safely mask.
+    private var shouldRevealMaskedKey: Bool {
+        guard !apiKeyFocused else { return false }
+        let typed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.count >= 16
     }
 
 }
