@@ -149,6 +149,49 @@ jobs:
           files: |
             FreeFlow.dmg
 
+      # --- Homebrew cask ---
+      # The cask in Casks/ pins an exact version and checksum, so it has to be
+      # bumped on every release or `brew upgrade` keeps serving the old build.
+      # Done here rather than by hand because a manual step gets forgotten.
+      - name: Bump Homebrew cask
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DMG_SHA="$(shasum -a 256 FreeFlow.dmg | cut -d ' ' -f 1)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Retry because main can move while the DMG is being notarized, which
+          # takes long enough for that to be a realistic race. Each attempt
+          # re-reads main so the bump always lands on its current tip. --force
+          # is needed because the earlier version-stamp step leaves Info.plist
+          # dirty, which otherwise blocks the branch switch.
+          for attempt in 1 2 3; do
+            git fetch --force origin main:refs/remotes/origin/main
+            git checkout --force -B main origin/main
+
+            if [ ! -f Casks/freeflow.rb ]; then
+              echo "::error::Casks/freeflow.rb is missing on main. Release $VERSION is published but Homebrew still serves the previous build."
+              exit 1
+            fi
+
+            sed -i '' -E "s|^  version \".*\"$|  version \"$VERSION\"|" Casks/freeflow.rb
+            sed -i '' -E "s|^  sha256 \".*\"$|  sha256 \"$DMG_SHA\"|" Casks/freeflow.rb
+
+            if git diff --quiet -- Casks/freeflow.rb; then
+              echo "Cask already at $VERSION."
+              exit 0
+            fi
+
+            git commit -m "Bump Homebrew cask to $VERSION" -- Casks/freeflow.rb
+            git push origin main && exit 0
+
+            echo "Push rejected, main moved. Retrying ($attempt/3)."
+          done
+
+          echo "::error::Could not push the cask bump for $VERSION after 3 attempts."
+          exit 1
+
       # --- Cleanup ---
       - name: Cleanup signing artifacts
         if: always()
