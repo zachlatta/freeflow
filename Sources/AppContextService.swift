@@ -24,9 +24,28 @@ struct AppContext {
     var contextSummary: String {
         currentActivity
     }
+
+    var summaryForPostProcessing: String {
+        ContextInferenceFailure.usableSummary(currentActivity)
+    }
+}
+
+enum DesktopScreenshotFallbackPreference {
+    static let storageKey = "context_desktop_screenshot_fallback_enabled"
+
+    static func load(from defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: storageKey) == nil
+            ? true
+            : defaults.bool(forKey: storageKey)
+    }
+
+    static func save(_ enabled: Bool, to defaults: UserDefaults) {
+        defaults.set(enabled, forKey: storageKey)
+    }
 }
 
 final class AppContextService {
+    static let defaultContextModel = "qwen/qwen3.8-27b"
     static let defaultContextPrompt = """
 You are a context synthesis assistant for a speech-to-text pipeline.
 Given app/window metadata and an optional screenshot, output exactly two sentences that describe what the user is doing right now and the likely writing intent in the current window.
@@ -44,6 +63,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
     private let maxScreenshotDataURILength = 500_000
     private let screenshotCompressionPrimary = 0.5
     private let screenshotMaxDimension: CGFloat
+    private let desktopScreenshotFallbackEnabled: Bool
     private var contextRequestTimeoutSeconds: TimeInterval {
         let override = UserDefaults.standard.double(forKey: "context_request_timeout_seconds")
         return override > 0 ? override : 20
@@ -53,14 +73,16 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         customContextPrompt: String = "",
-        contextModel: String = "meta-llama/llama-4-scout-17b-16e-instruct",
-        screenshotMaxDimension: CGFloat = AppContextService.defaultScreenshotMaxDimension
+        contextModel: String = AppContextService.defaultContextModel,
+        screenshotMaxDimension: CGFloat = AppContextService.defaultScreenshotMaxDimension,
+        desktopScreenshotFallbackEnabled: Bool = true
     ) {
         self.apiKey = apiKey
+        self.desktopScreenshotFallbackEnabled = desktopScreenshotFallbackEnabled
         self.baseURL = baseURL
         self.customContextPrompt = customContextPrompt
         let trimmedModel = contextModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.contextModel = trimmedModel.isEmpty ? "meta-llama/llama-4-scout-17b-16e-instruct" : trimmedModel
+        self.contextModel = trimmedModel.isEmpty ? Self.defaultContextModel : trimmedModel
         self.screenshotMaxDimension = screenshotMaxDimension > 0
             ? screenshotMaxDimension
             : AppContextService.defaultScreenshotMaxDimension
@@ -122,7 +144,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         let currentActivity: String
         let contextPrompt: String?
         if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if let result = await inferActivityWithLLM(
+            switch await inferActivityWithLLM(
                 appName: appName,
                 bundleIdentifier: bundleIdentifier,
                 windowTitle: windowTitle,
@@ -130,26 +152,15 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 screenshotDataURL: screenshot.dataURL,
                 contextSystemPrompt: contextSystemPrompt
             ) {
+            case .success(let result):
                 currentActivity = result.activity
                 contextPrompt = result.prompt
-            } else {
-                currentActivity = fallbackCurrentActivity(
-                    appName: appName,
-                    bundleIdentifier: bundleIdentifier,
-                    selectedText: selectedText,
-                    windowTitle: windowTitle,
-                    screenshotAvailable: screenshot.dataURL != nil
-                )
+            case .failure(let error):
+                currentActivity = error.summary
                 contextPrompt = nil
             }
         } else {
-            currentActivity = fallbackCurrentActivity(
-                appName: appName,
-                bundleIdentifier: bundleIdentifier,
-                selectedText: selectedText,
-                windowTitle: windowTitle,
-                screenshotAvailable: screenshot.dataURL != nil
-            )
+            currentActivity = ContextInferenceFailure.missingAPIKey.summary
             contextPrompt = nil
         }
 
@@ -174,7 +185,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         selectedText: String?,
         screenshotDataURL: String?,
         contextSystemPrompt: String
-    ) async -> (activity: String, prompt: String)? {
+    ) async -> Result<(activity: String, prompt: String), ContextInferenceFailure> {
         let attempts: [(model: String, screenshotDataURL: String?)] =
             if let screenshotDataURL {
                 [
@@ -187,8 +198,9 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 ]
             }
 
+        var lastFailure = ContextInferenceFailure.emptySummary
         for attempt in attempts {
-            if let inferred = await inferActivityWithLLM(
+            switch await inferActivityWithLLM(
                 appName: appName,
                 bundleIdentifier: bundleIdentifier,
                 windowTitle: windowTitle,
@@ -197,11 +209,17 @@ Return only two sentences, no labels, no markdown, no extra commentary.
                 contextSystemPrompt: contextSystemPrompt,
                 model: attempt.model
             ) {
-                return inferred
+            case .success(let inferred): return .success(inferred)
+            case .failure(let error):
+                lastFailure = error
+                // Removing an image cannot repair auth, a missing model, or
+                // throttling. Avoid sending the same failing request twice.
+                if case .httpStatus(let status) = error,
+                   [401, 403, 404, 429].contains(status) { return .failure(error) }
             }
         }
 
-        return nil
+        return .failure(lastFailure)
     }
 
     private func inferActivityWithLLM(
@@ -212,7 +230,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         screenshotDataURL: String?,
         contextSystemPrompt: String,
         model: String
-    ) async -> (activity: String, prompt: String)? {
+    ) async -> Result<(activity: String, prompt: String), ContextInferenceFailure> {
         do {
             var request = URLRequest(url: URL(string: "\(baseURL)/chat/completions")!)
             request.httpMethod = "POST"
@@ -253,7 +271,7 @@ Selected text: \(selectedText ?? "None")
 
             let fullPrompt = "Model: \(model)\n\n[System]\n\(contextSystemPrompt)\n[User]\n\(userMessageDescription)"
 
-            let payload: [String: Any] = [
+            var payload: [String: Any] = [
                 "model": model,
                 "temperature": 0.2,
                 "messages": [
@@ -262,31 +280,58 @@ Selected text: \(selectedText ?? "None")
                 ]
             ]
 
+            payload.merge(Self.inferenceRequestOptions(for: model)) { _, option in option }
+
             request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
             let (data, response) = try await LLMAPITransport.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
-                return nil
+                return .failure(.invalidResponse)
             }
-            guard httpResponse.statusCode == 200 else {
-                return nil
-            }
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = json["choices"] as? [[String: Any]],
-                  let firstChoice = choices.first,
-                  let message = firstChoice["message"] as? [String: Any],
-                  let content = message["content"] as? String else {
-                return nil
-            }
-
-            let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !cleaned.isEmpty else { return nil }
-            return (activity: normalizedActivitySummary(cleaned), prompt: fullPrompt)
+            return Self.inferenceResult(data: data, status: httpResponse.statusCode, model: model, prompt: fullPrompt)
         } catch {
-            return nil
+            if (error as? URLError)?.code == .timedOut { return .failure(.timeout) }
+            return .failure(.network)
         }
     }
 
-    private func normalizedActivitySummary(_ value: String) -> String {
+    static func inferenceRequestOptions(for model: String) -> [String: Any] {
+        // Two sentences need a small completion budget. Leaving this unset
+        // can reserve more output tokens than Groq's free-tier TPM limit.
+        var options: [String: Any] = ["max_completion_tokens": 512]
+        let config = ModelConfiguration.config(for: model)
+        if let effort = config.reasoningEffort { options["reasoning_effort"] = effort }
+        if let include = config.includeReasoning { options["include_reasoning"] = include }
+        return options
+    }
+
+    static func inferenceResult(
+        data: Data, status: Int, model: String, prompt: String
+    ) -> Result<(activity: String, prompt: String), ContextInferenceFailure> {
+        guard status == 200 else { return .failure(.httpStatus(status)) }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = message["content"] as? String else {
+            return .failure(.invalidResponse)
+        }
+        guard let activity = activitySummary(from: content, model: model) else {
+            return .failure(.emptySummary)
+        }
+        return .success((activity: activity, prompt: prompt))
+    }
+
+    static func activitySummary(from rawContent: String, model: String) -> String? {
+        var content = rawContent
+        if ModelConfiguration.config(for: model).shouldStripThinkTags {
+            content = ModelConfiguration.stripThinkTags(content)
+        }
+
+        let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        return normalizedActivitySummary(cleaned)
+    }
+
+    private static func normalizedActivitySummary(_ value: String) -> String {
         let sentences = value
             .split(whereSeparator: { $0 == "." || $0 == "。" || $0 == "!" || $0 == "?" })
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -298,20 +343,6 @@ Selected text: \(selectedText ?? "None")
 
         let firstTwo = sentences.prefix(2)
         return firstTwo.joined(separator: ". ") + "."
-    }
-
-    private func fallbackCurrentActivity(
-        appName: String?,
-        bundleIdentifier: String?,
-        selectedText: String?,
-        windowTitle: String?,
-        screenshotAvailable: Bool
-    ) -> String {
-        let activeApp = appName ?? "the active application"
-        if screenshotAvailable {
-            return "Could not reliably infer a two-sentence summary for \(activeApp) from the screenshot and metadata."
-        }
-        return "Could not reliably infer a two-sentence summary for \(activeApp) from the visible metadata."
     }
 
     private func focusedWindowTitle(from appElement: AXUIElement) -> String? {
@@ -527,6 +558,23 @@ Selected text: \(selectedText ?? "None")
             }
         }
 
+        return captureDesktopFallback {
+            captureDesktopScreenshot()
+        }
+    }
+
+    // Keep the preference boundary ahead of all desktop capture and image work.
+    // The injected operation also lets tests verify this without Screen Recording.
+    func captureDesktopFallback(
+        using capture: () -> (dataURL: String?, mimeType: String?, error: String?)
+    ) -> (dataURL: String?, mimeType: String?, error: String?) {
+        guard desktopScreenshotFallbackEnabled else {
+            return (nil, nil, "Active-window screenshot unavailable; full-desktop fallback is disabled in Settings.")
+        }
+        return capture()
+    }
+
+    private func captureDesktopScreenshot() -> (dataURL: String?, mimeType: String?, error: String?) {
         guard let fullScreenImage = CGWindowListCreateImage(
             CGRect.infinite,
             .optionOnScreenOnly,

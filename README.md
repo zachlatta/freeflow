@@ -38,7 +38,7 @@ FreeFlow is a free Mac dictation app inspired by [Wispr Flow](https://wisprflow.
 - **Custom shortcuts:** Customize both hold-to-talk and toggle dictation shortcuts. If your toggle shortcut extends your hold shortcut, you can start in hold mode and press the extra modifier keys to latch into tap mode without stopping the recording.
 - **Context-aware cleanup:** FreeFlow can read nearby app context so names, terms, and phrases are spelled correctly when you dictate into email, terminals, docs, and other apps.
 - **Custom vocabulary:** Add names, jargon, and project-specific words that FreeFlow should preserve during cleanup.
-- **Provider choices:** Use Groq by default, select ElevenLabs Scribe v2 for transcription, or configure OpenAI-compatible model IDs and API URLs in settings.
+- **Provider choices:** Use Groq by default, select ElevenLabs Scribe for transcription, or configure OpenAI-compatible model IDs and API URLs in settings.
 
 ## Edit Mode
 
@@ -84,7 +84,7 @@ Local models are often slower than hosted providers, especially on cold start, l
 
 ## Using ElevenLabs Scribe
 
-FreeFlow can use ElevenLabs Scribe v2 for speech-to-text while continuing to use your OpenAI-compatible provider for cleanup, Edit Mode, and context. Open Settings, expand Providers, choose ElevenLabs Scribe as the transcription provider, and enter an ElevenLabs API key. Realtime streaming uses Scribe v2 Realtime when the realtime toggle is enabled.
+FreeFlow can use ElevenLabs Scribe v2 for speech-to-text while continuing to use your OpenAI-compatible provider for cleanup, Edit Mode, and context. Open Settings, expand Provider Settings under Providers, choose ElevenLabs Scribe as the transcription provider, and enter an ElevenLabs API key. Realtime streaming uses Scribe v2 Realtime when the realtime toggle is enabled.
 
 <details>
   <summary>Configure longer timeouts for local models</summary>
@@ -112,6 +112,10 @@ defaults delete com.zachlatta.freeflow context_request_timeout_seconds
 ```
 
 </details>
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up the project, build, test, and submit changes.
 
 ## License
 

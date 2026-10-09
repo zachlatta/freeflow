@@ -11,6 +11,29 @@ APP_EXECUTABLE = $(MACOS_DIR)/$(APP_NAME)
 APP_EXECUTABLE_TARGET := $(subst $(space),\ ,$(APP_EXECUTABLE))
 
 SOURCES = $(shell find Sources -name '*.swift' -type f | LC_ALL=C sort)
+TEST_RUNNER = $(BUILD_DIR)/FreeFlowTests
+TEST_PRODUCTION_SOURCES = \
+	Sources/AppContextService.swift \
+	Sources/AppName.swift \
+	Sources/ContextInferenceFailure.swift \
+	Sources/LLMAPITransport.swift \
+	Sources/LLMCooldownManager.swift \
+	Sources/ModelConfiguration.swift \
+	Sources/RecordingCaptureTiming.swift \
+	Sources/RecordingTimerPreference.swift \
+	Sources/RealtimeTranscriptionService.swift \
+	Sources/TranscriptionConfiguration.swift \
+	Sources/TranscriptionFallback.swift \
+	Sources/TranscriptionService.swift \
+	Sources/TranscriptionErrorPresentationCore.swift \
+	Sources/TranscriptTextCore.swift \
+	Sources/UpdateManager.swift \
+	Sources/ShortcutCore/DictationShortcutSessionController.swift \
+	Sources/ShortcutCore/ShortcutMatcher.swift \
+	Sources/ShortcutCore/ShortcutModels.swift
+TEST_SOURCES = $(shell find Tests -name '*.swift' -type f | LC_ALL=C sort)
+SHELL_SCRIPTS = $(shell find .github/scripts .agents/skills -name '*.sh' -type f | LC_ALL=C sort)
+YAML_FILES = $(shell find .github -type f \( -name '*.yml' -o -name '*.yaml' \) | LC_ALL=C sort)
 RESOURCES = $(CONTENTS)/Resources
 ARCH ?= $(shell uname -m)
 
@@ -25,7 +48,7 @@ ICON_SOURCE = Resources/AppIcon-Source.png
 ICON_ICNS = Resources/AppIcon.icns
 endif
 
-.PHONY: all clean run icon dmg codesign-dmg notarize
+.PHONY: all check clean run icon dmg codesign-dmg notarize test typecheck validate
 
 all: $(APP_EXECUTABLE_TARGET)
 
@@ -67,6 +90,34 @@ endif
 	@plutil -replace NSAccessibilityUsageDescription -string "$(APP_NAME) needs accessibility access to detect the text cursor position and paste transcribed text." "$(CONTENTS)/Info.plist"
 	@codesign --force --options runtime --sign "$(CODESIGN_IDENTITY)" --entitlements FreeFlow.entitlements "$(APP_BUNDLE)"
 	@echo "Built $(APP_BUNDLE)"
+
+check: typecheck test validate
+
+typecheck:
+	swiftc \
+		-parse-as-library \
+		-typecheck \
+		-warnings-as-errors \
+		-sdk $(shell xcrun --show-sdk-path) \
+		-target $(ARCH)-apple-macosx13.0 \
+		$(SOURCES)
+
+test:
+	@mkdir -p "$(BUILD_DIR)"
+	swiftc \
+		-parse-as-library \
+		-warnings-as-errors \
+		-o "$(TEST_RUNNER)" \
+		-sdk $(shell xcrun --show-sdk-path) \
+		-target $(ARCH)-apple-macosx13.0 \
+		$(TEST_PRODUCTION_SOURCES) \
+		$(TEST_SOURCES)
+	@$(TEST_RUNNER)
+
+validate:
+	plutil -lint Info.plist FreeFlow.entitlements
+	@set -e; for script in $(SHELL_SCRIPTS); do bash -n "$$script"; done
+	@ruby -e 'require "yaml"; ARGV.each { |file| YAML.load_file(file) }' $(YAML_FILES)
 
 icon: $(ICON_ICNS)
 

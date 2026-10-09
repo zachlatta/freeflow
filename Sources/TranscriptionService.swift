@@ -17,6 +17,11 @@ enum TranscriptionProvider: String, CaseIterable, Identifiable {
     }
 }
 
+// The production default uses an ephemeral URLSession. Injection keeps provider
+// request/response tests deterministic without contacting an AI service.
+typealias TranscriptionUpload = (URLRequest, Data) async throws -> (Data, URLResponse)
+typealias TranscriptionDataRequest = (URLRequest) async throws -> (Data, URLResponse)
+
 private protocol BatchTranscriptionClient {
     func transcribe(fileURL: URL) async throws -> String
 }
@@ -27,46 +32,75 @@ class TranscriptionService {
     static let defaultElevenLabsModel = "scribe_v2"
     static let defaultElevenLabsRealtimeModel = "scribe_v2_realtime"
 
+    private static let modelsSupportingVerboseJSON: Set<String> = [
+        // Newer OpenAI transcription models only support plain JSON.
+        "whisper-1", "whisper-large-v3", "whisper-large-v3-turbo"
+    ]
+
     private let client: BatchTranscriptionClient
+    private let timeoutSeconds: TimeInterval?
     private var transcriptionTimeoutSeconds: TimeInterval {
-        let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
-        return override > 0 ? override : 20
+        let override = timeoutSeconds ?? UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
+        return override.isFinite && override > 0 ? override : 20
     }
 
     init(
         provider: TranscriptionProvider = .openAICompatible,
         apiKey: String,
-        baseURL: String = TranscriptionService.defaultOpenAICompatibleBaseURL,
+        baseURL: String? = nil,
         transcriptionModel: String = "whisper-large-v3",
-        language: String? = nil
+        language: String? = nil,
+        timeoutSeconds: TimeInterval? = nil,
+        upload: @escaping TranscriptionUpload = {
+            try await LLMAPITransport.upload(for: $0, from: $1)
+        }
     ) throws {
+        self.timeoutSeconds = timeoutSeconds
+        let baseURL = baseURL ?? Self.defaultBaseURL(for: provider)
         switch provider {
         case .openAICompatible:
             self.client = try OpenAICompatibleTranscriptionClient(
                 apiKey: apiKey,
                 baseURL: baseURL,
                 transcriptionModel: transcriptionModel,
-                language: language
+                language: language,
+                timeoutSeconds: timeoutSeconds,
+                upload: upload
             )
         case .elevenLabs:
             self.client = try ElevenLabsTranscriptionClient(
                 apiKey: apiKey,
                 baseURL: baseURL,
-                language: language
+                language: language,
+                timeoutSeconds: timeoutSeconds,
+                upload: upload
             )
         }
     }
 
+    static func responseFormat(forModel model: String) -> String {
+        let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return modelsSupportingVerboseJSON.contains(normalizedModel) ? "verbose_json" : "json"
+    }
+
+    private static func defaultBaseURL(for provider: TranscriptionProvider) -> String {
+        provider == .elevenLabs ? defaultElevenLabsBaseURL : defaultOpenAICompatibleBaseURL
+    }
+
     static func validateAPIKey(
         _ key: String,
-        baseURL: String = TranscriptionService.defaultOpenAICompatibleBaseURL,
-        provider: TranscriptionProvider = .openAICompatible
+        baseURL: String? = nil,
+        provider: TranscriptionProvider = .openAICompatible,
+        data: @escaping TranscriptionDataRequest = {
+            try await LLMAPITransport.data(for: $0)
+        }
     ) async -> Bool {
+        let baseURL = baseURL ?? defaultBaseURL(for: provider)
         switch provider {
         case .openAICompatible:
-            return await OpenAICompatibleTranscriptionClient.validateAPIKey(key, baseURL: baseURL)
+            return await OpenAICompatibleTranscriptionClient.validateAPIKey(key, baseURL: baseURL, data: data)
         case .elevenLabs:
-            return await ElevenLabsTranscriptionClient.validateAPIKey(key, baseURL: baseURL)
+            return await ElevenLabsTranscriptionClient.validateAPIKey(key, baseURL: baseURL, data: data)
         }
     }
 
@@ -118,7 +152,7 @@ class TranscriptionService {
         let provider = host ?? "the provider"
         switch status {
         case 400:
-            return "Request rejected by \(provider) (HTTP 400). Check provider settings."
+            return "Provider rejected the request (HTTP 400). Check your model name and Base URL in Settings."
         case 401:
             return "Invalid API key for \(provider). Open Settings to fix it."
         case 403:
@@ -154,18 +188,26 @@ private final class OpenAICompatibleTranscriptionClient: BatchTranscriptionClien
     private let baseURL: URL
     private let transcriptionModel: String
     private let language: String?
-    private let transcriptionResponseFormat = "verbose_json"
+    private var transcriptionResponseFormat: String {
+        TranscriptionService.responseFormat(forModel: transcriptionModel)
+    }
+    private let timeoutSeconds: TimeInterval?
+    private let upload: TranscriptionUpload
     private var transcriptionTimeoutSeconds: TimeInterval {
-        let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
-        return override > 0 ? override : 20
+        let override = timeoutSeconds ?? UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
+        return override.isFinite && override > 0 ? override : 20
     }
 
     init(
         apiKey: String,
         baseURL: String,
         transcriptionModel: String,
-        language: String?
+        language: String?,
+        timeoutSeconds: TimeInterval?,
+        upload: @escaping TranscriptionUpload
     ) throws {
+        self.timeoutSeconds = timeoutSeconds
+        self.upload = upload
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.baseURL = try normalizedBaseURL(from: baseURL)
         let trimmedModel = transcriptionModel.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -174,7 +216,11 @@ private final class OpenAICompatibleTranscriptionClient: BatchTranscriptionClien
         self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
     }
 
-    static func validateAPIKey(_ key: String, baseURL: String) async -> Bool {
+    static func validateAPIKey(
+        _ key: String,
+        baseURL: String,
+        data: TranscriptionDataRequest
+    ) async -> Bool {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         guard let baseURL = try? normalizedBaseURL(from: baseURL) else { return false }
@@ -184,7 +230,7 @@ private final class OpenAICompatibleTranscriptionClient: BatchTranscriptionClien
         request.setValue("Bearer \(trimmed)", forHTTPHeaderField: "Authorization")
 
         do {
-            let (_, response) = try await LLMAPITransport.data(for: request)
+            let (_, response) = try await data(request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             return status == 200
         } catch {
@@ -225,7 +271,7 @@ private final class OpenAICompatibleTranscriptionClient: BatchTranscriptionClien
         )
 
         do {
-            let (data, response) = try await LLMAPITransport.upload(for: request, from: body)
+            let (data, response) = try await upload(request, body)
             return try validateTranscriptionResponse(data: data, response: response, fileURL: fileURL)
         } catch {
             logUploadFailure(error, fileURL: fileURL)
@@ -242,9 +288,8 @@ private final class OpenAICompatibleTranscriptionClient: BatchTranscriptionClien
             os_log(
                 .error,
                 log: transcriptionLog,
-                "OpenAI-compatible upload returned HTTP %ld for %{public}@ (bytes=%{public}lld)",
+                "OpenAI-compatible upload returned HTTP %ld (bytes=%{public}lld)",
                 httpResponse.statusCode,
-                fileURL.lastPathComponent,
                 fileSizeBytes(for: fileURL)
             )
             throw TranscriptionError.submissionFailed(TranscriptionService.friendlyHTTPMessage(
@@ -256,70 +301,12 @@ private final class OpenAICompatibleTranscriptionClient: BatchTranscriptionClien
         return try parseTranscript(from: data)
     }
 
-    private let hallucinationPhrases = [
-        "thank you",
-        "thank you for watching",
-        "thank you very much",
-        "thank you so much",
-        "thanks for watching",
-        "please subscribe",
-        "like and subscribe",
-        "subtitles by",
-        "subtitles by the amara.org community",
-        "you"
-    ]
-
-    private let hallucinationNoSpeechThreshold = 0.1
-
     private func parseTranscript(from data: Data) throws -> String {
-        if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let text = json["text"] as? String {
-            if isHallucination(text: text, json: json) {
-                return ""
-            }
-            return text
-        }
-
-        let plainText = String(data: data, encoding: .utf8) ?? ""
-        let text = plainText
-            .components(separatedBy: .newlines)
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
+        do {
+            return try TranscriptionResponseParser.parse(data)
+        } catch TranscriptionResponseParsingError.invalidResponse {
             throw TranscriptionError.pollFailed("Invalid response")
         }
-
-        return text
-    }
-
-    private func isHallucination(text: String, json: [String: Any]) -> Bool {
-        let normalized = text
-            .lowercased()
-            .trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines))
-        guard hallucinationPhrases.contains(normalized) else {
-            return false
-        }
-
-        guard let segments = json["segments"] as? [[String: Any]] else {
-            os_log(
-                .info,
-                log: transcriptionLog,
-                "Skipping hallucination filter for '%{public}@': provider response has no segments/no_speech metadata",
-                normalized
-            )
-            return false
-        }
-
-        guard let noSpeechProb = segments.first?["no_speech_prob"] as? Double else {
-            os_log(
-                .info,
-                log: transcriptionLog,
-                "Skipping hallucination filter for '%{public}@': provider response omitted no_speech_prob",
-                normalized
-            )
-            return false
-        }
-        return noSpeechProb >= hallucinationNoSpeechThreshold
     }
 }
 
@@ -327,19 +314,33 @@ private final class ElevenLabsTranscriptionClient: BatchTranscriptionClient {
     private let apiKey: String
     private let baseURL: URL
     private let language: String?
+    private let timeoutSeconds: TimeInterval?
+    private let upload: TranscriptionUpload
     private var transcriptionTimeoutSeconds: TimeInterval {
-        let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
-        return override > 0 ? override : 20
+        let override = timeoutSeconds ?? UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
+        return override.isFinite && override > 0 ? override : 20
     }
 
-    init(apiKey: String, baseURL: String, language: String?) throws {
+    init(
+        apiKey: String,
+        baseURL: String,
+        language: String?,
+        timeoutSeconds: TimeInterval?,
+        upload: @escaping TranscriptionUpload
+    ) throws {
+        self.timeoutSeconds = timeoutSeconds
+        self.upload = upload
         self.apiKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.baseURL = try normalizedBaseURL(from: baseURL)
         let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
     }
 
-    static func validateAPIKey(_ key: String, baseURL: String) async -> Bool {
+    static func validateAPIKey(
+        _ key: String,
+        baseURL: String,
+        data: TranscriptionDataRequest
+    ) async -> Bool {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         guard let baseURL = try? normalizedBaseURL(from: baseURL) else { return false }
@@ -349,7 +350,7 @@ private final class ElevenLabsTranscriptionClient: BatchTranscriptionClient {
         request.setValue(trimmed, forHTTPHeaderField: "xi-api-key")
 
         do {
-            let (_, response) = try await LLMAPITransport.data(for: request)
+            let (_, response) = try await data(request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             return status == 200
         } catch {
@@ -389,7 +390,7 @@ private final class ElevenLabsTranscriptionClient: BatchTranscriptionClient {
         )
 
         do {
-            let (data, response) = try await LLMAPITransport.upload(for: request, from: body)
+            let (data, response) = try await upload(request, body)
             return try validateTranscriptionResponse(data: data, response: response, fileURL: fileURL)
         } catch {
             logUploadFailure(error, fileURL: fileURL)
@@ -406,9 +407,8 @@ private final class ElevenLabsTranscriptionClient: BatchTranscriptionClient {
             os_log(
                 .error,
                 log: transcriptionLog,
-                "ElevenLabs upload returned HTTP %ld for %{public}@ (bytes=%{public}lld)",
+                "ElevenLabs upload returned HTTP %ld (bytes=%{public}lld)",
                 httpResponse.statusCode,
-                fileURL.lastPathComponent,
                 fileSizeBytes(for: fileURL)
             )
             throw TranscriptionError.submissionFailed(TranscriptionService.friendlyHTTPMessage(
@@ -417,7 +417,7 @@ private final class ElevenLabsTranscriptionClient: BatchTranscriptionClient {
             ))
         }
 
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let text = json["text"] as? String else {
             throw TranscriptionError.pollFailed("Invalid ElevenLabs response")
         }
@@ -513,12 +513,9 @@ private func logUploadFailure(_ error: Error, fileURL: URL) {
     os_log(
         .error,
         log: transcriptionLog,
-        "Transcription upload failed for %{public}@ (bytes=%{public}lld): domain=%{public}@ code=%ld desc=%{public}@",
-        fileURL.lastPathComponent,
+        "Transcription upload failed (bytes=%{public}lld): code=%ld",
         fileSizeBytes(for: fileURL),
-        nsError.domain,
-        nsError.code,
-        error.localizedDescription
+        nsError.code
     )
 }
 
