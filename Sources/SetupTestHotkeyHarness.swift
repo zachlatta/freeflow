@@ -10,12 +10,18 @@ final class SetupTestHotkeyHarness: ObservableObject {
     var isTranscribing = false
     var onAction: ((DictationShortcutAction) -> Void)?
 
+    // Starts the hotkey monitoring and sets up the event callbacks
     func start(configuration: ShortcutConfiguration, startDelay: TimeInterval) throws {
+        // Handle events from the hotkey manager, returning true if consumed
         hotkeyManager.onShortcutEvent = { [weak self] event in
-            guard let self else { return }
+            guard let self else { return false }
+            if event == .copyAgainTriggered { return true }
             let action = self.sessionController.handle(event: event, isTranscribing: self.isTranscribing)
-            guard let action else { return }
+            guard let action else { return false }
             self.handle(action: action, startDelay: startDelay)
+            if case .stop = action { return true }
+            if case .consumeOnly = action { return true }
+            return false
         }
         cancelPendingStart()
         sessionController.reset()
@@ -52,6 +58,8 @@ final class SetupTestHotkeyHarness: ObservableObject {
             DispatchQueue.main.async {
                 self.onAction?(action)
             }
+        case .consumeOnly:
+            break
         }
     }
 

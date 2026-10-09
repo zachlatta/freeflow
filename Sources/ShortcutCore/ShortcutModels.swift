@@ -71,6 +71,12 @@ enum ShortcutEvent: Equatable {
     case holdDeactivated
     case toggleActivated
     case toggleDeactivated
+    /// Fired when any key/modifier of the toggle shortcut becomes pressed.
+    case toggleComponentActivated
+    /// Fired statelessly on keydown for any component of the toggle shortcut.
+    case toggleComponentInputReceived
+    /// Fired when all keys/modifiers of the toggle shortcut are released.
+    case toggleComponentDeactivated
     case copyAgainTriggered
 }
 
