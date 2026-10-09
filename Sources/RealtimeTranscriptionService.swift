@@ -6,20 +6,36 @@ private let realtimeLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "
 enum RealtimeTranscriptionError: LocalizedError {
     case invalidBaseURL(String)
     case notConnected
-    case serverError(code: String, message: String)
+    case serverError
+    case missingAPIKey
+    case sendFailed
+    case finalizationTimedOut
+    case alreadyFinalizing
     case closedBeforeFinal
 
     var errorDescription: String? {
         switch self {
-        case .invalidBaseURL(let url): return "Cannot derive a WebSocket URL from \(url)"
+        case .invalidBaseURL: return "Cannot derive a WebSocket URL from the configured base URL"
         case .notConnected: return "Realtime transcription socket is not connected"
-        case .serverError(let code, let message): return "Realtime server error [\(code)]: \(message)"
+        case .serverError: return "Realtime transcription server rejected the request"
+        case .missingAPIKey: return "Enter an ElevenLabs API key in Settings."
+        case .sendFailed: return "Realtime transcription could not send audio"
+        case .finalizationTimedOut: return "Realtime transcription timed out waiting for the final transcript"
+        case .alreadyFinalizing: return "Realtime transcription is already waiting for the final transcript"
         case .closedBeforeFinal: return "Realtime socket closed before emitting the final transcript"
         }
     }
 }
 
-final class RealtimeTranscriptionService {
+protocol RealtimeTranscriptionClient: AnyObject {
+    var pcmSampleRate: Double { get }
+    func start() throws
+    func cancel()
+    func appendPCM16(_ data: Data)
+    func commitAndAwaitFinal() async throws -> String
+}
+
+final class RealtimeTranscriptionService: RealtimeTranscriptionClient {
     struct Configuration {
         let baseURL: String
         let apiKey: String
@@ -48,6 +64,7 @@ final class RealtimeTranscriptionService {
     /// concatenates all `completed` events and currently-streaming `delta`
     /// events — useful for a live overlay readout.
     var onPartialUpdate: ((String) -> Void)?
+    let pcmSampleRate: Double = 24_000
 
     init(config: Configuration, session: URLSession = .shared) {
         self.config = config
@@ -252,11 +269,8 @@ final class RealtimeTranscriptionService {
             }
             resumeIfReadyAfterCommit()
         case "error":
-            let errObj = json["error"] as? [String: Any]
-            let code = errObj?["code"] as? String ?? "unknown"
-            let message = errObj?["message"] as? String ?? "unknown realtime error"
-            os_log(.error, log: realtimeLog, "server error [%{public}@]: %{public}@", code, message)
-            let error = RealtimeTranscriptionError.serverError(code: code, message: message)
+            os_log(.error, log: realtimeLog, "server rejected realtime transcription request")
+            let error = RealtimeTranscriptionError.serverError
             stateQueue.sync {
                 terminalError = error
                 closed = true
@@ -308,8 +322,8 @@ final class RealtimeTranscriptionService {
             return
         }
         task.send(.string(text)) { error in
-            if let error {
-                os_log(.error, log: realtimeLog, "send failed: %{public}@", error.localizedDescription)
+            if error != nil {
+                os_log(.error, log: realtimeLog, "realtime audio send failed")
             }
         }
     }
@@ -407,5 +421,337 @@ final class RealtimeTranscriptionService {
             return nil
         }
         return finalText
+    }
+}
+
+/// Small transport boundary so realtime sessions can be verified without a
+/// provider connection, credentials, or recorded audio.
+protocol RealtimeWebSocketTransport: AnyObject {
+    func resume()
+    func send(_ text: String, completion: @escaping (Error?) -> Void)
+    func receive() async throws -> String
+    func cancel()
+}
+
+private final class URLSessionRealtimeWebSocketTransport: RealtimeWebSocketTransport {
+    private let task: URLSessionWebSocketTask
+
+    init(request: URLRequest, session: URLSession) {
+        task = session.webSocketTask(with: request)
+    }
+
+    func resume() { task.resume() }
+
+    func send(_ text: String, completion: @escaping (Error?) -> Void) {
+        task.send(.string(text), completionHandler: completion)
+    }
+
+    func receive() async throws -> String {
+        switch try await task.receive() {
+        case .string(let text): return text
+        case .data(let data): return String(data: data, encoding: .utf8) ?? ""
+        @unknown default: return ""
+        }
+    }
+
+    func cancel() { task.cancel(with: .normalClosure, reason: nil) }
+}
+
+final class ElevenLabsRealtimeTranscriptionService: RealtimeTranscriptionClient {
+    struct Configuration {
+        let baseURL: String
+        let apiKey: String
+        let model: String
+        let language: String?
+    }
+
+    typealias TransportFactory = (URLRequest) -> RealtimeWebSocketTransport
+    /// The scheduler must invoke its action asynchronously and return a
+    /// cancellation closure. Production uses a bounded timer; tests fire it manually.
+    typealias TimeoutScheduler = (TimeInterval, @escaping () -> Void) -> (() -> Void)
+
+    private struct AudioChunk {
+        let data: Data
+        let commit: Bool
+    }
+
+    private let config: Configuration
+    private let makeTransport: TransportFactory
+    private let scheduleTimeout: TimeoutScheduler
+    private let finalizationTimeout: TimeInterval
+    private let stateQueue = DispatchQueue(label: "com.zachlatta.freeflow.realtime.elevenlabs.state")
+    // Every field below is read and written on stateQueue.
+    private var transport: RealtimeWebSocketTransport?
+    private var receiveTask: Task<Void, Never>?
+    private var cancelTimeout: (() -> Void)?
+    private var finalText = ""
+    private var partialText = ""
+    private var pendingAudio = Data()
+    private var outboundChunks: [AudioChunk] = []
+    private var sendInFlight = false
+    private var commitRequested = false
+    private var commitDispatched = false
+    private var finalContinuation: CheckedContinuation<String, Error>?
+    private var terminalResult: Result<String, Error>?
+
+    var onPartialUpdate: ((String) -> Void)?
+    let pcmSampleRate: Double = 16_000
+    private let targetChunkBytes = 16_000 // 500 ms, mono PCM16 at 16 kHz.
+    private let heldChunkBytes = 3_200 // Keep 100 ms for the manual commit.
+
+    init(
+        config: Configuration,
+        session: URLSession = .shared,
+        transportFactory: TransportFactory? = nil,
+        finalizationTimeout: TimeInterval = 10,
+        timeoutScheduler: @escaping TimeoutScheduler = ElevenLabsRealtimeTranscriptionService.scheduleFinalizationTimeout
+    ) {
+        self.config = config
+        self.makeTransport = transportFactory ?? {
+            URLSessionRealtimeWebSocketTransport(request: $0, session: session)
+        }
+        self.finalizationTimeout = finalizationTimeout
+        self.scheduleTimeout = timeoutScheduler
+    }
+
+    func start() throws {
+        let trimmedKey = config.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { throw RealtimeTranscriptionError.missingAPIKey }
+        guard let wsURL = Self.deriveWebSocketURL(
+            baseURL: config.baseURL,
+            model: config.model,
+            language: config.language
+        ) else {
+            throw RealtimeTranscriptionError.invalidBaseURL(config.baseURL)
+        }
+        var request = URLRequest(url: wsURL)
+        request.setValue(trimmedKey, forHTTPHeaderField: "xi-api-key")
+
+        try stateQueue.sync {
+            if let terminalResult {
+                _ = try terminalResult.get()
+                throw RealtimeTranscriptionError.notConnected
+            }
+            guard transport == nil else { return }
+            let transport = makeTransport(request)
+            self.transport = transport
+            transport.resume()
+            receiveTask = Task { [weak self] in
+                await self?.receiveLoop(transport: transport)
+            }
+        }
+    }
+
+    /// Cancellation is terminal even when finalization has not started yet.
+    func cancel() {
+        stateQueue.sync { finishLocked(.failure(CancellationError())) }
+    }
+
+    func appendPCM16(_ data: Data) {
+        guard !data.isEmpty else { return }
+        stateQueue.sync {
+            guard transport != nil, !commitRequested, terminalResult == nil else { return }
+            pendingAudio.append(data)
+            while pendingAudio.count >= targetChunkBytes + heldChunkBytes {
+                outboundChunks.append(AudioChunk(data: Data(pendingAudio.prefix(targetChunkBytes)), commit: false))
+                pendingAudio.removeFirst(targetChunkBytes)
+            }
+            sendNextLocked()
+        }
+    }
+
+    func commitAndAwaitFinal() async throws -> String {
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                stateQueue.sync {
+                    if let terminalResult {
+                        continuation.resume(with: terminalResult)
+                        return
+                    }
+                    guard transport != nil else {
+                        continuation.resume(throwing: RealtimeTranscriptionError.notConnected)
+                        return
+                    }
+                    guard finalContinuation == nil else {
+                        continuation.resume(throwing: RealtimeTranscriptionError.alreadyFinalizing)
+                        return
+                    }
+                    finalContinuation = continuation
+                    commitRequested = true
+                    // No audio still needs a nonempty commit frame. Otherwise
+                    // the held audio forms the final chunk, with no added silence.
+                    let finalChunk = pendingAudio.isEmpty
+                        ? Data(repeating: 0, count: heldChunkBytes)
+                        : pendingAudio
+                    pendingAudio.removeAll(keepingCapacity: false)
+                    outboundChunks.append(AudioChunk(data: finalChunk, commit: true))
+                    cancelTimeout = scheduleTimeout(finalizationTimeout) { [weak self] in
+                        guard let self else { return }
+                        self.stateQueue.sync {
+                            self.finishLocked(.failure(RealtimeTranscriptionError.finalizationTimedOut))
+                        }
+                    }
+                    sendNextLocked()
+                }
+            }
+        } onCancel: {
+            self.cancel()
+        }
+    }
+
+    /// Called only on stateQueue. Enqueuing and draining share this queue so
+    /// concurrent producers cannot let a commit pass previously accepted audio.
+    private func sendNextLocked() {
+        guard !sendInFlight, terminalResult == nil,
+              let transport, !outboundChunks.isEmpty else { return }
+        let chunk = outboundChunks.removeFirst()
+        let payload: [String: Any] = [
+            "message_type": "input_audio_chunk",
+            "audio_base_64": chunk.data.base64EncodedString(),
+            "sample_rate": Int(pcmSampleRate),
+            "commit": chunk.commit
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let text = String(data: data, encoding: .utf8) else {
+            finishLocked(.failure(RealtimeTranscriptionError.sendFailed))
+            return
+        }
+        sendInFlight = true
+        commitDispatched = chunk.commit
+        transport.send(text) { [weak self] error in
+            guard let self else { return }
+            // A transport may complete synchronously. Always queue completion
+            // to avoid reentering stateQueue while sendNextLocked is running.
+            self.stateQueue.async {
+                guard self.terminalResult == nil else { return }
+                self.sendInFlight = false
+                if error != nil {
+                    os_log(.error, log: realtimeLog, "ElevenLabs realtime audio send failed")
+                    self.finishLocked(.failure(RealtimeTranscriptionError.sendFailed))
+                } else {
+                    self.sendNextLocked()
+                }
+            }
+        }
+    }
+
+    private func receiveLoop(transport: RealtimeWebSocketTransport) async {
+        while !Task.isCancelled {
+            do {
+                let text = try await transport.receive()
+                handleServerEvent(text)
+            } catch {
+                stateQueue.sync {
+                    finishLocked(.failure(RealtimeTranscriptionError.closedBeforeFinal))
+                }
+                return
+            }
+        }
+    }
+
+    private func handleServerEvent(_ text: String) {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let eventType = json["message_type"] as? String else { return }
+        stateQueue.sync {
+            guard terminalResult == nil else { return }
+            switch eventType {
+            case "partial_transcript":
+                partialText = (json["text"] as? String) ?? (json["partial_transcript"] as? String) ?? ""
+                reportPartialLocked(joinedTranscriptLocked())
+            case "committed_transcript", "committed_transcript_with_timestamps":
+                let transcript = (json["text"] as? String) ?? (json["transcript"] as? String) ?? ""
+                let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    if !finalText.isEmpty { finalText += " " }
+                    finalText += trimmed
+                }
+                partialText = ""
+                reportPartialLocked(finalText)
+                // Earlier segments can complete while queued audio is draining.
+                // They are not the response to our final manual commit.
+                if commitDispatched { finishLocked(.success(finalText)) }
+            default:
+                if eventType.lowercased().contains("error") {
+                    // Provider-controlled messages and codes can contain user
+                    // content or credentials. Never retain them in an error or log.
+                    os_log(.error, log: realtimeLog, "ElevenLabs server rejected realtime transcription request")
+                    finishLocked(.failure(RealtimeTranscriptionError.serverError))
+                }
+            }
+        }
+    }
+
+    private func finishLocked(_ result: Result<String, Error>) {
+        guard terminalResult == nil else { return }
+        terminalResult = result
+        let continuation = finalContinuation
+        finalContinuation = nil
+        let transport = self.transport
+        self.transport = nil
+        outboundChunks.removeAll(keepingCapacity: false)
+        pendingAudio.removeAll(keepingCapacity: false)
+        let receiveTask = self.receiveTask
+        self.receiveTask = nil
+        let cancelTimeout = self.cancelTimeout
+        self.cancelTimeout = nil
+        cancelTimeout?()
+        receiveTask?.cancel()
+        transport?.cancel()
+        continuation?.resume(with: result)
+    }
+
+    private func reportPartialLocked(_ text: String) {
+        guard let handler = onPartialUpdate else { return }
+        DispatchQueue.main.async { handler(text) }
+    }
+
+    private func joinedTranscriptLocked() -> String {
+        if finalText.isEmpty { return partialText }
+        if partialText.isEmpty { return finalText }
+        return finalText + " " + partialText
+    }
+
+    private static func scheduleFinalizationTimeout(
+        seconds: TimeInterval,
+        action: @escaping () -> Void
+    ) -> (() -> Void) {
+        let workItem = DispatchWorkItem(block: action)
+        DispatchQueue.global().asyncAfter(deadline: .now() + seconds, execute: workItem)
+        return { workItem.cancel() }
+    }
+
+    static func deriveWebSocketURL(
+        baseURL: String,
+        model: String,
+        language: String?
+    ) -> URL? {
+        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var components = URLComponents(string: trimmed),
+              let host = components.host, !host.isEmpty else { return nil }
+        switch components.scheme?.lowercased() {
+        case "http": components.scheme = "ws"
+        case "https": components.scheme = "wss"
+        case "ws", "wss": break
+        default: return nil
+        }
+        var path = components.path
+        if path.hasSuffix("/") { path.removeLast() }
+        if !path.hasSuffix("/speech-to-text/realtime") { path += "/speech-to-text/realtime" }
+        components.path = path
+        var queryItems = components.queryItems ?? []
+        func setQueryItem(_ name: String, _ value: String?) {
+            queryItems.removeAll { $0.name == name }
+            if let value { queryItems.append(URLQueryItem(name: name, value: value)) }
+        }
+        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        setQueryItem("model_id", trimmedModel.isEmpty ? TranscriptionService.defaultElevenLabsRealtimeModel : trimmedModel)
+        setQueryItem("commit_strategy", "manual")
+        setQueryItem("audio_format", "pcm_16000")
+        let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
+        setQueryItem("language_code", trimmedLanguage?.isEmpty == false ? trimmedLanguage : nil)
+        components.queryItems = queryItems
+        return components.url
     }
 }

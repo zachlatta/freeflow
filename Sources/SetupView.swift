@@ -13,9 +13,9 @@ private struct SetupProviderSettingsSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Advanced Provider Settings")
+                Text("Provider Settings")
                     .font(.title2.weight(.semibold))
-                Text("Use these fields when pointing \(AppName.displayName) at another OpenAI-compatible provider or when you need custom model IDs.")
+                Text("Configure cleanup models and choose the speech-to-text provider.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -397,7 +397,7 @@ struct SetupView: View {
                     .font(.title)
                     .fontWeight(.bold)
 
-                Text("Enter an API key for your OpenAI-compatible provider. If you are not using Groq, expand the advanced provider settings and enter that provider's base URL and model IDs before continuing.")
+                Text("Enter an API key for transcript cleanup and context. To use ElevenLabs for speech-to-text, open Provider Settings and choose ElevenLabs Scribe as the transcription provider.")
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -444,9 +444,9 @@ struct SetupView: View {
                             Image(systemName: "slider.horizontal.3")
                                 .foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Advanced Provider Settings")
+                                Text("Provider Settings")
                                     .foregroundStyle(.primary)
-                                Text("Base URL and model IDs")
+                                Text("Transcription provider, base URL, and model IDs")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -1151,7 +1151,7 @@ struct SetupView: View {
                         currentStep = nextStep(currentStep)
                     }
                 } else {
-                    keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
+                    keyValidationError = "Validation failed. Please check your cleanup provider key and settings, then try again."
                 }
             }
         }
