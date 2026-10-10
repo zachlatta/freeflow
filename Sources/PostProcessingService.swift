@@ -538,21 +538,13 @@ Model: \(model)
             ]
         ]
         let config = ModelConfiguration.config(for: model)
-        if let maxTokens = config.maxCompletionTokens {
-            payload["max_completion_tokens"] = maxTokens
-        } else if model == defaultModel {
-            payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
-        }
-        if let effort = config.reasoningEffort {
-            payload["reasoning_effort"] = effort
-        } else if model == defaultModel {
-            payload["reasoning_effort"] = defaultModelReasoningEffort
-        }
-        if let include = config.includeReasoning {
-            payload["include_reasoning"] = include
-        } else if model == defaultModel {
-            payload["include_reasoning"] = false
-        }
+        payload.merge(ModelConfiguration.nonContentRequestOptions(
+            model: model,
+            temperature: 0,
+            defaultModel: defaultModel,
+            defaultReasoningEffort: defaultModelReasoningEffort,
+            defaultMaxCompletionTokens: postProcessingMaxCompletionTokens
+        )) { _, new in new }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
 
@@ -678,21 +670,13 @@ Model: \(model)
             ]
         ]
         let config = ModelConfiguration.config(for: model)
-        if let maxTokens = config.maxCompletionTokens {
-            payload["max_completion_tokens"] = maxTokens
-        } else if model == defaultModel {
-            payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
-        }
-        if let effort = config.reasoningEffort {
-            payload["reasoning_effort"] = effort
-        } else if model == defaultModel {
-            payload["reasoning_effort"] = defaultModelReasoningEffort
-        }
-        if let include = config.includeReasoning {
-            payload["include_reasoning"] = include
-        } else if model == defaultModel {
-            payload["include_reasoning"] = false
-        }
+        payload.merge(ModelConfiguration.nonContentRequestOptions(
+            model: model,
+            temperature: 0,
+            defaultModel: defaultModel,
+            defaultReasoningEffort: defaultModelReasoningEffort,
+            defaultMaxCompletionTokens: postProcessingMaxCompletionTokens
+        )) { _, new in new }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
 
@@ -833,21 +817,13 @@ Model: \(model)
             ],
         ]
         let config = ModelConfiguration.config(for: model)
-        if let maxTokens = config.maxCompletionTokens {
-            payload["max_completion_tokens"] = maxTokens
-        } else if model == defaultModel {
-            payload["max_completion_tokens"] = postProcessingMaxCompletionTokens
-        }
-        if let effort = config.reasoningEffort {
-            payload["reasoning_effort"] = effort
-        } else if model == defaultModel {
-            payload["reasoning_effort"] = defaultModelReasoningEffort
-        }
-        if let include = config.includeReasoning {
-            payload["include_reasoning"] = include
-        } else if model == defaultModel {
-            payload["include_reasoning"] = false
-        }
+        payload.merge(ModelConfiguration.nonContentRequestOptions(
+            model: model,
+            temperature: 0,
+            defaultModel: defaultModel,
+            defaultReasoningEffort: defaultModelReasoningEffort,
+            defaultMaxCompletionTokens: postProcessingMaxCompletionTokens
+        )) { _, new in new }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: payload, options: [])
 
