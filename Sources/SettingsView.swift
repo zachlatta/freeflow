@@ -150,6 +150,37 @@ struct ProviderSettingsFields: View {
         appState.transcriptionAPIKey = trimmed
     }
 
+    /// Points the LLM requests at Atlas Cloud. The saved key of the previous
+    /// provider is cleared (see `ProviderPreset.applyingAtlasCloud`), and the
+    /// transcription URL/key keep resolving to the provider they used before.
+    private func applyAtlasCloudPreset() {
+        let next = ProviderPreset.applyingAtlasCloud(
+            to: ProviderSettingsSnapshot(
+                apiBaseURL: appState.apiBaseURL,
+                apiKey: appState.apiKey,
+                transcriptionAPIURL: appState.transcriptionAPIURL,
+                transcriptionAPIKey: appState.transcriptionAPIKey
+            )
+        )
+
+        // Pin transcription before the LLM endpoint and key change.
+        transcriptionAPIURLInput = next.transcriptionAPIURL
+        appState.transcriptionAPIURL = next.transcriptionAPIURL
+        transcriptionAPIKeyInput = next.transcriptionAPIKey
+        appState.transcriptionAPIKey = next.transcriptionAPIKey
+
+        apiBaseURLInput = next.apiBaseURL
+        appState.apiBaseURL = next.apiBaseURL
+        appState.apiKey = next.apiKey
+
+        postProcessingModelDraft = ProviderPreset.atlasCloudModel
+        appState.postProcessingModel = ProviderPreset.atlasCloudModel
+        postProcessingFallbackModelDraft = ProviderPreset.atlasCloudModel
+        appState.postProcessingFallbackModel = ProviderPreset.atlasCloudModel
+        contextModelDraft = ProviderPreset.atlasCloudModel
+        appState.contextModel = ProviderPreset.atlasCloudModel
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("API Base URL")
@@ -178,6 +209,17 @@ struct ProviderSettingsFields: View {
                     appState.apiBaseURL = AppState.defaultAPIBaseURL
                 }
                 .font(.caption)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Button("Use Atlas Cloud") {
+                    applyAtlasCloudPreset()
+                }
+                .font(.caption)
+
+                Text("Sends cleanup and screenshot-context requests to api.atlascloud.ai with \(ProviderPreset.atlasCloudModel). Your current API key is cleared, so enter an Atlas Cloud key above. Transcription keeps using your previous provider, since Atlas Cloud has no transcription endpoint.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             if showsModelDescription {
@@ -757,6 +799,9 @@ struct GeneralSettingsView: View {
             }
             .padding(24)
         }
+        .onChange(of: appState.apiKey) { newKey in
+            apiKeyInput = newKey
+        }
         .onAppear {
             apiKeyInput = appState.apiKey
             apiBaseURLInput = appState.apiBaseURL
@@ -983,7 +1028,7 @@ struct GeneralSettingsView: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
+                SecureField("Enter your API key", text: $apiKeyInput)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .disabled(isValidatingKey)
