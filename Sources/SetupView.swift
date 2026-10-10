@@ -194,6 +194,9 @@ struct SetupView: View {
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .frame(width: 520, height: 680)
+        .onChange(of: appState.apiKey) { newKey in
+            apiKeyInput = newKey
+        }
         .onAppear {
             apiKeyInput = appState.apiKey
             apiBaseURLInput = appState.apiBaseURL
