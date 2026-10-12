@@ -1029,6 +1029,15 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return stored.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// English name of the language selected in Transcription Language, which
+    /// cleanup is asked to keep. Empty on Auto-detect: nothing is detected from
+    /// the transcript.
+    private static func dictationLanguageName(for language: String) -> String {
+        let normalized = normalizeTranscriptionLanguage(language)
+        guard !normalized.isEmpty else { return "" }
+        return transcriptionLanguageOptions.first { $0.code == normalized }?.name ?? ""
+    }
+
     private static func normalizeTranscriptionLanguage(_ language: String) -> String {
         let normalized = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard transcriptionLanguageOptions.contains(where: { $0.code == normalized }) else {
@@ -1240,6 +1249,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     customVocabulary: capturedCustomVocabulary,
                     customSystemPrompt: capturedCustomSystemPrompt,
                     outputLanguage: self.outputLanguage,
+                    dictationLanguage: Self.dictationLanguageName(for: self.transcriptionLanguage),
                     preserveExactWording: self.preserveExactWording
                 )
                 finalTranscript = result.finalTranscript
@@ -2489,6 +2499,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         customVocabulary: String,
         customSystemPrompt: String,
         outputLanguage: String = "",
+        dictationLanguage: String = "",
         preserveExactWording: Bool
     ) async -> (finalTranscript: String, outcome: TranscriptProcessingOutcome, prompt: String) {
         let trimmedRawTranscript = rawTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2554,7 +2565,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 context: context,
                 customVocabulary: customVocabulary,
                 customSystemPrompt: customSystemPrompt,
-                outputLanguage: outputLanguage
+                outputLanguage: outputLanguage,
+                dictationLanguage: dictationLanguage
             )
             return (result.transcript, .postProcessingSucceeded, result.prompt)
         } catch {
@@ -2716,6 +2728,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         customVocabulary: self.customVocabulary,
                         customSystemPrompt: self.customSystemPrompt,
                         outputLanguage: self.outputLanguage,
+                        dictationLanguage: Self.dictationLanguageName(for: self.transcriptionLanguage),
                         preserveExactWording: self.preserveExactWording
                     )
                     try Task.checkCancellation()
