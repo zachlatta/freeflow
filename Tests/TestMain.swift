@@ -13,6 +13,8 @@ struct FreeFlowTests {
         PostProcessingServiceTests.run()
         TranscriptionErrorPresentationCoreTests.run()
         TranscriptTextCoreTests.run()
+        RecordingOverlayPlacementTests.run()
+        CaretAnchorReaderTests.run()
         print("FreeFlowTests passed")
     }
 }
