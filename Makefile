@@ -22,6 +22,10 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/PostProcessingService.swift \
 	Sources/RecordingCaptureTiming.swift \
 	Sources/RecordingTimerPreference.swift \
+	Sources/RealtimeTranscriptionService.swift \
+	Sources/TranscriptionConfiguration.swift \
+	Sources/TranscriptionFallback.swift \
+	Sources/TranscriptionService.swift \
 	Sources/TranscriptionErrorPresentationCore.swift \
 	Sources/TranscriptTextCore.swift \
 	Sources/UpdateManager.swift \
