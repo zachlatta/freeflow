@@ -7,6 +7,7 @@ struct FreeFlowTests {
         await LLMAPITransportTests.run()
         TemperatureCapabilityCacheTests.run()
         ModelConfigurationTests.run()
+        ProviderPresetTests.run()
         RecordingCaptureTimingTests.run()
         RecordingTimerPreferenceTests.run()
         ShortcutCoreTests.run()

@@ -290,6 +290,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Discards in-flight key validations when the provider changes underneath them.
+    let keyValidationGate = KeyValidationGate()
+
     @Published var apiKey: String {
         didSet {
             guard !isApplyingAPIConfiguration else { return }
@@ -1085,14 +1088,21 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return normalized
     }
 
+    private var providerSettings: ProviderSettingsSnapshot {
+        ProviderSettingsSnapshot(
+            apiBaseURL: apiBaseURL,
+            apiKey: apiKey,
+            transcriptionAPIURL: transcriptionAPIURL,
+            transcriptionAPIKey: transcriptionAPIKey
+        )
+    }
+
     private var resolvedTranscriptionBaseURL: String {
-        let trimmed = transcriptionAPIURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? apiBaseURL : trimmed
+        providerSettings.effectiveTranscriptionBaseURL
     }
 
     private var resolvedTranscriptionAPIKey: String {
-        let trimmed = transcriptionAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? apiKey : trimmed
+        providerSettings.effectiveTranscriptionAPIKey
     }
 
     func makeTranscriptionService() throws -> TranscriptionService {

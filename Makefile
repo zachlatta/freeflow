@@ -21,6 +21,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/LLMCooldownManager.swift \
 	Sources/ModelConfiguration.swift \
 	Sources/PostProcessingService.swift \
+	Sources/ProviderPreset.swift \
 	Sources/RecordingCaptureTiming.swift \
 	Sources/RecordingTimerPreference.swift \
 	Sources/TranscriptionErrorPresentationCore.swift \
