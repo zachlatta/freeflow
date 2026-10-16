@@ -29,7 +29,17 @@ FreeFlow is a free Mac dictation app inspired by [Wispr Flow](https://wisprflow.
 
 ## Quick Start
 
-1. Download the app from above or [click here](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg)
+1. Install FreeFlow - [download FreeFlow.dmg](https://github.com/zachlatta/freeflow/releases/latest/download/FreeFlow.dmg).
+
+   A Homebrew installation path is proposed below. Tap location and update ownership are pending maintainer approval in [#283](https://github.com/zachlatta/freeflow/issues/283); use the DMG until that is confirmed.
+
+   ```sh
+   brew tap zachlatta/freeflow https://github.com/zachlatta/freeflow
+   brew install --cask zachlatta/freeflow/freeflow
+   ```
+
+   FreeFlow updates itself, so Homebrew skips it during ordinary upgrades. To let Homebrew handle upgrades too, run `brew upgrade --cask --greedy zachlatta/freeflow/freeflow`.
+
 2. Get a free Groq API key from [groq.com](https://groq.com/)
 3. Hold `Fn` to talk, or tap `Command-Fn` to start and stop dictation, and have whatever you say pasted into the current text field
 
