@@ -15,6 +15,8 @@ struct FreeFlowTests {
         PostProcessingServiceTests.run()
         TranscriptionErrorPresentationCoreTests.run()
         TranscriptTextCoreTests.run()
+        CredentialRecipeTests.run()
+        JSONPreferencesTests.run()
         await TranscriptionServiceTests.run()
         await APIConfigurationDraftTests.run()
         print("FreeFlowTests passed")

@@ -9,12 +9,6 @@ import Carbon
 import os.log
 private let recordingLog = OSLog(subsystem: "com.zachlatta.freeflow", category: "Recording")
 
-struct VoiceMacro: Codable, Identifiable, Equatable {
-    var id: UUID = UUID()
-    var command: String
-    var payload: String
-}
-
 struct PrecomputedMacro {
     let original: VoiceMacro
     let normalizedCommand: String
@@ -723,7 +717,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             : soundVolume > 0
         
         let initialMacros: [VoiceMacro]
-        if let data = UserDefaults.standard.data(forKey: "voice_macros"),
+        if let data = JSONPreferences.data(forKey: "voice_macros"),
            let decoded = try? JSONDecoder().decode([VoiceMacro].self, from: data) {
             initialMacros = decoded
         } else {
@@ -952,7 +946,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private static func loadShortcut(forKey key: String) -> StoredShortcutLoadResult {
-        guard let data = UserDefaults.standard.data(forKey: key) else {
+        guard let data = JSONPreferences.data(forKey: key) else {
             return StoredShortcutLoadResult(binding: nil, hadStoredValue: false, didNormalize: false)
         }
         guard let decoded = try? JSONDecoder().decode(ShortcutBinding.self, from: data) else {
