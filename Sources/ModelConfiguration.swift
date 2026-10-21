@@ -20,8 +20,8 @@ public struct ModelConfiguration {
         "canopylabs/orpheus-v1-english",
         "meta-llama/llama-prompt-guard-2-22m",
         "meta-llama/llama-prompt-guard-2-86m",
-        "MiniMax-M3",
-        "MiniMax-M2.7"
+        "MiniMax-M3.1-Flash",
+        "MiniMax-M3"
     ]
 
     public static let transcriptionModels = [
@@ -145,9 +145,16 @@ public struct ModelConfiguration {
                 includeReasoning: nil,
                 shouldStripThinkTags: false
             )
+        } else if cleanModel == "minimax-m3.1-flash" {
+            // MiniMax-M3.1-Flash uses adaptive thinking; remove reasoning tags from transcripts.
+            return ModelConfig(
+                maxCompletionTokens: nil,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
+            )
         } else if cleanModel == "minimax-m3" {
-            // MiniMax-M3 emits an adaptive thinking block; strip reasoning tags so the
-            // cleaned transcript never contains the model's chain of thought.
+            // MiniMax-M3 may emit adaptive thinking; remove reasoning tags from transcripts.
             return ModelConfig(
                 maxCompletionTokens: nil,
                 reasoningEffort: nil,
@@ -155,7 +162,7 @@ public struct ModelConfiguration {
                 shouldStripThinkTags: true
             )
         } else if cleanModel == "minimax-m2.7" {
-            // MiniMax-M2.7 always emits reasoning; strip its think tags from the output.
+            // Preserve reasoning cleanup for saved or manually entered legacy models.
             return ModelConfig(
                 maxCompletionTokens: nil,
                 reasoningEffort: nil,

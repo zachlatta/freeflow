@@ -76,13 +76,26 @@ struct AppContextServiceTests {
     }
 
     private static func testMiniMaxModelsArePredefinedAndStripThinkTags() {
+        guard let flashIndex = ModelConfiguration.llmModels.firstIndex(of: "MiniMax-M3.1-Flash"),
+              let m3Index = ModelConfiguration.llmModels.firstIndex(of: "MiniMax-M3") else {
+            expect(false, "MiniMax models are missing from the picker")
+            return
+        }
+        expect(m3Index == flashIndex + 1, "MiniMax-M3 should follow MiniMax-M3.1-Flash")
+        expect(ModelConfiguration.llmModels.contains("MiniMax-M3.1-Flash"), "MiniMax-M3.1-Flash is missing from the picker")
         expect(ModelConfiguration.llmModels.contains("MiniMax-M3"), "MiniMax-M3 is missing from the picker")
-        expect(ModelConfiguration.llmModels.contains("MiniMax-M2.7"), "MiniMax-M2.7 is missing from the picker")
+        expect(!ModelConfiguration.llmModels.contains("MiniMax-M2.7"), "Retired MiniMax-M2.7 remains in the picker")
 
-        for model in ["MiniMax-M3", "MiniMax-M2.7"] {
+        let miniMaxModels = ModelConfiguration.llmModels.filter { $0.hasPrefix("MiniMax-") }
+        expect(miniMaxModels == ["MiniMax-M3.1-Flash", "MiniMax-M3"], "Unexpected ordinary MiniMax choices")
+        for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7", "  minimax-m3.1-flash  "] {
             let config = ModelConfiguration.config(for: model)
             expect(config.shouldStripThinkTags, "MiniMax model should strip think tags: \(model)")
+            expect(config.reasoningEffort == nil, "MiniMax should retain provider reasoning defaults")
+            expect(config.includeReasoning == nil, "MiniMax should not disable adaptive thinking")
+            expect(config.maxCompletionTokens == nil, "MiniMax should retain provider token defaults")
         }
+        expect(!ModelConfiguration.config(for: "custom-model").shouldStripThinkTags, "Custom model behavior changed")
 
         let reasoningOutput = """
         <think>
@@ -90,9 +103,11 @@ struct AppContextServiceTests {
         </think>
         Cleaned transcript text.
         """
-        let summary = AppContextService.activitySummary(from: reasoningOutput, model: "MiniMax-M3")
-        expect(summary?.contains("Hidden reasoning") == false, "MiniMax reasoning leaked into summary")
-        expect(summary?.contains("Cleaned transcript text.") == true, "MiniMax summary dropped the transcript text")
+        for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7"] {
+            let summary = AppContextService.activitySummary(from: reasoningOutput, model: model)
+            expect(summary?.contains("Hidden reasoning") == false, "MiniMax reasoning leaked into summary: \(model)")
+            expect(summary?.contains("Cleaned transcript text.") == true, "MiniMax summary dropped the transcript text: \(model)")
+        }
     }
 
     private static func expectEqual(_ actual: String?, _ expected: String, file: StaticString = #file, line: UInt = #line) {
