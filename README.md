@@ -109,6 +109,10 @@ defaults delete com.zachlatta.freeflow context_request_timeout_seconds
 
 </details>
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up the project, build, test, and submit changes.
+
 ## License
 
 Licensed under the MIT license.

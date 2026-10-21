@@ -8,6 +8,36 @@ This project uses semantic versioning for public releases. Use `MAJOR.MINOR.PATC
 - `MINOR` changes add user-visible features and improvements.
 - `PATCH` changes fix bugs, polish existing behavior, or make small internal improvements.
 
+## [1.3.1] - 2026-10-09
+
+### Fixed
+
+- The recording timer is now off by default. You can enable it in Settings; existing saved choices are preserved.
+
+## [1.3.0] - 2026-10-09
+
+### Added
+
+- An optional elapsed recording timer in the dictation overlay.
+- A setting to disable full-desktop screenshots when active-window capture is unavailable.
+
+### Improved
+
+- Context and fallback models now use Qwen 3.8 on Groq. Existing Groq Qwen 3.6 selections update automatically, while custom provider choices are preserved.
+- Context failures now show clear model, authentication, rate-limit, timeout, and response errors in run logs. Failed summaries are omitted from transcript cleanup and Edit Mode, including when retrying older entries.
+- Network failures provide clearer guidance when a VPN or proxy may be interrupting transcription.
+- Compatibility with newer Swift toolchains and reliability checks for dictation and releases.
+
+## [1.2.1] - 2026-08-11
+
+### Improved
+
+- Model pickers now show only currently supported Groq options, with context models limited to those that can analyze screenshots.
+
+### Fixed
+
+- Fixed typing lag in custom vocabulary and prompt editors by saving changes when editing finishes instead of after every keystroke.
+
 ## [1.2.0] - 2026-07-14
 
 ### Added

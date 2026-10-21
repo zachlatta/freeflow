@@ -5,6 +5,8 @@ import AppKit
 
 final class RecordingOverlayState: ObservableObject {
     @Published var phase: OverlayPhase = .recording
+    @Published var recordingStartedAt: ContinuousClock.Instant?
+    @Published var showsRecordingTimer = RecordingTimerPreference.defaultEnabled
     @Published var audioLevel: Float = 0.0
     @Published var recordingTriggerMode: RecordingTriggerMode = .hold
     @Published var isCommandMode = false
@@ -133,31 +135,49 @@ final class RecordingOverlayManager {
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
+            self.overlayState.recordingStartedAt = nil
             self.overlayState.phase = .initializing
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: false)
         }
     }
 
-    func showRecording(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
+    func showRecording(
+        mode: RecordingTriggerMode = .hold,
+        isCommandMode: Bool = false,
+        startedAt: ContinuousClock.Instant = .now,
+        showsRecordingTimer: Bool
+    ) {
         DispatchQueue.main.async {
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
+            self.beginRecordingTimer(startedAt: startedAt, showsRecordingTimer: showsRecordingTimer)
             self.overlayState.phase = .recording
             self.overlayState.audioLevel = 0
             self.showOverlayPanel(animatedResize: true)
         }
     }
 
-    func transitionToRecording(mode: RecordingTriggerMode = .hold, isCommandMode: Bool = false) {
+    func transitionToRecording(
+        mode: RecordingTriggerMode = .hold,
+        isCommandMode: Bool = false,
+        startedAt: ContinuousClock.Instant = .now,
+        showsRecordingTimer: Bool
+    ) {
         DispatchQueue.main.async {
             self.lockedOverlayWidth = nil
             self.overlayState.recordingTriggerMode = mode
             self.overlayState.isCommandMode = isCommandMode
+            self.beginRecordingTimer(startedAt: startedAt, showsRecordingTimer: showsRecordingTimer)
             self.overlayState.phase = .recording
             self.updateOverlayLayout(animated: true)
         }
+    }
+
+    private func beginRecordingTimer(startedAt: ContinuousClock.Instant, showsRecordingTimer: Bool) {
+        overlayState.showsRecordingTimer = showsRecordingTimer
+        overlayState.recordingStartedAt = startedAt
     }
 
     func setRecordingTriggerMode(_ mode: RecordingTriggerMode, animated: Bool) {
@@ -202,7 +222,7 @@ final class RecordingOverlayManager {
             let cutoff = message.index(message.startIndex, offsetBy: Self.maxToastMessageLength - 1)
             return String(message[..<cutoff]) + "…"
         }()
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [self] in
             let toastID = UUID()
             self.overlayState.errorMessage = truncated
             self.overlayState.toastID = toastID
@@ -291,9 +311,9 @@ final class RecordingOverlayManager {
             // Winged layout: notch x-range stays solid black so the cutout masks it.
             let rootView = WingedRecordingView(
                 state: overlayState,
-                leftWingWidth: Self.leftWingWidth,
+                leftWingWidth: activeWingWidth,
                 notchWidth: notchWidth,
-                rightWingWidth: Self.rightWingWidth,
+                rightWingWidth: activeWingWidth,
                 height: frame.height,
                 onStopButtonPressed: { [weak self] in
                     self?.onStopButtonPressed?()
@@ -356,11 +376,11 @@ final class RecordingOverlayManager {
         }
     }
 
-    /// Wing width — tight to the compact waveform / stop button so the
-    /// panel stays clear of right-side menu-bar items.
-    static let wingWidth: CGFloat = 36
-    static let leftWingWidth: CGFloat = wingWidth
-    static let rightWingWidth: CGFloat = wingWidth
+    /// Equal wings keep the overlay balanced around the camera cutout.
+    /// Recording needs just enough room for the timer on the left.
+    private var activeWingWidth: CGFloat {
+        overlayState.phase == .recording && overlayState.showsRecordingTimer ? 48 : 36
+    }
 
     private var overlayFrame: NSRect {
         guard let screen = targetScreen else { return .zero }
@@ -371,8 +391,8 @@ final class RecordingOverlayManager {
             let nWidth = notchWidth
             let nLeftX = screen.auxiliaryTopLeftArea?.maxX
                 ?? (screen.frame.midX - nWidth / 2)
-            let leftWing = Self.leftWingWidth
-            let rightWing = Self.rightWingWidth
+            let leftWing = activeWingWidth
+            let rightWing = activeWingWidth
             let panelHeight = notchOverlap
             let panelWidth = leftWing + nWidth + rightWing
             let panelX = nLeftX - leftWing
@@ -440,8 +460,12 @@ final class RecordingOverlayManager {
             baseWidth = defaultWidth
         }
 
-        guard screenHasNotch else { return baseWidth }
-        return max(notchWidth, baseWidth)
+        // Reserve separate leading, center, and trailing slots while recording.
+        let width = overlayState.phase == .recording && overlayState.showsRecordingTimer
+            ? max(baseWidth, overlayState.isCommandMode ? 224 : 180)
+            : baseWidth
+        guard screenHasNotch else { return width }
+        return max(notchWidth, width)
     }
 
     private func showFeedbackPanel() {
@@ -452,6 +476,7 @@ final class RecordingOverlayManager {
 
     private func dismissAll() {
         lockedOverlayWidth = nil
+        overlayState.recordingStartedAt = nil
         overlayState.isCommandMode = false
         overlayState.updateVersion = ""
         if let panel = overlayWindow {
@@ -468,7 +493,7 @@ final class RecordingOverlayManager {
 
 // MARK: - Winged Recording View
 
-/// Wing layout: waveform left, stop button right, solid-black notch in the middle
+/// Wing layout: timer (or waveform) left, stop button right, black notch in the middle
 /// (the camera cutout masks those pixels).
 struct WingedRecordingView: View {
     @ObservedObject var state: RecordingOverlayState
@@ -495,7 +520,7 @@ struct WingedRecordingView: View {
     private var wingsHStack: some View {
         HStack(spacing: 0) {
             // Left wing — empty during feedback so the right-wing X reads as the sole signal.
-            HStack {
+            HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 Group {
                     if state.phase == .feedback {
@@ -504,11 +529,6 @@ struct WingedRecordingView: View {
                         InitializingDotsView()
                             .transition(.opacity)
                     } else if showsLiveRecordingContent {
-                        // Command-mode pencil sits directly above and centered
-                        // over the compact waveform inside the same wing
-                        // rectangle. Closes the gap between pill and winged
-                        // layouts: pill users already see a pencil during
-                        // command-mode dictation; winged users now do too.
                         VStack(spacing: 1) {
                             if state.isCommandMode {
                                 Image(systemName: "pencil")
@@ -516,10 +536,14 @@ struct WingedRecordingView: View {
                                     .foregroundStyle(.white.opacity(0.92))
                                     .transition(.opacity)
                             }
-                            CompactWaveformView(
-                                audioLevel: state.audioLevel,
-                                showsActivityPulse: state.phase == .recording
-                            )
+                            if state.showsRecordingTimer, let start = state.recordingStartedAt {
+                                RecordingElapsedTimeView(start: start)
+                            } else {
+                                CompactWaveformView(
+                                    audioLevel: state.audioLevel,
+                                    showsActivityPulse: true
+                                )
+                            }
                         }
                         .transition(.opacity)
                     } else {
@@ -535,8 +559,7 @@ struct WingedRecordingView: View {
             Color.black
                 .frame(width: notchWidth, height: height)
 
-            // Right wing — stop button (recording) OR failure X (feedback),
-            // horizontally centered.
+            // Right wing — stop button or failure X, horizontally centered.
             HStack {
                 Spacer(minLength: 0)
                 Group {
@@ -938,7 +961,10 @@ struct RecordingOverlayView: View {
     let onStopButtonPressed: () -> Void
     let onUpdateOverlayPressed: () -> Void
 
-    private let leadingAccessoryWidth: CGFloat = 24
+    private var leadingAccessoryWidth: CGFloat {
+        guard showsLiveRecordingContent && state.showsRecordingTimer else { return 24 }
+        return state.isCommandMode ? 72 : 48
+    }
     private let trailingAccessoryWidth: CGFloat = 32
 
     private var showsLiveRecordingContent: Bool {
@@ -964,11 +990,13 @@ struct RecordingOverlayView: View {
                             InitializingDotsView()
                                 .transition(.opacity)
                         } else if showsLiveRecordingContent {
-                            WaveformView(
-                                audioLevel: state.audioLevel,
-                                showsActivityPulse: state.phase == .recording
-                            )
-                                .transition(.opacity)
+                            if state.showsRecordingTimer, let start = state.recordingStartedAt {
+                                RecordingElapsedTimeView(start: start)
+                                    .transition(.opacity)
+                            } else {
+                                WaveformView(audioLevel: state.audioLevel, showsActivityPulse: true)
+                                    .transition(.opacity)
+                            }
                         } else {
                             ProcessingIndicatorView()
                                 .transition(.opacity)
@@ -977,7 +1005,18 @@ struct RecordingOverlayView: View {
 
                     HStack {
                         Group {
-                            if state.isCommandMode {
+                            if showsLiveRecordingContent && state.showsRecordingTimer {
+                                HStack(spacing: 6) {
+                                    if state.isCommandMode {
+                                        CommandModeIndicator()
+                                    }
+                                    WaveformView(
+                                        audioLevel: state.audioLevel,
+                                        showsActivityPulse: true
+                                    )
+                                }
+                                .transition(.opacity)
+                            } else if state.isCommandMode {
                                 CommandModeIndicator()
                                     .transition(.opacity)
                             }
@@ -1010,6 +1049,26 @@ struct RecordingOverlayView: View {
         .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.phase)
         .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.recordingTriggerMode)
         .animation(.spring(response: 0.28, dampingFraction: 1.0), value: state.isCommandMode)
+    }
+}
+
+/// The manager owns the start instant so rebuilding the overlay or switching
+/// from hold to toggle mode cannot reset the elapsed time. A monotonic clock
+/// also keeps system clock adjustments from changing the displayed duration.
+private struct RecordingElapsedTimeView: View {
+    let start: ContinuousClock.Instant
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            let seconds = max(0, start.duration(to: .now).components.seconds)
+            Text(String(format: "%lld:%02lld", seconds / 60, seconds % 60))
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+                .fixedSize()
+                .frame(minWidth: 40)
+                .accessibilityLabel("Recording duration")
+                .accessibilityValue("\(seconds / 60) minutes, \(seconds % 60) seconds")
+        }
     }
 }
 

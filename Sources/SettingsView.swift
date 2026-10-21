@@ -65,9 +65,7 @@ struct ProviderSettingsFields: View {
 
     private func commitAPIBaseURL() {
         let trimmed = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedBaseURL = trimmed.isEmpty ? AppState.defaultAPIBaseURL : trimmed
-        apiBaseURLInput = resolvedBaseURL
-        appState.apiBaseURL = resolvedBaseURL
+        apiBaseURLInput = trimmed.isEmpty ? AppState.defaultAPIBaseURL : trimmed
     }
 
     private func commitTranscriptionModel() {
@@ -137,17 +135,11 @@ struct ProviderSettingsFields: View {
     }
 
     private func commitTranscriptionAPIURL() {
-        let trimmed = transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        transcriptionAPIURLInput = trimmed
-        guard appState.transcriptionAPIURL != trimmed else { return }
-        appState.transcriptionAPIURL = trimmed
+        transcriptionAPIURLInput = transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func commitTranscriptionAPIKey() {
-        let trimmed = transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        transcriptionAPIKeyInput = trimmed
-        guard appState.transcriptionAPIKey != trimmed else { return }
-        appState.transcriptionAPIKey = trimmed
+        transcriptionAPIKeyInput = transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
@@ -175,7 +167,6 @@ struct ProviderSettingsFields: View {
 
                 Button("Reset to Default") {
                     apiBaseURLInput = AppState.defaultAPIBaseURL
-                    appState.apiBaseURL = AppState.defaultAPIBaseURL
                 }
                 .font(.caption)
             }
@@ -238,8 +229,8 @@ struct ProviderSettingsFields: View {
 
             ModelDropdownView(
                 title: "Context Model",
-                subtitle: "Used for context inference, with a text-only retry when screenshot analysis fails.",
-                predefinedModels: ModelConfiguration.llmModels,
+                subtitle: "Used for context inference, with a text-only retry when screenshot analysis fails. Screenshot analysis requires a model that accepts image input.",
+                predefinedModels: ModelConfiguration.visionModels,
                 defaultModel: AppState.defaultContextModel,
                 textDraft: $contextModelDraft,
                 onCommit: commitContextModel,
@@ -296,7 +287,6 @@ struct ProviderSettingsFields: View {
                     if !transcriptionAPIURLInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button("Clear") {
                             transcriptionAPIURLInput = ""
-                            appState.transcriptionAPIURL = ""
                         }
                         .font(.caption)
                     }
@@ -322,7 +312,6 @@ struct ProviderSettingsFields: View {
                     if !transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Button("Clear") {
                             transcriptionAPIKeyInput = ""
-                            appState.transcriptionAPIKey = ""
                         }
                         .font(.caption)
                     }
@@ -534,16 +523,15 @@ struct GeneralSettingsView: View {
     @AppStorage("show_menu_bar_icon") private var showMenuBarIcon = true
     @AppStorage("overlay_display_id") private var overlayDisplayID = 0
     @AppStorage("use_compact_overlay") private var useCompactOverlay = true
+    @AppStorage(RecordingTimerPreference.storageKey) private var showRecordingTimer = RecordingTimerPreference.defaultEnabled
     @State private var screensVersion = 0
-    @State private var apiKeyInput: String = ""
-    @State private var apiBaseURLInput: String = ""
-    @State private var transcriptionAPIURLInput: String = ""
-    @State private var transcriptionAPIKeyInput: String = ""
+    @State private var apiDraft = APIConfigurationDraft()
     @State private var advancedProviderSettingsExpanded = false
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
-    @State private var keyValidationSuccess = false
+    @State private var successfulAPIConfiguration: ValidatedAPIConfiguration?
     @State private var customVocabularyInput: String = ""
+    @FocusState private var customVocabularyFocused: Bool
     @State private var micPermissionGranted = false
     @State private var showMutedHint = false
     @State private var copiedBuildInfo = false
@@ -756,23 +744,30 @@ struct GeneralSettingsView: View {
             .padding(24)
         }
         .onAppear {
-            apiKeyInput = appState.apiKey
-            apiBaseURLInput = appState.apiBaseURL
-            transcriptionAPIURLInput = appState.transcriptionAPIURL
-            transcriptionAPIKeyInput = appState.transcriptionAPIKey
+            apiDraft.present(appState.committedAPIConfiguration)
+            isValidatingKey = false
+            keyValidationError = nil
+            successfulAPIConfiguration = nil
             customVocabularyInput = appState.customVocabulary
             checkMicPermission()
             appState.refreshLaunchAtLoginStatus()
             Task { await githubCache.fetchIfNeeded() }
         }
-        .onChange(of: appState.transcriptionAPIURL) { value in
-            if transcriptionAPIURLInput != value {
-                transcriptionAPIURLInput = value
+        .onDisappear {
+            apiDraft.dismiss()
+            commitCustomVocabulary()
+        }
+        .onChange(of: appState.committedAPIConfiguration) { saved in
+            apiDraft.reconcile(saved)
+            keyValidationError = nil
+            if successfulAPIConfiguration != saved {
+                successfulAPIConfiguration = nil
             }
         }
-        .onChange(of: appState.transcriptionAPIKey) { value in
-            if transcriptionAPIKeyInput != value {
-                transcriptionAPIKeyInput = value
+        .onChange(of: apiDraft.configuration) { value in
+            keyValidationError = nil
+            if successfulAPIConfiguration != value {
+                successfulAPIConfiguration = nil
             }
         }
     }
@@ -978,26 +973,22 @@ struct GeneralSettingsView: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiKeyInput)
+                SecureField("Enter your Groq API key", text: $apiDraft.apiKey)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .disabled(isValidatingKey)
-                    .onChange(of: apiKeyInput) { _ in
-                        keyValidationError = nil
-                        keyValidationSuccess = false
-                    }
 
                 Button(isValidatingKey ? "Validating..." : "Save") {
                     validateAndSaveKey()
                 }
-                .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
+                .disabled(apiDraft.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isValidatingKey)
             }
 
             if let error = keyValidationError {
                 Label(error, systemImage: "xmark.circle.fill")
                     .foregroundStyle(.red)
                     .font(.caption)
-            } else if keyValidationSuccess {
+            } else if apiDraft.showsSavedSuccess(successfulAPIConfiguration, committed: appState.committedAPIConfiguration) {
                 Label("API key saved", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .font(.caption)
@@ -1007,9 +998,9 @@ struct GeneralSettingsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Divider()
                     ProviderSettingsFields(
-                        apiBaseURLInput: $apiBaseURLInput,
-                        transcriptionAPIURLInput: $transcriptionAPIURLInput,
-                        transcriptionAPIKeyInput: $transcriptionAPIKeyInput,
+                        apiBaseURLInput: $apiDraft.baseURL,
+                        transcriptionAPIURLInput: $apiDraft.transcriptionAPIURL,
+                        transcriptionAPIKeyInput: $apiDraft.transcriptionAPIKey,
                         showsModelDescription: false
                     )
                 }
@@ -1028,25 +1019,37 @@ struct GeneralSettingsView: View {
     }
 
     private func validateAndSaveKey() {
-        let key = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isValidatingKey else { return }
+        let submission = apiDraft.submission
         isValidatingKey = true
         keyValidationError = nil
-        keyValidationSuccess = false
+        successfulAPIConfiguration = nil
 
-        Task {
-            let valid = await TranscriptionService.validateAPIKey(
-                key,
-                baseURL: baseURL.isEmpty ? AppState.defaultAPIBaseURL : baseURL
-            )
-            await MainActor.run {
-                isValidatingKey = false
-                if valid {
-                    appState.apiKey = key
-                    keyValidationSuccess = true
-                } else {
-                    keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
+        Task { @MainActor in
+            var accepted: ValidatedAPIConfiguration?
+            let valid = await APIConfigurationSaveFlow.validateAndApply(
+                apiKey: submission.configuration.apiKey,
+                baseURL: submission.configuration.baseURL,
+                transcriptionAPIURL: submission.configuration.transcriptionAPIURL,
+                transcriptionAPIKey: submission.configuration.transcriptionAPIKey
+            ) { configuration in
+                if apiDraft.accept(configuration, for: submission) {
+                    accepted = configuration
                 }
+                appState.updateAPIConfiguration(
+                    apiKey: configuration.apiKey,
+                    baseURL: configuration.baseURL,
+                    transcriptionAPIURL: configuration.transcriptionAPIURL,
+                    transcriptionAPIKey: configuration.transcriptionAPIKey
+                )
+            }
+            guard apiDraft.isCurrent(submission) else { return }
+            isValidatingKey = false
+            if valid, let accepted, apiDraft.configuration == accepted,
+               appState.committedAPIConfiguration == accepted {
+                successfulAPIConfiguration = accepted
+            } else if !valid && apiDraft.matches(submission) {
+                keyValidationError = "Validation failed. Please check your API key and provider settings, then try again."
             }
         }
     }
@@ -1135,6 +1138,11 @@ struct GeneralSettingsView: View {
                 isMinimalist: false,
                 selection: $useCompactOverlay
             )
+
+            Toggle("Show recording timer", isOn: $showRecordingTimer)
+            Text("When off, the minimalist overlay shows a waveform instead of the timer, and the drop-down pill hides the timer. Applies to the next recording.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Divider()
 
@@ -1385,6 +1393,13 @@ struct GeneralSettingsView: View {
 
     // MARK: Custom Vocabulary
 
+    private func commitCustomVocabulary() {
+        let trimmed = customVocabularyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if appState.customVocabulary != trimmed {
+            appState.customVocabulary = trimmed
+        }
+    }
+
     private var vocabularySection: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Words and phrases to preserve during post-processing.")
@@ -1394,12 +1409,13 @@ struct GeneralSettingsView: View {
             TextEditor(text: $customVocabularyInput)
                 .font(.system(.body, design: .monospaced))
                 .frame(minHeight: 80, maxHeight: 140)
+                .focused($customVocabularyFocused)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                 )
-                .onChange(of: customVocabularyInput) { newValue in
-                    appState.customVocabulary = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                .onChange(of: customVocabularyFocused) { focused in
+                    if !focused { commitCustomVocabulary() }
                 }
 
             Text("Separate entries with commas, new lines, or semicolons.")
@@ -1508,6 +1524,8 @@ struct PromptsSettingsView: View {
     @EnvironmentObject var appState: AppState
     @State private var customSystemPromptInput: String = ""
     @State private var customContextPromptInput: String = ""
+    @FocusState private var customSystemPromptFocused: Bool
+    @FocusState private var customContextPromptFocused: Bool
     @State private var showDefaultSystemPrompt = false
     @State private var showDefaultContextPrompt = false
 
@@ -1546,6 +1564,38 @@ struct PromptsSettingsView: View {
             customContextPromptInput = appState.customContextPrompt.isEmpty
                 ? AppContextService.defaultContextPrompt
                 : appState.customContextPrompt
+        }
+        .onDisappear {
+            commitCustomSystemPrompt()
+            commitCustomContextPrompt()
+        }
+    }
+
+    private func commitCustomSystemPrompt() {
+        let trimmed = customSystemPromptInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let defaultTrimmed = PostProcessingService.defaultSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == defaultTrimmed || trimmed.isEmpty {
+            if !appState.customSystemPrompt.isEmpty {
+                appState.customSystemPrompt = ""
+                appState.customSystemPromptLastModified = ""
+            }
+        } else if appState.customSystemPrompt != trimmed {
+            appState.customSystemPrompt = trimmed
+            appState.customSystemPromptLastModified = iso8601DayFormatter.string(from: Date())
+        }
+    }
+
+    private func commitCustomContextPrompt() {
+        let trimmed = customContextPromptInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let defaultTrimmed = AppContextService.defaultContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == defaultTrimmed || trimmed.isEmpty {
+            if !appState.customContextPrompt.isEmpty {
+                appState.customContextPrompt = ""
+                appState.customContextPromptLastModified = ""
+            }
+        } else if appState.customContextPrompt != trimmed {
+            appState.customContextPrompt = trimmed
+            appState.customContextPromptLastModified = iso8601DayFormatter.string(from: Date())
         }
     }
 
@@ -1609,25 +1659,13 @@ struct PromptsSettingsView: View {
             TextEditor(text: $customSystemPromptInput)
                 .font(.system(.body, design: .monospaced))
                 .frame(minHeight: 120, maxHeight: 200)
+                .focused($customSystemPromptFocused)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                 )
-                .onChange(of: customSystemPromptInput) { newValue in
-                    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let defaultTrimmed = PostProcessingService.defaultSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if trimmed == defaultTrimmed || trimmed.isEmpty {
-                        if !appState.customSystemPrompt.isEmpty {
-                            appState.customSystemPrompt = ""
-                            appState.customSystemPromptLastModified = ""
-                        }
-                    } else {
-                        appState.customSystemPrompt = trimmed
-                        let today = iso8601DayFormatter.string(from: Date())
-                        if appState.customSystemPromptLastModified != today {
-                            appState.customSystemPromptLastModified = today
-                        }
-                    }
+                .onChange(of: customSystemPromptFocused) { focused in
+                    if !focused { commitCustomSystemPrompt() }
                 }
 
             HStack {
@@ -1740,6 +1778,7 @@ struct PromptsSettingsView: View {
     }
 
     private func runSystemPromptTest() {
+        commitCustomSystemPrompt()
         systemTestRunning = true
         systemTestOutput = nil
         systemTestError = nil
@@ -1851,25 +1890,13 @@ struct PromptsSettingsView: View {
             TextEditor(text: $customContextPromptInput)
                 .font(.system(.body, design: .monospaced))
                 .frame(minHeight: 120, maxHeight: 200)
+                .focused($customContextPromptFocused)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
                 )
-                .onChange(of: customContextPromptInput) { newValue in
-                    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let defaultTrimmed = AppContextService.defaultContextPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if trimmed == defaultTrimmed || trimmed.isEmpty {
-                        if !appState.customContextPrompt.isEmpty {
-                            appState.customContextPrompt = ""
-                            appState.customContextPromptLastModified = ""
-                        }
-                    } else {
-                        appState.customContextPrompt = trimmed
-                        let today = iso8601DayFormatter.string(from: Date())
-                        if appState.customContextPromptLastModified != today {
-                            appState.customContextPromptLastModified = today
-                        }
-                    }
+                .onChange(of: customContextPromptFocused) { focused in
+                    if !focused { commitCustomContextPrompt() }
                 }
 
             HStack {
@@ -1930,6 +1957,15 @@ struct PromptsSettingsView: View {
                         .font(.caption)
                     }
                 }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Allow full-desktop screenshot fallback", isOn: $appState.desktopScreenshotFallbackEnabled)
+                Text("When active-window capture fails, FreeFlow can capture the full desktop, including other apps, and send it to your configured context provider. Turn this off to continue without a screenshot when active-window capture fails. Applies to new context captures.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Divider()
@@ -1999,6 +2035,7 @@ struct PromptsSettingsView: View {
     }
 
     private func runContextPromptTest() {
+        commitCustomContextPrompt()
         contextTestRunning = true
         contextTestOutput = nil
         contextTestError = nil
@@ -2013,7 +2050,7 @@ struct PromptsSettingsView: View {
                     contextTestOutput = context.contextSummary
                     contextTestPrompt = prompt
                 } else {
-                    contextTestError = "Context inference returned no result. This may be a permissions issue or the API could not be reached."
+                    contextTestError = context.contextSummary
                     contextTestOutput = context.contextSummary
                 }
                 contextTestRunning = false
@@ -2298,10 +2335,23 @@ struct RunLogEntryView: View {
                                     }
 
                                     if !item.contextSummary.isEmpty {
-                                        Text(item.contextSummary)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .textSelection(.enabled)
+                                        if ContextInferenceFailure.isFailureSummary(item.contextSummary) {
+                                            Label("Context summary failed", systemImage: "exclamationmark.triangle.fill")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.orange)
+                                            Text(item.contextSummary)
+                                                .font(.caption)
+                                                .foregroundStyle(.orange)
+                                                .textSelection(.enabled)
+                                            Text("No usable activity summary. Dictation can continue.")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            Text(item.contextSummary)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .textSelection(.enabled)
+                                        }
                                     } else {
                                         Text("No context captured")
                                             .font(.caption)

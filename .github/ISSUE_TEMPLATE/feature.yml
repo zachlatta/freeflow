@@ -1,0 +1,55 @@
+name: Feature request
+description: Propose an improvement to FreeFlow
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Describe the user problem rather than only the proposed implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Proposed behavior
+      description: What should FreeFlow do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: textarea
+    id: data
+    attributes:
+      label: Privacy and data impact
+      description: |
+        Would this read, store, log, or transmit audio, transcripts,
+        screenshots, app context, selected text, clipboard data, diagnostics,
+        or identifiers? Which provider or local store would receive it? Use
+        provider or store names only. Do not include private URLs or real user
+        content.
+    validations:
+      required: true
+
+  - type: textarea
+    id: permissions
+    attributes:
+      label: Permission or settings impact
+      description: |
+        Note any proposed Microphone, Accessibility, Screen Recording,
+        notification, login-item, entitlement, or preferences changes.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: This request contains no credentials or private user content.
+          required: true

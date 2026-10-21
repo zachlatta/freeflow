@@ -8,20 +8,47 @@ public struct ModelConfig {
 }
 
 public struct ModelConfiguration {
+    public static func nonContentRequestOptions(
+        model: String,
+        temperature: Double,
+        defaultModel: String? = nil,
+        defaultReasoningEffort: String? = nil,
+        defaultMaxCompletionTokens: Int? = nil
+    ) -> [String: Any] {
+        var options: [String: Any] = ["model": model, "temperature": temperature]
+        let config = config(for: model)
+        if let maxTokens = config.maxCompletionTokens {
+            options["max_completion_tokens"] = maxTokens
+        } else if model == defaultModel, let defaultMaxCompletionTokens {
+            options["max_completion_tokens"] = defaultMaxCompletionTokens
+        }
+        if let effort = config.reasoningEffort {
+            options["reasoning_effort"] = effort
+        } else if model == defaultModel, let defaultReasoningEffort {
+            options["reasoning_effort"] = defaultReasoningEffort
+        }
+        if let include = config.includeReasoning {
+            options["include_reasoning"] = include
+        } else if model == defaultModel {
+            options["include_reasoning"] = false
+        }
+        return options
+    }
+
     public static let llmModels = [
         "openai/gpt-oss-20b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-safeguard-20b",
-        "qwen/qwen3.6-27b",
-        "allam-2-7b",
-        "groq/compound",
-        "groq/compound-mini",
-        "canopylabs/orpheus-arabic-saudi",
-        "canopylabs/orpheus-v1-english",
-        "meta-llama/llama-prompt-guard-2-22m",
-        "meta-llama/llama-prompt-guard-2-86m",
+        "qwen/qwen3.8-27b",
         "MiniMax-M3.1-Flash",
         "MiniMax-M3"
+    ]
+
+    // MARK: - Vision-capable models
+
+    /// Models that accept image input. The context model must support vision for screenshot analysis to work.
+    public static let visionModels = [
+        "qwen/qwen3.8-27b"
     ]
 
     public static let transcriptionModels = [
@@ -29,12 +56,27 @@ public struct ModelConfiguration {
         "whisper-large-v3-turbo"
     ]
 
+    /// Only migrate retired IDs on Groq's own endpoint. Other providers can
+    /// still serve Qwen 3.6 under the same model name.
+    static func migrateGroqSelection(key: String, baseURL: String, defaults: UserDefaults) {
+        guard let url = URL(string: baseURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "api.groq.com",
+              url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")) == "openai/v1",
+              let stored = defaults.string(forKey: key) else { return }
+        let model = stored.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if model == "qwen/qwen3.6-27b" || model == "qwen3.6-27b" {
+            defaults.set("qwen/qwen3.8-27b", forKey: key)
+        }
+    }
+
     public static func config(for model: String) -> ModelConfig {
         var cleanModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         
         // Normalize providerless aliases
         if cleanModel == "qwen3-32b" { cleanModel = "qwen/qwen3-32b" }
         else if cleanModel == "qwen3.6-27b" { cleanModel = "qwen/qwen3.6-27b" }
+        else if cleanModel == "qwen3.8-27b" { cleanModel = "qwen/qwen3.8-27b" }
         else if cleanModel == "gpt-oss-20b" { cleanModel = "openai/gpt-oss-20b" }
         else if cleanModel == "gpt-oss-120b" { cleanModel = "openai/gpt-oss-120b" }
         else if cleanModel == "gpt-oss-safeguard-20b" { cleanModel = "openai/gpt-oss-safeguard-20b" }
@@ -61,14 +103,14 @@ public struct ModelConfiguration {
                 shouldStripThinkTags: false
             )
         } else if cleanModel == "qwen/qwen3-32b" {
- // Model that requires sanitization of thought tags
+            // Model that requires sanitization of thought tags
             return ModelConfig(
                 maxCompletionTokens: nil,
                 reasoningEffort: nil,
                 includeReasoning: nil,
                 shouldStripThinkTags: true
             )
-        } else if cleanModel == "qwen/qwen3.6-27b" {
+        } else if cleanModel == "qwen/qwen3.8-27b" || cleanModel == "qwen/qwen3.6-27b" {
             return ModelConfig(
                 maxCompletionTokens: nil,
                 reasoningEffort: "none",
@@ -185,7 +227,7 @@ public struct ModelConfiguration {
             )
         }
         
-        // Fallback genérico para qualquer outro modelo que não esteja na lista acima
+        // Generic fallback for any model not explicitly listed above
         return ModelConfig(
             maxCompletionTokens: nil,
             reasoningEffort: nil,
