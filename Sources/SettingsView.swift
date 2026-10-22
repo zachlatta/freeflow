@@ -1270,6 +1270,14 @@ struct GeneralSettingsView: View {
 
     private var cleanupSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Toggle("Use active window context", isOn: $appState.contextCaptureEnabled)
+
+            Text("Uses window context to help with names and terminology. Turn off to skip screenshots and the context request; processing may be faster, but accuracy may decrease. Edit Mode still uses selected text.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
             Toggle("Preserve exact wording", isOn: $appState.preserveExactWording)
 
             Text("When on, \(AppName.displayName) skips the LLM cleanup step and pastes the transcript verbatim — filler words, informal phrasing, and explicit language are all preserved. Voice macros and Edit Mode still run.")

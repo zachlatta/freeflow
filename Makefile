@@ -12,6 +12,7 @@ APP_EXECUTABLE_TARGET := $(subst $(space),\ ,$(APP_EXECUTABLE))
 
 SOURCES = $(shell find Sources -name '*.swift' -type f | LC_ALL=C sort)
 TEST_RUNNER = $(BUILD_DIR)/FreeFlowTests
+TEST_CONTEXT_HARNESS = $(BUILD_DIR)/ContextCaptureHarness.swift
 TEST_PRODUCTION_SOURCES = \
 	Sources/APIConfigurationDraft.swift \
 	Sources/AppContextService.swift \
@@ -102,7 +103,11 @@ typecheck:
 		-target $(ARCH)-apple-macosx13.0 \
 		$(SOURCES)
 
-test:
+$(TEST_CONTEXT_HARNESS): Sources/AppState.swift Tests/generate-context-capture-harness.rb
+	@mkdir -p "$(BUILD_DIR)"
+	ruby Tests/generate-context-capture-harness.rb $< "$@"
+
+test: $(TEST_CONTEXT_HARNESS)
 	@mkdir -p "$(BUILD_DIR)"
 	swiftc \
 		-parse-as-library \
@@ -111,7 +116,8 @@ test:
 		-sdk $(shell xcrun --show-sdk-path) \
 		-target $(ARCH)-apple-macosx13.0 \
 		$(TEST_PRODUCTION_SOURCES) \
-		$(TEST_SOURCES)
+		$(TEST_SOURCES) \
+		"$(TEST_CONTEXT_HARNESS)"
 	@$(TEST_RUNNER)
 
 validate:

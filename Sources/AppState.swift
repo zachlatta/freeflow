@@ -220,6 +220,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let instructionExecutionGuardEnabledStorageKey = "instruction_execution_guard_enabled"
     private let customSystemPromptLastModifiedStorageKey = "custom_system_prompt_last_modified"
     private let customContextPromptLastModifiedStorageKey = "custom_context_prompt_last_modified"
+    private let contextCaptureEnabledStorageKey = "context_capture_enabled"
     private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
     private let preserveClipboardStorageKey = "preserve_clipboard"
@@ -438,6 +439,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var contextCaptureEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(contextCaptureEnabled, forKey: contextCaptureEnabledStorageKey)
+            if !contextCaptureEnabled {
+                contextCaptureGeneration = UUID()
+                contextCaptureTask?.cancel()
+                contextCaptureTask = nil
+                capturedContext = nil
+            }
+        }
+    }
+
     @Published var instructionExecutionGuardEnabled: Bool {
         didSet {
             UserDefaults.standard.set(
@@ -615,6 +628,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var transcriptionTask: Task<Void, Never>?
     private var transcribingAudioFileName: String?
     private var contextService: AppContextService
+    private var contextCaptureGeneration = UUID()
     private var contextCaptureTask: Task<AppContext?, Never>?
     private var capturedContext: AppContext?
     private var hasShownScreenshotPermissionAlert = false
@@ -680,6 +694,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         )
         let customSystemPrompt = UserDefaults.standard.string(forKey: customSystemPromptStorageKey) ?? ""
         let customContextPrompt = UserDefaults.standard.string(forKey: customContextPromptStorageKey) ?? ""
+        let contextCaptureEnabled = UserDefaults.standard.object(forKey: contextCaptureEnabledStorageKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: contextCaptureEnabledStorageKey)
         let instructionExecutionGuardEnabled = UserDefaults.standard.object(
             forKey: instructionExecutionGuardEnabledStorageKey
         ) == nil
@@ -781,6 +798,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.transcriptionLanguage = transcriptionLanguage
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
+        self.contextCaptureEnabled = contextCaptureEnabled
         self.instructionExecutionGuardEnabled = instructionExecutionGuardEnabled
         self.desktopScreenshotFallbackEnabled = desktopScreenshotFallbackEnabled
         self.contextScreenshotMaxDimension = contextScreenshotMaxDimension
@@ -2082,7 +2100,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             manualCommandRequested: manualCommandRequested
         ) else { return false }
 
-        if resolvedIntent.isCommandMode {
+        if resolvedIntent.isCommandMode && contextCaptureEnabled {
             guard ensureScreenCaptureAccess() else { return false }
             if let startedAt {
                 os_log(.info, log: recordingLog, "screen capture check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - startedAt) * 1000)
@@ -2318,7 +2336,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 os_log(.info, log: recordingLog, "audioRecorder.startRecording() done: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
                 DispatchQueue.main.async { [self] in
                     guard self.isRecording, self.activeRecordingTriggerMode != nil else { return }
-                    self.startContextCapture()
+                    if self.contextCaptureEnabled {
+                        self.startContextCapture()
+                    }
                     self.audioLevelCancellable = self.audioRecorder.$audioLevel
                         .receive(on: DispatchQueue.main)
                         .sink { [weak self] level in
@@ -2653,10 +2673,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         audioLevelCancellable?.cancel()
         audioLevelCancellable = nil
         debugStatusMessage = "Preparing audio"
+        let contextGeneration = contextCaptureGeneration
         let sessionContext = capturedContext
         let inFlightContextTask = contextCaptureTask
         capturedContext = nil
-        contextCaptureTask = nil
+        // Keep the handle so disabling context or cancelling transcription can cancel it.
         lastRawTranscript = ""
         lastPostProcessedTranscript = ""
         lastContextSummary = ""
@@ -2747,14 +2768,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             self?.lastTranscript = bootstrapTranscript
                         }
                     }
-                    let appContext: AppContext
-                    if let sessionContext {
-                        appContext = sessionContext
-                    } else if let inFlightContext = await inFlightContextTask?.value {
-                        appContext = inFlightContext
-                    } else {
-                        appContext = self.fallbackContextAtStop()
-                    }
+                    let appContext = await self.contextForTranscription(sessionContext, task: inFlightContextTask)
                     try Task.checkCancellation()
                     await MainActor.run { [weak self] in
                         self?.debugStatusMessage = "Running post-processing"
@@ -2774,6 +2788,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
                     await MainActor.run {
                         guard self.isTranscribing else { return }
+                        let publication = self.contextForPublication(
+                            appContext, prompt: result.prompt, generation: contextGeneration
+                        )
+                        let appContext = publication.context
                         self.lastContextSummary = appContext.contextSummary
                         self.lastContextScreenshotDataURL = appContext.screenshotDataURL
                         self.lastContextScreenshotStatus = appContext.screenshotError
@@ -2789,14 +2807,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             for: result.outcome,
                             parsedTranscript: parsedTranscript
                         )
-                        self.lastPostProcessingPrompt = result.prompt
+                        self.lastPostProcessingPrompt = publication.prompt
                         self.lastRawTranscript = trimmedRawTranscript
                         self.lastPostProcessedTranscript = trimmedFinalTranscript
                         self.lastPostProcessingStatus = processingStatus
                         self.recordPipelineHistoryEntry(
                             rawTranscript: trimmedRawTranscript,
                             postProcessedTranscript: trimmedFinalTranscript,
-                            postProcessingPrompt: result.prompt,
+                            postProcessingPrompt: publication.prompt,
                             systemPrompt: Self.resolvedSystemPrompt(self.customSystemPrompt),
                             context: appContext,
                             processingStatus: processingStatus,
@@ -2865,16 +2883,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         self.endCriticalDictationActivity()
                     }
                 } catch {
-                    let resolvedContext: AppContext
-                    if let sessionContext {
-                        resolvedContext = sessionContext
-                    } else if let inFlightContext = await inFlightContextTask?.value {
-                        resolvedContext = inFlightContext
-                    } else {
-                        resolvedContext = self.fallbackContextAtStop()
-                    }
+                    let resolvedContext = await self.contextForTranscription(sessionContext, task: inFlightContextTask)
                     await MainActor.run {
                         guard self.isTranscribing else { return }
+                        let resolvedContext = self.contextForPublication(
+                            resolvedContext, prompt: "", generation: contextGeneration
+                        ).context
                         self.transcriptionTask = nil
                         self.transcribingAudioFileName = nil
                         let userFacingErrorMessage = self.formattedTranscriptionError(error)
@@ -2993,6 +3007,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     private func startContextCapture() {
+        guard contextCaptureEnabled else { return }
         contextCaptureTask?.cancel()
         capturedContext = nil
         lastContextSummary = "Collecting app context..."
@@ -3001,9 +3016,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         lastContextScreenshotStatus = "Collecting screenshot..."
 
         contextCaptureTask = Task { [weak self] in
-            guard let self else { return nil }
+            guard let self, !Task.isCancelled else { return nil }
             let context = await self.contextService.collectContext()
-            await MainActor.run {
+            guard !Task.isCancelled else { return nil }
+            return await MainActor.run {
+                guard !Task.isCancelled, self.contextCaptureEnabled else { return nil }
                 self.capturedContext = context
                 self.lastContextSummary = context.contextSummary
                 self.lastContextScreenshotDataURL = context.screenshotDataURL
@@ -3016,9 +3033,49 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.lastContextLLMPrompt = context.contextPrompt ?? ""
                 self.lastPostProcessingStatus = "App context captured"
                 self.handleScreenshotCaptureIssue(context.screenshotError)
+                return context
             }
-            return context
         }
+    }
+
+    private func contextForTranscription(
+        _ snapshot: AppContext?, task: Task<AppContext?, Never>?
+    ) async -> AppContext {
+        guard contextCaptureEnabled, task?.isCancelled != true else { return Self.disabledContext() }
+        let context: AppContext?
+        if let snapshot {
+            context = snapshot
+        } else {
+            context = await task?.value
+        }
+        // The preference can change while waiting, including off and back on.
+        guard contextCaptureEnabled, task?.isCancelled != true else { return Self.disabledContext() }
+        return context ?? fallbackContextAtStop()
+    }
+
+    /// Rechecks invalidation after processing, before context or derived prompts enter UI/history.
+    private func contextForPublication(
+        _ context: AppContext, prompt: String, generation: UUID
+    ) -> (context: AppContext, prompt: String) {
+        guard contextCaptureEnabled, generation == contextCaptureGeneration else {
+            return (Self.disabledContext(), "")
+        }
+        return (context, prompt)
+    }
+
+    private static func disabledContext() -> AppContext {
+        AppContext(
+            appName: nil,
+            bundleIdentifier: nil,
+            windowTitle: nil,
+            selectedText: nil,
+            currentActivity: "Active window context disabled.",
+            contextSystemPrompt: nil,
+            contextPrompt: nil,
+            screenshotDataURL: nil,
+            screenshotMimeType: nil,
+            screenshotError: "Disabled in Settings"
+        )
     }
 
     private func fallbackContextAtStop() -> AppContext {
