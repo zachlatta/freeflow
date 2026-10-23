@@ -8,6 +8,57 @@ enum PostProcessingServiceTests {
         testCustomPromptKeepsDirective()
         testFallbackModelReceivesSameDirective()
         testEnglishRequestIsUnchanged()
+        testPromptEchoFallsBackToRawDictation()
+    }
+
+    private static func testPromptEchoFallsBackToRawDictation() {
+        let syntheticContext = "Synthetic terminal context describes an invented build failure with twelve distinct diagnostic details today."
+        for role in ["system", "user", "context", "partial"] {
+            let recorder = RequestRecorder()
+            let service = PostProcessingService(
+                apiKey: "synthetic-key", baseURL: "https://example.invalid/v1",
+                preferredModel: "synthetic-echo", preferredFallbackModel: "synthetic-fallback",
+                instructionExecutionGuardEnabled: false,
+                transport: { request in
+                    recorder.record(request.httpBody)
+                    let json = try JSONSerialization.jsonObject(with: request.httpBody!) as! [String: Any]
+                    let messages = json["messages"] as! [[String: String]]
+                    let echo: String
+                    if role == "context" {
+                        echo = syntheticContext
+                    } else if role == "partial" {
+                        echo = "Please check the build. " + syntheticContext
+                    } else {
+                        echo = messages.first { $0["role"] == role }!["content"]!
+                    }
+                    let data = try JSONSerialization.data(withJSONObject: [
+                        "choices": [["message": ["content": echo]]]
+                    ])
+                    return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+                }
+            )
+            let context = AppContext(
+                appName: nil, bundleIdentifier: nil, windowTitle: nil, selectedText: nil,
+                currentActivity: syntheticContext,
+                contextSystemPrompt: nil, contextPrompt: nil, screenshotDataURL: nil,
+                screenshotMimeType: nil, screenshotError: nil
+            )
+            let done = DispatchSemaphore(value: 0)
+            Task {
+                do {
+                    let result = try await service.postProcess(
+                        transcript: "  please check the build  ", context: context,
+                        customVocabulary: "", outputLanguage: "German"
+                    )
+                    TestSupport.expectEqual(result.transcript, "please check the build")
+                } catch {
+                    TestSupport.expect(false, "Synthetic echo should safely return raw dictation")
+                }
+                done.signal()
+            }
+            done.wait()
+            TestSupport.expectEqual(recorder.captured.count, 1)
+        }
     }
 
     private static let directive = "The dictation is primarily in Russian"

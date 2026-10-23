@@ -594,6 +594,20 @@ Model: \(model)
             throw PostProcessingError.emptyOutput
         }
 
+        // Reject copied request material before it can reach paste or processed history.
+        // Keep the raw dictation without another provider request, even with the optional
+        // instruction-execution heuristic disabled or an output language selected.
+        if TranscriptOutputSanitizer.echoesPrompt(
+            output: content,
+            rawTranscript: transcript,
+            promptParts: [systemPrompt, userMessage]
+        ) {
+            return PostProcessingResult(
+                transcript: transcript.trimmingCharacters(in: .whitespacesAndNewlines),
+                prompt: promptForDisplay
+            )
+        }
+
         let sanitizedTranscript = TranscriptOutputSanitizer.postProcessedTranscript(content)
         if instructionExecutionGuardEnabled && TranscriptOutputSanitizer.appearsToHaveExecutedInstruction(
             rawTranscript: transcript,
