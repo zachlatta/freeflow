@@ -8,6 +8,7 @@ enum PostProcessingServiceTests {
         testCustomPromptKeepsDirective()
         testFallbackModelReceivesSameDirective()
         testEnglishRequestIsUnchanged()
+        testMiniMaxRequestsPreserveSelectedModels()
     }
 
     private static let directive = "The dictation is primarily in Russian"
@@ -82,11 +83,32 @@ enum PostProcessingServiceTests {
         TestSupport.expectEqual(requests.map(\.systemPrompt), [PostProcessingService.defaultSystemPrompt])
     }
 
+    private static func testMiniMaxRequestsPreserveSelectedModels() {
+        let firstMiniMax = ModelConfiguration.llmModels.first { $0.hasPrefix("MiniMax-") }
+        TestSupport.expectEqual(firstMiniMax, "MiniMax-M3.1-Flash")
+        for model in [firstMiniMax!, "MiniMax-M3", "MiniMax-M2.7", "synthetic/custom"] {
+            let requests = cleanupRequests(dictationLanguage: "English", preferredModel: model) { _ in
+                "Synthetic cleaned text."
+            }
+            TestSupport.expectEqual(requests.map(\.model), [model])
+            let payload = requests[0].payload
+            for key in ["reasoning_effort", "include_reasoning", "thinking", "service_tier", "max_completion_tokens"] {
+                TestSupport.expect(payload[key] == nil, "Unexpected request option for \(model): \(key)")
+            }
+            TestSupport.expectEqual((payload["messages"] as? [[String: Any]])?.count, 2)
+        }
+        let defaultRequests = cleanupRequests(dictationLanguage: "English", preferredModel: "") { _ in
+            "Synthetic cleaned text."
+        }
+        TestSupport.expectEqual(defaultRequests.map(\.model), ["openai/gpt-oss-20b"])
+    }
+
     // MARK: - Request capture
 
     private struct CapturedRequest {
         let model: String
         let systemPrompt: String
+        let payload: [String: Any]
     }
 
     private final class RequestRecorder: @unchecked Sendable {
@@ -108,7 +130,8 @@ enum PostProcessingServiceTests {
                 let system = messages.first { $0["role"] as? String == "system" }
                 return CapturedRequest(
                     model: json["model"] as? String ?? "",
-                    systemPrompt: system?["content"] as? String ?? ""
+                    systemPrompt: system?["content"] as? String ?? "",
+                    payload: json
                 )
             }
         }
@@ -116,13 +139,14 @@ enum PostProcessingServiceTests {
 
     private static func cleanupRequests(
         dictationLanguage: String,
+        preferredModel: String = "synthetic-primary",
         reply: @escaping @Sendable (String) -> String
     ) -> [CapturedRequest] {
         let recorder = RequestRecorder()
         let service = PostProcessingService(
             apiKey: "synthetic-key",
             baseURL: "https://example.invalid/v1",
-            preferredModel: "synthetic-primary",
+            preferredModel: preferredModel,
             preferredFallbackModel: "synthetic-fallback",
             transport: { request in
                 recorder.record(request.httpBody)

@@ -9,6 +9,7 @@ enum AppContextServiceTests {
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
+        testMiniMaxModelsArePredefinedAndStripThinkTags()
         testInferenceFailureDiagnostics()
         testContextRequestBudget()
         testFailedSummariesStayOutOfPostProcessing()
@@ -132,6 +133,41 @@ enum AppContextServiceTests {
         let custom = AppContextService.inferenceRequestOptions(for: "synthetic/custom")
         TestSupport.expectEqual(custom["max_completion_tokens"] as? Int, 512)
         TestSupport.expect(custom["reasoning_effort"] == nil, "Unknown providers should not receive reasoning options")
+    }
+
+    private static func testMiniMaxModelsArePredefinedAndStripThinkTags() {
+        guard let flashIndex = ModelConfiguration.llmModels.firstIndex(of: "MiniMax-M3.1-Flash"),
+              let m3Index = ModelConfiguration.llmModels.firstIndex(of: "MiniMax-M3") else {
+            TestSupport.expect(false, "MiniMax models are missing from the picker")
+            return
+        }
+        TestSupport.expect(m3Index == flashIndex + 1, "MiniMax-M3 should follow MiniMax-M3.1-Flash")
+        TestSupport.expect(ModelConfiguration.llmModels.contains("MiniMax-M3.1-Flash"), "MiniMax-M3.1-Flash is missing from the picker")
+        TestSupport.expect(ModelConfiguration.llmModels.contains("MiniMax-M3"), "MiniMax-M3 is missing from the picker")
+        TestSupport.expect(!ModelConfiguration.llmModels.contains("MiniMax-M2.7"), "Retired MiniMax-M2.7 remains in the picker")
+
+        let miniMaxModels = ModelConfiguration.llmModels.filter { $0.hasPrefix("MiniMax-") }
+        TestSupport.expect(miniMaxModels == ["MiniMax-M3.1-Flash", "MiniMax-M3"], "Unexpected ordinary MiniMax choices")
+        for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7", "  minimax-m3.1-flash  "] {
+            let config = ModelConfiguration.config(for: model)
+            TestSupport.expect(config.shouldStripThinkTags, "MiniMax model should strip think tags: \(model)")
+            TestSupport.expect(config.reasoningEffort == nil, "MiniMax should retain provider reasoning defaults")
+            TestSupport.expect(config.includeReasoning == nil, "MiniMax should not disable adaptive thinking")
+            TestSupport.expect(config.maxCompletionTokens == nil, "MiniMax should retain provider token defaults")
+        }
+        TestSupport.expect(!ModelConfiguration.config(for: "custom-model").shouldStripThinkTags, "Custom model behavior changed")
+
+        let reasoningOutput = """
+        <think>
+        Hidden reasoning should never reach the transcript.
+        </think>
+        Cleaned transcript text.
+        """
+        for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7"] {
+            let summary = AppContextService.activitySummary(from: reasoningOutput, model: model)
+            TestSupport.expect(summary?.contains("Hidden reasoning") == false, "MiniMax reasoning leaked into summary: \(model)")
+            TestSupport.expect(summary?.contains("Cleaned transcript text.") == true, "MiniMax summary dropped the transcript text: \(model)")
+        }
     }
 
     private static func testInferenceFailureDiagnostics() {
