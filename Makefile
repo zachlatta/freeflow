@@ -25,6 +25,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/ModelConfiguration.swift \
 	Sources/OriginalFieldInsertionPreference.swift \
 	Sources/PostProcessingService.swift \
+	Sources/ProviderPreset.swift \
 	Sources/RecordingCaptureTiming.swift \
 	Sources/RecordingTimerPreference.swift \
 	Sources/TranscriptionErrorPresentationCore.swift \
