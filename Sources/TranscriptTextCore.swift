@@ -91,6 +91,23 @@ enum TranscriptionResponseParser {
 }
 
 enum TranscriptOutputSanitizer {
+    /// Conservative copied-passage guard, not a detector for paraphrased context leaks.
+    /// Ignore passages also present in the dictation: users may dictate prompt-like prose.
+    static func echoesPrompt(output: String, rawTranscript: String, promptParts: [String]) -> Bool {
+        func words(_ value: String) -> [String] {
+            value.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        }
+        func passages(_ value: String) -> Set<String> {
+            let tokens = words(value)
+            let width = 12
+            guard tokens.count >= width else { return [] }
+            return Set((0...(tokens.count - width)).map { tokens[$0..<($0 + width)].joined(separator: " ") })
+        }
+        let unspoken = passages(output).subtracting(passages(rawTranscript))
+        guard !unspoken.isEmpty else { return false }
+        return promptParts.contains { !unspoken.isDisjoint(with: passages($0)) }
+    }
+
     // Verbatim translation deliberately preserves the cleanup prompt's EMPTY
     // sentinel because "empty" can be legitimate translated speech here.
     static func verbatimTranslation(_ value: String) -> String {

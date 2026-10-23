@@ -10,6 +10,24 @@ enum TranscriptTextCoreTests {
         testPostProcessedTranscriptSanitization()
         testModeSpecificSanitization()
         testInstructionExecutionGuard()
+        testPromptEchoGuard()
+    }
+
+    private static func testPromptEchoGuard() {
+        let passage = "Synthetic context contains twelve distinct words about an invented terminal task today."
+        TestSupport.expect(TranscriptOutputSanitizer.echoesPrompt(
+            output: "Answer: " + passage.uppercased().replacingOccurrences(of: " ", with: "\n"),
+            rawTranscript: "please check the build", promptParts: [passage]
+        ), "Copied context with case and whitespace changes must be rejected")
+        TestSupport.expect(!TranscriptOutputSanitizer.echoesPrompt(
+            output: passage, rawTranscript: passage, promptParts: [passage]
+        ), "Actually dictated prompt-like prose must be preserved")
+        TestSupport.expect(!TranscriptOutputSanitizer.echoesPrompt(
+            output: "Please check the build.", rawTranscript: "please check the build", promptParts: [passage]
+        ), "Ordinary cleanup must remain allowed")
+        TestSupport.expect(!TranscriptOutputSanitizer.echoesPrompt(
+            output: "Synthetic context", rawTranscript: "synthetic context", promptParts: ["Synthetic context"]
+        ), "Short shared vocabulary must not trigger rejection")
     }
 
     private static func testJSONTranscriptParsing() {
