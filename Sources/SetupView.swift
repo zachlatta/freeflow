@@ -7,6 +7,7 @@ import ServiceManagement
 private struct SetupProviderSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var apiBaseURLInput: String
+    @Binding var apiKeyInput: String
     @Binding var transcriptionAPIURLInput: String
     @Binding var transcriptionAPIKeyInput: String
 
@@ -28,6 +29,7 @@ private struct SetupProviderSettingsSheet: View {
             ScrollView {
                 ProviderSettingsFields(
                     apiBaseURLInput: $apiBaseURLInput,
+                    apiKeyInput: $apiKeyInput,
                     transcriptionAPIURLInput: $transcriptionAPIURLInput,
                     transcriptionAPIKeyInput: $transcriptionAPIKeyInput,
                     showsModelDescription: true
@@ -211,6 +213,7 @@ struct SetupView: View {
         .sheet(isPresented: $showingProviderSettingsSheet) {
             SetupProviderSettingsSheet(
                 apiBaseURLInput: $apiDraft.baseURL,
+                apiKeyInput: $apiDraft.apiKey,
                 transcriptionAPIURLInput: $apiDraft.transcriptionAPIURL,
                 transcriptionAPIKeyInput: $apiDraft.transcriptionAPIKey
             )
@@ -1140,6 +1143,7 @@ struct SetupView: View {
         isValidatingKey = true
         keyValidationError = nil
 
+        let token = appState.keyValidationGate.begin()
         Task { @MainActor in
             var accepted: ValidatedAPIConfiguration?
             let valid = await APIConfigurationSaveFlow.validateAndApply(
@@ -1148,15 +1152,19 @@ struct SetupView: View {
                 transcriptionAPIURL: submission.configuration.transcriptionAPIURL,
                 transcriptionAPIKey: submission.configuration.transcriptionAPIKey
             ) { configuration in
-                if apiDraft.accept(configuration, for: submission) {
-                    accepted = configuration
+                // Never commit credentials validated for a different draft endpoint.
+                guard apiDraft.configuration.baseURL == submission.configuration.baseURL else { return }
+                appState.keyValidationGate.applyIfCurrent(token) {
+                    if apiDraft.accept(configuration, for: submission) {
+                        accepted = configuration
+                    }
+                    appState.updateAPIConfiguration(
+                        apiKey: configuration.apiKey,
+                        baseURL: configuration.baseURL,
+                        transcriptionAPIURL: configuration.transcriptionAPIURL,
+                        transcriptionAPIKey: configuration.transcriptionAPIKey
+                    )
                 }
-                appState.updateAPIConfiguration(
-                    apiKey: configuration.apiKey,
-                    baseURL: configuration.baseURL,
-                    transcriptionAPIURL: configuration.transcriptionAPIURL,
-                    transcriptionAPIKey: configuration.transcriptionAPIKey
-                )
             }
             guard apiDraft.isCurrent(submission) else { return }
             isValidatingKey = false
