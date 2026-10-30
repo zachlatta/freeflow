@@ -1283,13 +1283,38 @@ struct GeneralSettingsView: View {
 
             Toggle("Preserve exact wording", isOn: $appState.preserveExactWording)
 
-            Text("When on, \(AppName.displayName) skips the LLM cleanup step and pastes the transcript verbatim — filler words, informal phrasing, and explicit language are all preserved. Voice macros and Edit Mode still run.")
+            Text("The default for dictation; each shortcut can override it below. When on, \(AppName.displayName) skips the LLM cleanup step and pastes the transcript verbatim — filler words, informal phrasing, and explicit language are all preserved. Voice macros and Edit Mode still run.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             Text("If Output Language is set, the transcript is still translated into that language, but the translation is literal: no rewording, no filler removal, no reformatting.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Shortcut overrides")
+                    .font(.caption.weight(.semibold))
+
+                Picker("Hold to Talk", selection: $appState.holdShortcutCleanupPreference) {
+                    Text("Use global setting").tag(ShortcutCleanupPreference.inherit)
+                    Text("Preserve exact wording").tag(ShortcutCleanupPreference.preserveExactWording)
+                    Text("Cleanup").tag(ShortcutCleanupPreference.cleanup)
+                }
+                .pickerStyle(.menu)
+
+                Picker("Tap to Toggle", selection: $appState.toggleShortcutCleanupPreference) {
+                    Text("Use global setting").tag(ShortcutCleanupPreference.inherit)
+                    Text("Preserve exact wording").tag(ShortcutCleanupPreference.preserveExactWording)
+                    Text("Cleanup").tag(ShortcutCleanupPreference.cleanup)
+                }
+                .pickerStyle(.menu)
+
+                Text("Use global setting follows Preserve exact wording above. Cleanup applies your rewording prompt. Each recording keeps its starting choice, even when switching from hold to toggle. Menu-bar recordings use the global setting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
         }
     }
 
