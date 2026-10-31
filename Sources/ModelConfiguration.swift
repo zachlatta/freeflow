@@ -8,6 +8,33 @@ public struct ModelConfig {
 }
 
 public struct ModelConfiguration {
+    public static func nonContentRequestOptions(
+        model: String,
+        temperature: Double,
+        defaultModel: String? = nil,
+        defaultReasoningEffort: String? = nil,
+        defaultMaxCompletionTokens: Int? = nil
+    ) -> [String: Any] {
+        var options: [String: Any] = ["model": model, "temperature": temperature]
+        let config = config(for: model)
+        if let maxTokens = config.maxCompletionTokens {
+            options["max_completion_tokens"] = maxTokens
+        } else if model == defaultModel, let defaultMaxCompletionTokens {
+            options["max_completion_tokens"] = defaultMaxCompletionTokens
+        }
+        if let effort = config.reasoningEffort {
+            options["reasoning_effort"] = effort
+        } else if model == defaultModel, let defaultReasoningEffort {
+            options["reasoning_effort"] = defaultReasoningEffort
+        }
+        if let include = config.includeReasoning {
+            options["include_reasoning"] = include
+        } else if model == defaultModel {
+            options["include_reasoning"] = false
+        }
+        return options
+    }
+
     public static let llmModels = [
         "openai/gpt-oss-20b",
         "openai/gpt-oss-120b",

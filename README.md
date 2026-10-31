@@ -37,6 +37,7 @@ FreeFlow is a free Mac dictation app inspired by [Wispr Flow](https://wisprflow.
 
 - **Custom shortcuts:** Customize both hold-to-talk and toggle dictation shortcuts. If your toggle shortcut extends your hold shortcut, you can start in hold mode and press the extra modifier keys to latch into tap mode without stopping the recording.
 - **Context-aware cleanup:** FreeFlow can read nearby app context so names, terms, and phrases are spelled correctly when you dictate into email, terminals, docs, and other apps.
+- **Original-field insertion (opt in):** Enable **Insert into the original field** in Settings → General → Text insertion to keep dictation tied to its starting field when switching windows. This is off by default and applies to new dictations; otherwise dictation pastes into the currently focused field. Changed or unavailable fields and unconfirmed writes leave the transcript available through Paste Again rather than risking a misplaced or duplicate paste. Paste fallback, or Enter when an editor loses background focus, may briefly activate the original app before restoring your previous focus.
 - **Custom vocabulary:** Add names, jargon, and project-specific words that FreeFlow should preserve during cleanup.
 - **OpenAI-compatible providers:** Use Groq by default, or configure a custom model and API URL in settings.
 

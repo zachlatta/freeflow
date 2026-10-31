@@ -1,9 +1,10 @@
 import Foundation
 
 enum AppContextServiceTests {
-    static func run() {
+    static func run() async {
         testDesktopFallbackPreferencePersistence()
         testDesktopFallbackCaptureBoundary()
+        await testCancellationSkipsScreenshotAfterMetadata()
         testQwenRawOutputIsSummarized()
         testQwenReasoningOutputIsStripped()
         testNonStrippingModelPreservesExistingBehavior()
@@ -57,6 +58,34 @@ enum AppContextServiceTests {
         }
         TestSupport.expect(failed.dataURL == nil && failed.mimeType == nil, "Failed fallback must remain image-free")
         TestSupport.expectEqual(failed.error, "Synthetic capture failure")
+    }
+
+    private static func testCancellationSkipsScreenshotAfterMetadata() async {
+        let service = AppContextService(apiKey: "")
+        let enabled = service.captureScreenshotIfNotCancelled {
+            ("synthetic-image", "image/jpeg", nil)
+        }
+        TestSupport.expectEqual(enabled.dataURL, "synthetic-image")
+
+        let task = Task {
+            var captureCalls = 0
+            // Model cancellation arriving during a synchronous metadata read.
+            let collectMetadata = {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return "Synthetic window"
+            }
+            let windowTitle = collectMetadata()
+            let screenshot = service.captureScreenshotIfNotCancelled {
+                captureCalls += 1
+                return (windowTitle, "image/jpeg", nil)
+            }
+            return (captureCalls, screenshot)
+        }
+        let (captureCalls, screenshot) = await task.value
+        TestSupport.expectEqual(captureCalls, 0)
+        TestSupport.expect(screenshot.dataURL == nil && screenshot.mimeType == nil,
+                           "Cancellation after metadata must skip capture and return no screenshot")
+        TestSupport.expectEqual(screenshot.error, "Context capture cancelled")
     }
 
     private static func testQwenRawOutputIsSummarized() {
@@ -170,7 +199,8 @@ enum AppContextServiceTests {
             ContextInferenceFailure.missingAPIKey.summary,
             "Could not reliably infer a two-sentence summary for SyntheticApp from the screenshot and metadata.",
             "Could not refresh app context at stop time; using text-only post-processing.",
-            "You are dictating in an unrecognized context."
+            "You are dictating in an unrecognized context.",
+            "Active window context disabled."
         ]
         for summary in failures {
             let context = AppContext(
