@@ -17,7 +17,9 @@ enum RecordingSpeechGate {
     /// OpenAI rejects audio shorter than 0.1 seconds.
     static let minimumDurationSeconds = 0.1
     /// Successful dictations peak well above this; silent failures sit below it.
-    static let minimumPeakAmplitude = 0.01
+    static let minimumPeakDBFS = -45.0
+    /// `minimumPeakDBFS` as a linear amplitude (about 0.005623 of full scale).
+    static let minimumPeakAmplitude = pow(10.0, minimumPeakDBFS / 20.0)
 
     enum SkipReason: Equatable {
         case tooShort
@@ -57,26 +59,37 @@ enum RecordingSpeechGate {
     }
 
     /// Full message for the menu-bar error surface.
-    static func userMessage(deviceName: String?) -> String {
-        "No speech detected from \(displayDeviceName(deviceName)). Bluetooth mics can take a second to wake up — wait for the tick, then speak."
+    static func userMessage(reason: SkipReason, deviceName: String?) -> String {
+        switch reason {
+        case .silent:
+            return "No speech detected from \(displayDeviceName(deviceName)). Bluetooth mics can take a moment to wake up — try again."
+        case .tooShort:
+            return "Recording was too short. Hold the shortcut while you speak."
+        }
     }
 
-    /// Shorter message that fits the overlay toast.
-    static func overlayMessage(deviceName: String?) -> String {
-        "No speech detected from \(displayDeviceName(deviceName)). Wait for the tick, then speak."
+    /// Short message for the overlay toast; never includes the mic name so it
+    /// always fits the toast length cap.
+    static func overlayMessage(reason: SkipReason) -> String {
+        switch reason {
+        case .silent:
+            return "No speech detected. Try again."
+        case .tooShort:
+            return "Recording was too short. Hold the shortcut while you speak."
+        }
     }
 
-    /// Pipeline-history status explaining why transcription was skipped.
+    /// Pipeline-history status. Starts with `Error:` so the history row offers Retry.
     static func historyStatus(reason: SkipReason, summary: RecordingAudioSummary) -> String {
-        let reasonText: String
+        let headline: String
         switch reason {
         case .tooShort:
-            reasonText = "recording shorter than \(String(format: "%.1f", minimumDurationSeconds))s"
+            headline = "Recording too short"
         case .silent:
-            reasonText = "no speech-level audio"
+            headline = "No speech detected"
         }
         let duration = String(format: "%.2f", summary.durationSeconds)
-        return "Skipped transcription: \(reasonText) (duration \(duration)s, "
-            + "peak \(formatDBFS(summary.peakAmplitude)), mic \(displayDeviceName(summary.deviceName)))"
+        return "Error: \(headline) (\(duration)s, peak \(formatDBFS(summary.peakAmplitude)), "
+            + "mic: \(displayDeviceName(summary.deviceName))). Transcription skipped."
     }
 }

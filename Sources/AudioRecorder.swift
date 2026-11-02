@@ -663,14 +663,14 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         }
         installSessionObservers(for: session)
 
-        os_log(.default, log: recordingLog, "configured capture session with device %{public}@ [uid=%{public}@]", device.localizedName, device.uniqueID)
+        os_log(.info, log: recordingLog, "configured capture session with device %{public}@ [uid=%{public}@]", device.localizedName, device.uniqueID)
 
         session.startRunning()
         guard session.isRunning else {
             throw AudioRecorderError.failedToStartCaptureSession("Session failed to enter running state.")
         }
 
-        os_log(.default, log: recordingLog, "capture session running with device %{public}@ [uid=%{public}@]", device.localizedName, device.uniqueID)
+        os_log(.info, log: recordingLog, "capture session running with device %{public}@ [uid=%{public}@]", device.localizedName, device.uniqueID)
         tempFileURL = outputURL
     }
 
@@ -717,19 +717,13 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         os_log(.info, log: recordingLog, "startRecording() complete: %.3fms total", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
     }
 
-    func stopRecording(completion: @escaping (URL?) -> Void) {
-        stopRecordingWithSummary { outputURL, _ in
-            completion(outputURL)
-        }
-    }
-
     /// Stops recording and delivers the finalized file plus this recording's
     /// measurements (written duration, peak, buffer count, device) on main.
-    func stopRecordingWithSummary(completion: @escaping (URL?, RecordingAudioSummary) -> Void) {
+    func stopRecording(completion: @escaping (URL?, RecordingAudioSummary) -> Void) {
         captureTiming.withLock { $0.invalidate() }
         let count = _bufferCount.withLock { $0 }
         let elapsed = (CFAbsoluteTimeGetCurrent() - recordingStartTime) * 1000
-        os_log(.default, log: recordingLog, "stopRecording() called: %.3fms after start, %d buffers received", elapsed, count)
+        os_log(.info, log: recordingLog, "stopRecording() called: %.3fms after start, %d buffers received", elapsed, count)
 
         sessionQueue.async {
             self.cancelWatchdog()
@@ -739,9 +733,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             self.liveLevelNormalizerLock.withLock { $0.reset() }
             let summary = finished.summary
             os_log(
-                .default,
+                .info,
                 log: recordingLog,
-                "stopRecording() finalized: duration=%.3fs peak=%{public}@ buffers=%d device=%{public}@ file=%{public}@",
+                "stopRecording() finalized: duration=%.3fs peak=%{public}@ buffers=%d device=%{private}@ file=%{public}@",
                 summary.durationSeconds,
                 RecordingSpeechGate.formatDBFS(summary.peakAmplitude),
                 summary.bufferCount,
@@ -949,7 +943,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
 
         if let readyEvent = captureTiming.withLock({ $0.recordingStartIfReady(rms: rms) }) {
             let elapsed = (CFAbsoluteTimeGetCurrent() - recordingStartTime) * 1000
-            os_log(.default, log: recordingLog, "FIRST non-silent buffer at %.3fms — recording ready", elapsed)
+            os_log(.info, log: recordingLog, "FIRST non-silent buffer at %.3fms — recording ready", elapsed)
             DispatchQueue.main.async {
                 guard self.captureTiming.withLock({ $0.isCurrent(readyEvent) }) else { return }
                 self.onRecordingReady?(readyEvent.instant)

@@ -102,20 +102,10 @@ final class GlobalShortcutBackend {
     private func handleEventTap(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            let reason = type == .tapDisabledByTimeout ? "timeout" : "user input"
             notifyBackendReset()
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
                 fnKeyIsDown = ModifierKeyEventState.currentFunctionKeyIsDown()
-                os_log(
-                    .default,
-                    log: shortcutLog,
-                    "event tap disabled by %{public}@ — re-enabled, Fn physically down=%{public}@",
-                    reason,
-                    String(fnKeyIsDown)
-                )
-            } else {
-                os_log(.default, log: shortcutLog, "event tap disabled by %{public}@ — no tap to re-enable", reason)
             }
             return Unmanaged.passUnretained(event)
 

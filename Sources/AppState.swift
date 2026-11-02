@@ -1870,7 +1870,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         switch action {
         case .start(let mode):
-            os_log(.default, log: recordingLog, "Shortcut start fired for mode %{public}@", mode.rawValue)
+            os_log(.info, log: recordingLog, "Shortcut start fired for mode %{public}@", mode.rawValue)
             scheduleShortcutStart(mode: mode)
         case .stop:
             cancelPendingShortcutStart()
@@ -2366,7 +2366,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         triggerMode: RecordingTriggerMode,
         cleanupOrigin: ShortcutCleanupSessionOrigin
     ) {
-        os_log(.default, log: recordingLog, "beginRecording() entered")
+        os_log(.info, log: recordingLog, "beginRecording() entered")
         shortcutCleanupSession.start(
             origin: cleanupOrigin,
             globalPreserveExactWording: preserveExactWording,
@@ -2828,7 +2828,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         errorMessage = nil
         playAlertSound(named: "Pop")
         overlayManager.showTranscribing()
-        audioRecorder.stopRecordingWithSummary { [weak self] fileURL, audioSummary in
+        audioRecorder.stopRecording { [weak self] fileURL, audioSummary in
             guard let self else { return }
             guard let fileURL else {
                 self.isTranscribing = false
@@ -3092,7 +3092,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         os_log(
             .default,
             log: recordingLog,
-            "skipping transcription: %{public}@ duration=%.3fs peak=%{public}@ buffers=%d device=%{public}@",
+            "skipping transcription: %{public}@ duration=%.3fs peak=%{public}@ buffers=%d device=%{private}@",
             reason == .tooShort ? "too short" : "silent",
             summary.durationSeconds,
             RecordingSpeechGate.formatDBFS(summary.peakAmplitude),
@@ -3105,29 +3105,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
         contextCaptureTask = nil
         let savedAudioFile = Self.saveAudioFile(from: fileURL)
         // Nothing is post-processed, so avoid blocking on Accessibility or a screenshot.
-        let skippedContext = sessionContext ?? AppContext(
-            appName: nil,
-            bundleIdentifier: nil,
-            windowTitle: nil,
-            selectedText: nil,
-            currentActivity: "No app context captured before stop.",
-            contextSystemPrompt: nil,
-            contextPrompt: nil,
-            screenshotDataURL: nil,
-            screenshotMimeType: nil,
-            screenshotError: "No app context captured before stop"
+        let skippedContext = sessionContext ?? Self.uncapturedStopContext(
+            currentActivity: "No app context captured before stop."
         )
         let context = contextForPublication(skippedContext, prompt: "", generation: contextGeneration).context
 
-        let userFacingErrorMessage = RecordingSpeechGate.userMessage(deviceName: summary.deviceName)
+        let userFacingErrorMessage = RecordingSpeechGate.userMessage(reason: reason, deviceName: summary.deviceName)
         transcribingAudioFileName = nil
         isTranscribing = false
         endCriticalDictationActivity()
         errorMessage = userFacingErrorMessage
         statusText = "Error"
-        debugStatusMessage = "Skipped: no speech detected"
+        debugStatusMessage = reason == .tooShort ? "Skipped: recording too short" : "Skipped: no speech detected"
         clearPendingOverlayDismissToken()
-        overlayManager.showError(RecordingSpeechGate.overlayMessage(deviceName: summary.deviceName))
+        overlayManager.showError(RecordingSpeechGate.overlayMessage(reason: reason))
         lastRawTranscript = ""
         lastPostProcessedTranscript = ""
         lastPostProcessingStatus = processingStatus
@@ -3310,14 +3301,30 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func fallbackContextAtStop() -> AppContext {
         let frontmostApp = NSWorkspace.shared.frontmostApplication
-        let windowTitle = focusedWindowTitle(for: frontmostApp)
-        return AppContext(
+        return Self.uncapturedStopContext(
             appName: frontmostApp?.localizedName,
             bundleIdentifier: frontmostApp?.bundleIdentifier,
+            windowTitle: focusedWindowTitle(for: frontmostApp),
+            currentActivity: "Could not refresh app context at stop time; using text-only post-processing.",
+            contextSystemPrompt: resolvedContextSystemPrompt()
+        )
+    }
+
+    /// Context for a session whose app-context capture had not finished at stop.
+    private static func uncapturedStopContext(
+        appName: String? = nil,
+        bundleIdentifier: String? = nil,
+        windowTitle: String? = nil,
+        currentActivity: String,
+        contextSystemPrompt: String? = nil
+    ) -> AppContext {
+        AppContext(
+            appName: appName,
+            bundleIdentifier: bundleIdentifier,
             windowTitle: windowTitle,
             selectedText: nil,
-            currentActivity: "Could not refresh app context at stop time; using text-only post-processing.",
-            contextSystemPrompt: resolvedContextSystemPrompt(),
+            currentActivity: currentActivity,
+            contextSystemPrompt: contextSystemPrompt,
             contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,
