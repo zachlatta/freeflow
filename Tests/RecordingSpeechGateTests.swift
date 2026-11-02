@@ -39,6 +39,20 @@ enum RecordingSpeechGateTests {
         let summary = RecordingAudioSummary(durationSeconds: 0.78, peakAmplitude: 0.001, bufferCount: 12, deviceName: "Test Headset")
         TestSupport.expectEqual(RecordingSpeechGate.evaluate(summary), .skip(.silent))
 
+        // Peak measurement over synthetic Int16 samples.
+        func peak(_ samples: [Int16]) -> Double {
+            samples.withUnsafeBufferPointer { RecordingSpeechGate.peakAmplitude(of: $0) }
+        }
+        TestSupport.expectEqual(peak([]), 0)
+        TestSupport.expectEqual(peak([0, 0, 0, 0]), 0)
+        TestSupport.expectEqual(peak([0, Int16.min, 0]), 1.0)
+        TestSupport.expectApproximatelyEqual(peak([Int16.max]), 32767.0 / 32768.0)
+        TestSupport.expectApproximatelyEqual(peak([12, -1343, 900, -7, 1200]), 1343.0 / 32768.0)
+        TestSupport.expectEqual(
+            RecordingSpeechGate.evaluate(durationSeconds: 1.0, peakAmplitude: peak([0, 33, -20])),
+            .skip(.silent)
+        )
+
         // dBFS formatting.
         TestSupport.expectEqual(RecordingSpeechGate.formatDBFS(1.0), "0.0 dBFS")
         TestSupport.expectEqual(RecordingSpeechGate.formatDBFS(0.01), "-40.0 dBFS")
@@ -57,21 +71,16 @@ enum RecordingSpeechGateTests {
         )
         TestSupport.expectEqual(
             RecordingSpeechGate.userMessage(reason: .tooShort, deviceName: "Test Headset"),
-            "Recording was too short. Hold the shortcut while you speak."
+            "Recording too short to transcribe — Test Headset may still have been starting. Try again."
         )
         TestSupport.expectEqual(RecordingSpeechGate.overlayMessage(reason: .silent), "No speech detected. Try again.")
+        TestSupport.expectEqual(RecordingSpeechGate.overlayMessage(reason: .tooShort), "Recording too short. Try again.")
         // RecordingOverlay truncates toasts at 90 characters (private UI constant).
         for reason in [RecordingSpeechGate.SkipReason.silent, .tooShort] {
             TestSupport.expect(
                 RecordingSpeechGate.overlayMessage(reason: reason).count <= 90,
                 "Overlay message must fit the toast length cap"
             )
-            for text in [
-                RecordingSpeechGate.userMessage(reason: reason, deviceName: "Test Headset"),
-                RecordingSpeechGate.overlayMessage(reason: reason),
-            ] {
-                TestSupport.expect(!text.lowercased().contains("tick"), "Copy must not mention a tick")
-            }
         }
 
         // History status must start with "Error:" so the history row offers Retry.

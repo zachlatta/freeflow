@@ -84,8 +84,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private var activeAudioFile: AVAudioFile?
     private var activeAudioFormat: AVAudioFormat?
     private var recordedFrameCount: AVAudioFramePosition = 0
-    /// Largest absolute Int16 sample written this recording (sample-buffer queue).
-    private var recordedPeakSample: Int = 0
+    /// Largest linear peak (0...1) written this recording (sample-buffer queue).
+    private var recordedPeakAmplitude: Double = 0
     /// Localized name of the device the current session captures from (session queue).
     private var activeDeviceName: String?
     private var loggedCaptureFormat = false
@@ -303,13 +303,13 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         var finalizedURL: URL?
         var shouldKeepFile = false
         var frameCount: AVAudioFramePosition = 0
-        var peakSample = 0
+        var peakAmplitude: Double = 0
 
         // Drain all queued sample-buffer callbacks before releasing the writer.
         sampleBufferQueue.sync {
             finalizedURL = self.tempFileURL
             frameCount = self.recordedFrameCount
-            peakSample = self.recordedPeakSample
+            peakAmplitude = self.recordedPeakAmplitude
             shouldKeepFile = !discard && self.recordedFrameCount > 0 && self.fileWriteErrorLock.withLock { _ in
                 self.fileWriteError == nil
             }
@@ -319,14 +319,14 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
 
         let summary = RecordingAudioSummary(
             durationSeconds: Double(frameCount) / recordingTargetFormat.sampleRate,
-            peakAmplitude: min(Double(peakSample) / 32768.0, 1.0),
+            peakAmplitude: peakAmplitude,
             bufferCount: _bufferCount.withLock { $0 },
             deviceName: activeDeviceName
         )
 
         defer {
             self.recordedFrameCount = 0
-            self.recordedPeakSample = 0
+            self.recordedPeakAmplitude = 0
             self.activeDeviceName = nil
             self.fileWriteErrorLock.withLock { _ in
                 self.fileWriteError = nil
@@ -441,14 +441,12 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private func trackPeakSample(in buffer: AVAudioPCMBuffer) {
         guard let samples = buffer.int16ChannelData?[0] else { return }
         let sampleCount = Int(buffer.frameLength) * Int(buffer.format.channelCount)
-        var peak = recordedPeakSample
-        for index in 0..<sampleCount {
-            let magnitude = Int(samples[index].magnitude)
-            if magnitude > peak {
-                peak = magnitude
-            }
+        let bufferPeak = RecordingSpeechGate.peakAmplitude(
+            of: UnsafeBufferPointer(start: samples, count: sampleCount)
+        )
+        if bufferPeak > recordedPeakAmplitude {
+            recordedPeakAmplitude = bufferPeak
         }
-        recordedPeakSample = peak
     }
 
     private func validatedPCMBufferFormat(
@@ -655,7 +653,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         recordingConverterLock.withLock { $0 = nil }
         pcm16ConverterLock.withLock { $0 = nil }
         recordedFrameCount = 0
-        recordedPeakSample = 0
+        recordedPeakAmplitude = 0
         activeDeviceName = device.localizedName
         loggedCaptureFormat = false
         fileWriteErrorLock.withLock { _ in

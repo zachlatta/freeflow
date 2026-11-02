@@ -16,7 +16,8 @@ struct RecordingAudioSummary: Equatable {
 enum RecordingSpeechGate {
     /// OpenAI rejects audio shorter than 0.1 seconds.
     static let minimumDurationSeconds = 0.1
-    /// Successful dictations peak well above this; silent failures sit below it.
+    /// Quietest observed speech peaked near -28 dBFS; observed silent captures
+    /// were mostly -50 to -60 dBFS (one near -44 dBFS still passes).
     static let minimumPeakDBFS = -45.0
     /// `minimumPeakDBFS` as a linear amplitude (about 0.005623 of full scale).
     static let minimumPeakAmplitude = pow(10.0, minimumPeakDBFS / 20.0)
@@ -46,6 +47,19 @@ enum RecordingSpeechGate {
         evaluate(durationSeconds: summary.durationSeconds, peakAmplitude: summary.peakAmplitude)
     }
 
+    /// Largest absolute sample as a linear amplitude of full scale (0...1).
+    /// `Int16.min` maps to exactly 1.0.
+    static func peakAmplitude(of samples: UnsafeBufferPointer<Int16>) -> Double {
+        var peak: UInt16 = 0
+        for sample in samples {
+            let magnitude = sample.magnitude
+            if magnitude > peak {
+                peak = magnitude
+            }
+        }
+        return Double(peak) / 32768.0
+    }
+
     /// Formats a linear peak (0...1) as dBFS, e.g. `-44.4 dBFS`.
     static func formatDBFS(_ peakAmplitude: Double) -> String {
         guard peakAmplitude.isFinite, peakAmplitude > 0 else { return "-inf dBFS" }
@@ -64,7 +78,7 @@ enum RecordingSpeechGate {
         case .silent:
             return "No speech detected from \(displayDeviceName(deviceName)). Bluetooth mics can take a moment to wake up — try again."
         case .tooShort:
-            return "Recording was too short. Hold the shortcut while you speak."
+            return "Recording too short to transcribe — \(displayDeviceName(deviceName)) may still have been starting. Try again."
         }
     }
 
@@ -75,7 +89,7 @@ enum RecordingSpeechGate {
         case .silent:
             return "No speech detected. Try again."
         case .tooShort:
-            return "Recording was too short. Hold the shortcut while you speak."
+            return "Recording too short. Try again."
         }
     }
 
