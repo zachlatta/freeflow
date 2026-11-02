@@ -1870,7 +1870,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         switch action {
         case .start(let mode):
-            os_log(.info, log: recordingLog, "Shortcut start fired for mode %{public}@", mode.rawValue)
+            os_log(.default, log: recordingLog, "Shortcut start fired for mode %{public}@", mode.rawValue)
             scheduleShortcutStart(mode: mode)
         case .stop:
             cancelPendingShortcutStart()
@@ -2366,7 +2366,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         triggerMode: RecordingTriggerMode,
         cleanupOrigin: ShortcutCleanupSessionOrigin
     ) {
-        os_log(.info, log: recordingLog, "beginRecording() entered")
+        os_log(.default, log: recordingLog, "beginRecording() entered")
         shortcutCleanupSession.start(
             origin: cleanupOrigin,
             globalPreserveExactWording: preserveExactWording,
@@ -2828,7 +2828,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         errorMessage = nil
         playAlertSound(named: "Pop")
         overlayManager.showTranscribing()
-        audioRecorder.stopRecording { [weak self] fileURL in
+        audioRecorder.stopRecordingWithSummary { [weak self] fileURL, audioSummary in
             guard let self else { return }
             guard let fileURL else {
                 self.isTranscribing = false
@@ -2845,6 +2845,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.tearDownRealtimeService()
                 self.audioRecorder.cleanup()
                 self.refreshAvailableMicrophonesIfNeeded()
+                return
+            }
+
+            if case .skip(let skipReason) = RecordingSpeechGate.evaluate(audioSummary) {
+                self.finishSkippedSilentRecording(
+                    fileURL: fileURL,
+                    summary: audioSummary,
+                    reason: skipReason,
+                    intent: sessionIntent,
+                    sessionContext: sessionContext,
+                    contextGeneration: contextGeneration
+                )
                 return
             }
 
@@ -3063,6 +3075,75 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Terminal path for recordings with no speech-level signal (too short or
+    /// digitally silent). Skips transcription and post-processing, keeps the
+    /// audio for history retry, and tells the user which mic produced silence.
+    private func finishSkippedSilentRecording(
+        fileURL: URL,
+        summary: RecordingAudioSummary,
+        reason: RecordingSpeechGate.SkipReason,
+        intent: SessionIntent,
+        sessionContext: AppContext?,
+        contextGeneration: UUID
+    ) {
+        let processingStatus = RecordingSpeechGate.historyStatus(reason: reason, summary: summary)
+        os_log(
+            .default,
+            log: recordingLog,
+            "skipping transcription: %{public}@ duration=%.3fs peak=%{public}@ buffers=%d device=%{public}@",
+            reason == .tooShort ? "too short" : "silent",
+            summary.durationSeconds,
+            RecordingSpeechGate.formatDBFS(summary.peakAmplitude),
+            summary.bufferCount,
+            summary.deviceName ?? "unknown"
+        )
+
+        tearDownRealtimeService()
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        let savedAudioFile = Self.saveAudioFile(from: fileURL)
+        // Nothing is post-processed, so avoid blocking on Accessibility or a screenshot.
+        let skippedContext = sessionContext ?? AppContext(
+            appName: nil,
+            bundleIdentifier: nil,
+            windowTitle: nil,
+            selectedText: nil,
+            currentActivity: "No app context captured before stop.",
+            contextSystemPrompt: nil,
+            contextPrompt: nil,
+            screenshotDataURL: nil,
+            screenshotMimeType: nil,
+            screenshotError: "No app context captured before stop"
+        )
+        let context = contextForPublication(skippedContext, prompt: "", generation: contextGeneration).context
+
+        let userFacingErrorMessage = RecordingSpeechGate.userMessage(deviceName: summary.deviceName)
+        transcribingAudioFileName = nil
+        isTranscribing = false
+        endCriticalDictationActivity()
+        errorMessage = userFacingErrorMessage
+        statusText = "Error"
+        debugStatusMessage = "Skipped: no speech detected"
+        clearPendingOverlayDismissToken()
+        overlayManager.showError(RecordingSpeechGate.overlayMessage(deviceName: summary.deviceName))
+        lastRawTranscript = ""
+        lastPostProcessedTranscript = ""
+        lastPostProcessingStatus = processingStatus
+        lastPostProcessingPrompt = ""
+        recordPipelineHistoryEntry(
+            rawTranscript: "",
+            postProcessedTranscript: "",
+            postProcessingPrompt: "",
+            systemPrompt: Self.resolvedSystemPrompt(customSystemPrompt),
+            context: context,
+            processingStatus: processingStatus,
+            intent: intent,
+            audioFileName: savedAudioFile?.fileName
+        )
+        audioRecorder.cleanup()
+        refreshAvailableMicrophonesIfNeeded()
     }
 
     static func resolvedSystemPrompt(_ customSystemPrompt: String) -> String {

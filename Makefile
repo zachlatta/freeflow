@@ -27,6 +27,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/OriginalFieldInsertionPreference.swift \
 	Sources/PostProcessingService.swift \
 	Sources/RecordingCaptureTiming.swift \
+	Sources/RecordingSpeechGate.swift \
 	Sources/RecordingTimerPreference.swift \
 	Sources/ShortcutCleanupPreference.swift \
 	Sources/TranscriptionErrorPresentationCore.swift \
