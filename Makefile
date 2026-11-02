@@ -28,6 +28,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/PostProcessingService.swift \
 	Sources/RecordingCaptureTiming.swift \
 	Sources/RecordingTimerPreference.swift \
+	Sources/ShortcutCleanupPreference.swift \
 	Sources/TranscriptionErrorPresentationCore.swift \
 	Sources/TranscriptTextCore.swift \
 	Sources/TemperatureCapabilityCache.swift \

@@ -548,6 +548,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var holdShortcutCleanupPreference: ShortcutCleanupPreference {
+        didSet {
+            holdShortcutCleanupPreference.save(to: .standard, key: ShortcutCleanupPreference.holdStorageKey)
+        }
+    }
+
+    @Published var toggleShortcutCleanupPreference: ShortcutCleanupPreference {
+        didSet {
+            toggleShortcutCleanupPreference.save(to: .standard, key: ShortcutCleanupPreference.toggleStorageKey)
+        }
+    }
+
     @Published var keepDictationInClipboardHistory: Bool {
         didSet {
             UserDefaults.standard.set(keepDictationInClipboardHistory, forKey: keepDictationInClipboardHistoryStorageKey)
@@ -643,6 +655,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var needsMicrophoneRefreshAfterRecording = false
     private let pipelineHistoryStore = PipelineHistoryStore()
     private let shortcutSessionController = DictationShortcutSessionController()
+    private var shortcutCleanupSession = ShortcutCleanupSession()
     private var activeRecordingTriggerMode: RecordingTriggerMode?
     private var activeTextInsertionTarget: AppTextInsertionTarget?
     private var insertionAccessibilityCancellable: AnyCancellable?
@@ -662,6 +675,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var isCapturingShortcut = false
     private var isAwaitingMicrophonePermission = false
     private var pendingMicrophonePermissionTriggerMode: RecordingTriggerMode?
+    private var pendingMicrophonePermissionCleanupOrigin: ShortcutCleanupSessionOrigin?
     private var pendingMicrophonePermissionSelectionSnapshot: AppSelectionSnapshot?
     private var pendingMicrophonePermissionManualCommandRequested: Bool?
     private var isApplyingAPIConfiguration = false
@@ -736,6 +750,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
             ? true
             : UserDefaults.standard.bool(forKey: preserveClipboardStorageKey)
         let preserveExactWording = UserDefaults.standard.bool(forKey: preserveExactWordingStorageKey)
+        let holdShortcutCleanupPreference = ShortcutCleanupPreference.load(
+            from: .standard,
+            key: ShortcutCleanupPreference.holdStorageKey
+        )
+        let toggleShortcutCleanupPreference = ShortcutCleanupPreference.load(
+            from: .standard,
+            key: ShortcutCleanupPreference.toggleStorageKey
+        )
         let keepDictationInClipboardHistory = UserDefaults.standard.bool(forKey: keepDictationInClipboardHistoryStorageKey)
         let realtimeStreamingEnabled = UserDefaults.standard.bool(forKey: realtimeStreamingEnabledStorageKey)
         let realtimeStreamingModel = UserDefaults.standard.string(forKey: realtimeStreamingModelStorageKey) ?? ""
@@ -821,6 +843,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.originalFieldInsertionEnabled = OriginalFieldInsertionPreference.load(from: .standard)
         self.preserveClipboard = preserveClipboard
         self.preserveExactWording = preserveExactWording
+        self.holdShortcutCleanupPreference = holdShortcutCleanupPreference
+        self.toggleShortcutCleanupPreference = toggleShortcutCleanupPreference
         self.keepDictationInClipboardHistory = keepDictationInClipboardHistory
         self.realtimeStreamingEnabled = realtimeStreamingEnabled
         self.realtimeStreamingModel = realtimeStreamingModel
@@ -1852,6 +1876,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             cancelPendingShortcutStart()
             guard isRecording else {
                 shortcutSessionController.reset()
+                shortcutCleanupSession.reset()
                 activeRecordingTriggerMode = nil
                 activeTextInsertionTarget = nil
                 return
@@ -1900,7 +1925,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             stopAndTranscribe()
         } else {
             shortcutSessionController.beginManual(mode: .toggle)
-            startRecording(triggerMode: .toggle)
+            startRecording(triggerMode: .toggle, cleanupOrigin: .menu)
         }
     }
 
@@ -1915,6 +1940,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         textInsertionTargetID = nil
         cancelPendingShortcutStart()
         shortcutSessionController.reset()
+        shortcutCleanupSession.reset()
         activeRecordingTriggerMode = nil
         activeTextInsertionTarget = nil
         audioRecorder.onRecordingReady = nil
@@ -1951,6 +1977,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         contextCaptureTask = nil
         capturedContext = nil
         shortcutSessionController.reset()
+        shortcutCleanupSession.reset()
         activeRecordingTriggerMode = nil
         activeTextInsertionTarget = nil
         currentSessionIntent = .dictation
@@ -1985,7 +2012,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
         guard delay > 0 else {
             pendingShortcutStartMode = nil
-            startRecording(triggerMode: mode)
+            startRecording(triggerMode: mode, cleanupOrigin: .shortcut(mode))
             return
         }
 
@@ -2000,7 +2027,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 guard let self, let pendingMode = self.pendingShortcutStartMode else { return }
                 self.pendingShortcutStartTask = nil
                 self.pendingShortcutStartMode = nil
-                self.startRecording(triggerMode: pendingMode)
+                self.startRecording(triggerMode: pendingMode, cleanupOrigin: .shortcut(pendingMode))
             }
         }
     }
@@ -2060,6 +2087,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func rejectCommandModeSelectionRequirement(triggerMode: RecordingTriggerMode) {
         currentSessionIntent = .dictation
         activeRecordingTriggerMode = nil
+        shortcutCleanupSession.reset()
         activeTextInsertionTarget = nil
         pendingSelectionSnapshot = nil
         pendingManualCommandInvocation = false
@@ -2077,6 +2105,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func rejectInvalidCommandModeModifier(triggerMode: RecordingTriggerMode, message: String) {
         currentSessionIntent = .dictation
         activeRecordingTriggerMode = nil
+        shortcutCleanupSession.reset()
         activeTextInsertionTarget = nil
         pendingSelectionSnapshot = nil
         pendingManualCommandInvocation = false
@@ -2091,10 +2120,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         scheduleReadyStatusReset(after: 2, matching: ["Fix Edit Mode modifier"])
     }
 
-    private func startRecording(triggerMode: RecordingTriggerMode) {
+    private func startRecording(
+        triggerMode: RecordingTriggerMode,
+        cleanupOrigin: ShortcutCleanupSessionOrigin
+    ) {
         let t0 = CFAbsoluteTimeGetCurrent()
         os_log(.info, log: recordingLog, "startRecording() entered")
         guard !isRecording && !isTranscribing else { return }
+        shortcutCleanupSession.reset()
         let scheduledSelectionSnapshot = pendingSelectionSnapshot
         let selectionSnapshot = scheduledSelectionSnapshot
             ?? contextService.collectSelectionSnapshot(captureInsertionTarget: originalFieldInsertionEnabled)
@@ -2108,10 +2141,13 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 : scheduledManualCommandInvocation,
             startedAt: t0
         ) else { return }
-        guard ensureMicrophoneAccess(selectionSnapshot: selectionSnapshot) else { return }
+        guard ensureMicrophoneAccess(
+            selectionSnapshot: selectionSnapshot,
+            cleanupOrigin: cleanupOrigin
+        ) else { return }
         os_log(.info, log: recordingLog, "mic access check passed: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
         applyAudioInterruptionIfNeeded()
-        beginRecording(triggerMode: triggerMode)
+        beginRecording(triggerMode: triggerMode, cleanupOrigin: cleanupOrigin)
         os_log(.info, log: recordingLog, "startRecording() finished: %.3fms", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
     }
 
@@ -2130,6 +2166,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             errorMessage = "Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility."
             statusText = "No Accessibility"
             activeRecordingTriggerMode = nil
+            shortcutCleanupSession.reset()
             activeTextInsertionTarget = nil
             currentSessionIntent = .dictation
             shortcutSessionController.reset()
@@ -2174,6 +2211,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             errorMessage = message
             statusText = "Screenshot Required"
             activeRecordingTriggerMode = nil
+            shortcutCleanupSession.reset()
             activeTextInsertionTarget = nil
             currentSessionIntent = .dictation
             shortcutSessionController.reset()
@@ -2185,7 +2223,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
         return true
     }
 
-    private func ensureMicrophoneAccess(selectionSnapshot: AppSelectionSnapshot) -> Bool {
+    private func ensureMicrophoneAccess(
+        selectionSnapshot: AppSelectionSnapshot,
+        cleanupOrigin: ShortcutCleanupSessionOrigin
+    ) -> Bool {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         switch status {
         case .authorized:
@@ -2198,15 +2239,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
             prepareForMicrophonePermissionPrompt(
                 triggerMode: triggerMode,
                 selectionSnapshot: selectionSnapshot,
-                manualCommandRequested: currentSessionIntent.isManualCommand
+                manualCommandRequested: currentSessionIntent.isManualCommand,
+                cleanupOrigin: cleanupOrigin
             )
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
                 DispatchQueue.main.async {
                     guard let strongSelf = self else { return }
                     let pendingTriggerMode = strongSelf.pendingMicrophonePermissionTriggerMode
+                    let pendingCleanupOrigin = strongSelf.pendingMicrophonePermissionCleanupOrigin
                     let pendingSelectionSnapshot = strongSelf.pendingMicrophonePermissionSelectionSnapshot
                     let pendingManualCommandRequested = strongSelf.pendingMicrophonePermissionManualCommandRequested
                     strongSelf.pendingMicrophonePermissionTriggerMode = nil
+                    strongSelf.pendingMicrophonePermissionCleanupOrigin = nil
                     strongSelf.pendingMicrophonePermissionSelectionSnapshot = nil
                     strongSelf.pendingMicrophonePermissionManualCommandRequested = nil
                     strongSelf.isAwaitingMicrophonePermission = false
@@ -2216,6 +2260,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     if granted {
                         strongSelf.errorMessage = nil
                         if triggerMode == .toggle {
+                            guard let cleanupOrigin = pendingCleanupOrigin else { return }
                             guard strongSelf.prepareRecordingStart(
                                 triggerMode: .toggle,
                                 selectionSnapshot: pendingSelectionSnapshot,
@@ -2223,7 +2268,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                             ) else { return }
                             strongSelf.shortcutSessionController.beginManual(mode: .toggle)
                             strongSelf.applyAudioInterruptionIfNeeded()
-                            strongSelf.beginRecording(triggerMode: .toggle)
+                            strongSelf.beginRecording(triggerMode: .toggle, cleanupOrigin: cleanupOrigin)
                         } else {
                             strongSelf.currentSessionIntent = .dictation
                             strongSelf.statusText = "Microphone access granted. Press and hold again to record."
@@ -2236,6 +2281,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         strongSelf.errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
                         strongSelf.statusText = "No Microphone"
                         strongSelf.activeRecordingTriggerMode = nil
+                        strongSelf.shortcutCleanupSession.reset()
                         strongSelf.activeTextInsertionTarget = nil
                         strongSelf.currentSessionIntent = .dictation
                         strongSelf.shortcutSessionController.reset()
@@ -2248,6 +2294,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             errorMessage = "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone."
             statusText = "No Microphone"
             activeRecordingTriggerMode = nil
+            shortcutCleanupSession.reset()
             activeTextInsertionTarget = nil
             currentSessionIntent = .dictation
             shortcutSessionController.reset()
@@ -2259,14 +2306,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func prepareForMicrophonePermissionPrompt(
         triggerMode: RecordingTriggerMode,
         selectionSnapshot: AppSelectionSnapshot?,
-        manualCommandRequested: Bool?
+        manualCommandRequested: Bool?,
+        cleanupOrigin: ShortcutCleanupSessionOrigin
     ) {
         isAwaitingMicrophonePermission = true
         pendingMicrophonePermissionTriggerMode = triggerMode
+        pendingMicrophonePermissionCleanupOrigin = cleanupOrigin
         pendingMicrophonePermissionSelectionSnapshot = selectionSnapshot
         pendingMicrophonePermissionManualCommandRequested = manualCommandRequested
         hotkeyManager.stop()
         shortcutSessionController.reset()
+        shortcutCleanupSession.reset()
         activeRecordingTriggerMode = nil
         activeTextInsertionTarget = nil
         cancelRecordingInitializationTimer()
@@ -2312,8 +2362,17 @@ final class AppState: ObservableObject, @unchecked Sendable {
         automaticTerminationDisabled = false
     }
 
-    private func beginRecording(triggerMode: RecordingTriggerMode) {
+    private func beginRecording(
+        triggerMode: RecordingTriggerMode,
+        cleanupOrigin: ShortcutCleanupSessionOrigin
+    ) {
         os_log(.info, log: recordingLog, "beginRecording() entered")
+        shortcutCleanupSession.start(
+            origin: cleanupOrigin,
+            globalPreserveExactWording: preserveExactWording,
+            holdPreference: holdShortcutCleanupPreference,
+            togglePreference: toggleShortcutCleanupPreference
+        )
         beginCriticalDictationActivity()
         clearPendingOverlayDismissToken()
         errorMessage = nil
@@ -2432,6 +2491,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             self.transcribingAudioFileName = nil
         }
         activeRecordingTriggerMode = nil
+        shortcutCleanupSession.reset()
         activeTextInsertionTarget = nil
         currentSessionIntent = .dictation
         shortcutSessionController.reset()
@@ -2735,6 +2795,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         cancelPendingShortcutStart()
         cancelRecordingInitializationTimer()
         shortcutSessionController.reset()
+        let preserveExactWordingForSession = shortcutCleanupSession.preserveExactWording ?? preserveExactWording
+        shortcutCleanupSession.reset()
         let textInsertionTarget = activeTextInsertionTarget
         let useOriginalFieldInsertion = activeOriginalFieldInsertionEnabled
         activeOriginalFieldInsertionEnabled = false
@@ -2856,7 +2918,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         customSystemPrompt: self.customSystemPrompt,
                         outputLanguage: self.outputLanguage,
                         dictationLanguage: Self.dictationLanguageName(for: self.transcriptionLanguage),
-                        preserveExactWording: self.preserveExactWording,
+                        preserveExactWording: preserveExactWordingForSession,
                         contextGeneration: contextGeneration
                     )
                     try Task.checkCancellation()
@@ -3255,6 +3317,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             isRecording = false
             restoreAudioInterruptionIfNeeded()
             shortcutSessionController.reset()
+            shortcutCleanupSession.reset()
             activeRecordingTriggerMode = nil
             activeTextInsertionTarget = nil
             endCriticalDictationActivity()
