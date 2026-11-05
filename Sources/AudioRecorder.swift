@@ -84,6 +84,10 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
     private var activeAudioFile: AVAudioFile?
     private var activeAudioFormat: AVAudioFormat?
     private var recordedFrameCount: AVAudioFramePosition = 0
+    /// Largest linear peak (0...1) written this recording (sample-buffer queue).
+    private var recordedPeakAmplitude: Double = 0
+    /// Localized name of the device the current session captures from (session queue).
+    private var activeDeviceName: String?
     private var loggedCaptureFormat = false
     private var fileWriteError: Error?
     private var isSessionInterrupted = false
@@ -248,7 +252,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             self._recording.withLock { $0 = false }
 
             let completion = completion
-            let discardURL = self.finishAudioFileLocked(discard: true)
+            let discardURL = self.finishAudioFileLocked(discard: true).url
             self.teardownSessionLocked()
             self.liveLevelNormalizerLock.withLock { $0.reset() }
             if let discardURL {
@@ -295,13 +299,17 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         watchdogTimer = nil
     }
 
-    private func finishAudioFileLocked(discard: Bool) -> URL? {
+    private func finishAudioFileLocked(discard: Bool) -> (url: URL?, summary: RecordingAudioSummary) {
         var finalizedURL: URL?
         var shouldKeepFile = false
+        var frameCount: AVAudioFramePosition = 0
+        var peakAmplitude: Double = 0
 
         // Drain all queued sample-buffer callbacks before releasing the writer.
         sampleBufferQueue.sync {
             finalizedURL = self.tempFileURL
+            frameCount = self.recordedFrameCount
+            peakAmplitude = self.recordedPeakAmplitude
             shouldKeepFile = !discard && self.recordedFrameCount > 0 && self.fileWriteErrorLock.withLock { _ in
                 self.fileWriteError == nil
             }
@@ -309,8 +317,17 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             self.activeAudioFormat = nil
         }
 
+        let summary = RecordingAudioSummary(
+            durationSeconds: Double(frameCount) / recordingTargetFormat.sampleRate,
+            peakAmplitude: peakAmplitude,
+            bufferCount: _bufferCount.withLock { $0 },
+            deviceName: activeDeviceName
+        )
+
         defer {
             self.recordedFrameCount = 0
+            self.recordedPeakAmplitude = 0
+            self.activeDeviceName = nil
             self.fileWriteErrorLock.withLock { _ in
                 self.fileWriteError = nil
             }
@@ -319,7 +336,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
             }
         }
 
-        return shouldKeepFile ? finalizedURL : nil
+        return (shouldKeepFile ? finalizedURL : nil, summary)
     }
 
     private func handleSessionInterrupted(_ notification: Notification) {
@@ -404,6 +421,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         if sourceFormat == targetFormat {
             try activeAudioFile.write(from: inputBuffer)
             recordedFrameCount += AVAudioFramePosition(inputBuffer.frameLength)
+            trackPeakSample(in: inputBuffer)
             return
         }
 
@@ -415,6 +433,20 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         guard outputBuffer.frameLength > 0 else { return }
         try activeAudioFile.write(from: outputBuffer)
         recordedFrameCount += AVAudioFramePosition(outputBuffer.frameLength)
+        trackPeakSample(in: outputBuffer)
+    }
+
+    /// Updates the per-recording peak from a buffer in the 16 kHz mono Int16
+    /// recording format. Runs on the sample-buffer queue.
+    private func trackPeakSample(in buffer: AVAudioPCMBuffer) {
+        guard let samples = buffer.int16ChannelData?[0] else { return }
+        let sampleCount = Int(buffer.frameLength) * Int(buffer.format.channelCount)
+        let bufferPeak = RecordingSpeechGate.peakAmplitude(
+            of: UnsafeBufferPointer(start: samples, count: sampleCount)
+        )
+        if bufferPeak > recordedPeakAmplitude {
+            recordedPeakAmplitude = bufferPeak
+        }
     }
 
     private func validatedPCMBufferFormat(
@@ -621,6 +653,8 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         recordingConverterLock.withLock { $0 = nil }
         pcm16ConverterLock.withLock { $0 = nil }
         recordedFrameCount = 0
+        recordedPeakAmplitude = 0
+        activeDeviceName = device.localizedName
         loggedCaptureFormat = false
         fileWriteErrorLock.withLock { _ in
             fileWriteError = nil
@@ -681,7 +715,9 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         os_log(.info, log: recordingLog, "startRecording() complete: %.3fms total", (CFAbsoluteTimeGetCurrent() - t0) * 1000)
     }
 
-    func stopRecording(completion: @escaping (URL?) -> Void) {
+    /// Stops recording and delivers the finalized file plus this recording's
+    /// measurements (written duration, peak, buffer count, device) on main.
+    func stopRecording(completion: @escaping (URL?, RecordingAudioSummary) -> Void) {
         captureTiming.withLock { $0.invalidate() }
         let count = _bufferCount.withLock { $0 }
         let elapsed = (CFAbsoluteTimeGetCurrent() - recordingStartTime) * 1000
@@ -690,13 +726,24 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         sessionQueue.async {
             self.cancelWatchdog()
             self.teardownSessionLocked()
-            let outputURL = self.finishAudioFileLocked(discard: false)
+            let finished = self.finishAudioFileLocked(discard: false)
             self._recording.withLock { $0 = false }
             self.liveLevelNormalizerLock.withLock { $0.reset() }
+            let summary = finished.summary
+            os_log(
+                .info,
+                log: recordingLog,
+                "stopRecording() finalized: duration=%.3fs peak=%{public}@ buffers=%d device=%{private}@ file=%{public}@",
+                summary.durationSeconds,
+                RecordingSpeechGate.formatDBFS(summary.peakAmplitude),
+                summary.bufferCount,
+                summary.deviceName ?? "unknown",
+                finished.url == nil ? "none" : "kept"
+            )
             DispatchQueue.main.async {
                 self.isRecording = false
                 self.audioLevel = 0.0
-                completion(outputURL)
+                completion(finished.url, summary)
             }
         }
     }
@@ -706,7 +753,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVCaptureAudioDataOutputS
         sessionQueue.async {
             self.cancelWatchdog()
             self.teardownSessionLocked()
-            let discardURL = self.finishAudioFileLocked(discard: true)
+            let discardURL = self.finishAudioFileLocked(discard: true).url
             self._recording.withLock { $0 = false }
             self.liveLevelNormalizerLock.withLock { $0.reset() }
             if let discardURL {

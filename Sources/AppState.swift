@@ -2865,7 +2865,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         errorMessage = nil
         playAlertSound(named: "Pop")
         overlayManager.showTranscribing()
-        audioRecorder.stopRecording { [weak self] fileURL in
+        audioRecorder.stopRecording { [weak self] fileURL, audioSummary in
             guard let self else { return }
             guard let fileURL else {
                 self.isTranscribing = false
@@ -2882,6 +2882,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.tearDownRealtimeService()
                 self.audioRecorder.cleanup()
                 self.refreshAvailableMicrophonesIfNeeded()
+                return
+            }
+
+            if case .skip(let skipReason) = RecordingSpeechGate.evaluate(audioSummary) {
+                self.finishSkippedSilentRecording(
+                    fileURL: fileURL,
+                    summary: audioSummary,
+                    reason: skipReason,
+                    intent: sessionIntent,
+                    sessionContext: sessionContext,
+                    contextGeneration: contextGeneration
+                )
                 return
             }
 
@@ -3102,6 +3114,66 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Terminal path for recordings with no speech-level signal (too short or
+    /// digitally silent). Skips transcription and post-processing, keeps the
+    /// audio for history retry, and tells the user which mic produced silence.
+    private func finishSkippedSilentRecording(
+        fileURL: URL,
+        summary: RecordingAudioSummary,
+        reason: RecordingSpeechGate.SkipReason,
+        intent: SessionIntent,
+        sessionContext: AppContext?,
+        contextGeneration: UUID
+    ) {
+        let processingStatus = RecordingSpeechGate.historyStatus(reason: reason, summary: summary)
+        os_log(
+            .default,
+            log: recordingLog,
+            "skipping transcription: %{public}@ duration=%.3fs peak=%{public}@ buffers=%d device=%{private}@",
+            reason == .tooShort ? "too short" : "silent",
+            summary.durationSeconds,
+            RecordingSpeechGate.formatDBFS(summary.peakAmplitude),
+            summary.bufferCount,
+            summary.deviceName ?? "unknown"
+        )
+
+        tearDownRealtimeService()
+        contextCaptureTask?.cancel()
+        contextCaptureTask = nil
+        let savedAudioFile = Self.saveAudioFile(from: fileURL)
+        // Nothing is post-processed, so avoid blocking on Accessibility or a screenshot.
+        let skippedContext = sessionContext ?? Self.uncapturedStopContext(
+            currentActivity: "No app context captured before stop."
+        )
+        let context = contextForPublication(skippedContext, prompt: "", generation: contextGeneration).context
+
+        let userFacingErrorMessage = RecordingSpeechGate.userMessage(reason: reason, deviceName: summary.deviceName)
+        transcribingAudioFileName = nil
+        isTranscribing = false
+        endCriticalDictationActivity()
+        errorMessage = userFacingErrorMessage
+        statusText = "Error"
+        debugStatusMessage = reason == .tooShort ? "Skipped: recording too short" : "Skipped: no speech detected"
+        clearPendingOverlayDismissToken()
+        overlayManager.showError(RecordingSpeechGate.overlayMessage(reason: reason))
+        lastRawTranscript = ""
+        lastPostProcessedTranscript = ""
+        lastPostProcessingStatus = processingStatus
+        lastPostProcessingPrompt = ""
+        recordPipelineHistoryEntry(
+            rawTranscript: "",
+            postProcessedTranscript: "",
+            postProcessingPrompt: "",
+            systemPrompt: Self.resolvedSystemPrompt(customSystemPrompt),
+            context: context,
+            processingStatus: processingStatus,
+            intent: intent,
+            audioFileName: savedAudioFile?.fileName
+        )
+        audioRecorder.cleanup()
+        refreshAvailableMicrophonesIfNeeded()
+    }
+
     static func resolvedSystemPrompt(_ customSystemPrompt: String) -> String {
         customSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? PostProcessingService.defaultSystemPrompt
@@ -3266,14 +3338,30 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func fallbackContextAtStop() -> AppContext {
         let frontmostApp = NSWorkspace.shared.frontmostApplication
-        let windowTitle = focusedWindowTitle(for: frontmostApp)
-        return AppContext(
+        return Self.uncapturedStopContext(
             appName: frontmostApp?.localizedName,
             bundleIdentifier: frontmostApp?.bundleIdentifier,
+            windowTitle: focusedWindowTitle(for: frontmostApp),
+            currentActivity: "Could not refresh app context at stop time; using text-only post-processing.",
+            contextSystemPrompt: resolvedContextSystemPrompt()
+        )
+    }
+
+    /// Context for a session whose app-context capture had not finished at stop.
+    private static func uncapturedStopContext(
+        appName: String? = nil,
+        bundleIdentifier: String? = nil,
+        windowTitle: String? = nil,
+        currentActivity: String,
+        contextSystemPrompt: String? = nil
+    ) -> AppContext {
+        AppContext(
+            appName: appName,
+            bundleIdentifier: bundleIdentifier,
             windowTitle: windowTitle,
             selectedText: nil,
-            currentActivity: "Could not refresh app context at stop time; using text-only post-processing.",
-            contextSystemPrompt: resolvedContextSystemPrompt(),
+            currentActivity: currentActivity,
+            contextSystemPrompt: contextSystemPrompt,
             contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,

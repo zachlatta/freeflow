@@ -1285,7 +1285,7 @@ struct SetupView: View {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.8)) {
                     testPhase = .transcribing
                 }
-                recorder.stopRecording { url in
+                recorder.stopRecording { url, _ in
                     guard let url else {
                         Task { @MainActor in
                             testHotkeyHarness.isTranscribing = false
