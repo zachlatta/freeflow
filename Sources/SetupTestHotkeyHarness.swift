@@ -52,6 +52,8 @@ final class SetupTestHotkeyHarness: ObservableObject {
             DispatchQueue.main.async {
                 self.onAction?(action)
             }
+        case .awaitDoubleTap:
+            break
         }
     }
 

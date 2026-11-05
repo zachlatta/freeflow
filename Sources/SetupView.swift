@@ -1329,7 +1329,7 @@ struct SetupView: View {
                     }
                 }
 
-            case .switchedToToggle:
+            case .switchedToToggle, .awaitDoubleTap:
                 break
             }
         }

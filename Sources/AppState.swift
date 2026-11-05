@@ -223,6 +223,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let contextCaptureEnabledStorageKey = "context_capture_enabled"
     private let contextScreenshotMaxDimensionStorageKey = "context_screenshot_max_dimension"
     private let shortcutStartDelayStorageKey = "shortcut_start_delay"
+    private let doubleTapToToggleStorageKey = "double_tap_to_toggle_enabled"
     private let preserveClipboardStorageKey = "preserve_clipboard"
     private let preserveExactWordingStorageKey = "preserve_exact_wording"
     private let keepDictationInClipboardHistoryStorageKey = "keep_dictation_in_clipboard_history"
@@ -502,6 +503,12 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    @Published var doubleTapToToggleEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(doubleTapToToggleEnabled, forKey: doubleTapToToggleStorageKey)
+        }
+    }
+
     /// Stream audio to the transcription backend during recording via the
     /// OpenAI Realtime WebSocket. Reduces wall-clock latency between "stop"
     /// and text-ready because most of the transcription work happens while
@@ -655,6 +662,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private var needsMicrophoneRefreshAfterRecording = false
     private let pipelineHistoryStore = PipelineHistoryStore()
     private let shortcutSessionController = DictationShortcutSessionController()
+    private var doubleTapTimeoutWorkItem: DispatchWorkItem?
     private var shortcutCleanupSession = ShortcutCleanupSession()
     private var activeRecordingTriggerMode: RecordingTriggerMode?
     private var activeTextInsertionTarget: AppTextInsertionTarget?
@@ -840,6 +848,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.customContextPromptLastModified = customContextPromptLastModified
         self.outputLanguage = outputLanguage
         self.shortcutStartDelay = shortcutStartDelay
+        self.doubleTapToToggleEnabled = UserDefaults.standard.bool(forKey: doubleTapToToggleStorageKey)
         self.originalFieldInsertionEnabled = OriginalFieldInsertionPreference.load(from: .standard)
         self.preserveClipboard = preserveClipboard
         self.preserveExactWording = preserveExactWording
@@ -1864,9 +1873,20 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return
         }
 
-        guard let action = shortcutSessionController.handle(event: event, isTranscribing: isTranscribing) else {
+        guard let action = shortcutSessionController.handle(
+            event: event,
+            isTranscribing: isTranscribing,
+            doubleTapToToggleEnabled: doubleTapToToggleEnabled
+        ) else {
             return
         }
+
+        performShortcutAction(action)
+    }
+
+    private func performShortcutAction(_ action: DictationShortcutAction) {
+        doubleTapTimeoutWorkItem?.cancel()
+        doubleTapTimeoutWorkItem = nil
 
         switch action {
         case .start(let mode):
@@ -1888,7 +1908,24 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 overlayManager.setRecordingTriggerMode(.toggle, animated: true)
             } else if pendingShortcutStartMode != nil {
                 pendingShortcutStartMode = .toggle
+                if pendingShortcutStartTask == nil {
+                    // A double tap paused this start; the second press confirms it.
+                    pendingShortcutStartMode = nil
+                    startRecording(triggerMode: .toggle, cleanupOrigin: .shortcut(.toggle))
+                }
             }
+        case .awaitDoubleTap(let window):
+            // A tap shorter than the start delay must not record unless a
+            // second press confirms it, so pause the start instead of racing it.
+            pendingShortcutStartTask?.cancel()
+            pendingShortcutStartTask = nil
+
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self, let action = self.shortcutSessionController.handleDoubleTapTimeout() else { return }
+                self.performShortcutAction(action)
+            }
+            doubleTapTimeoutWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + window, execute: workItem)
         }
     }
 

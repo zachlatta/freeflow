@@ -15,6 +15,13 @@ enum ShortcutCoreTests {
         testHoldSessionControllerLifecycle()
         testToggleSessionControllerLifecycle()
         testHoldToToggleSessionControllerLifecycle()
+        testDoubleTapIsOffByDefault()
+        testDoubleTapLatchesAndHoldShortcutStops()
+        testDoubleTapLatchedSessionStopsOnFirstToggleShortcutPress()
+        testSingleTapStopsWhenDoubleTapWindowExpires()
+        testLongHoldStopsImmediatelyWithDoubleTapEnabled()
+        testToggleStartedSessionIgnoresHoldShortcut()
+        testDoubleTapModifierChordThroughMatcher()
     }
 
     private static func testBareFnHoldLifecycle() {
@@ -343,5 +350,111 @@ enum ShortcutCoreTests {
         controller.reset()
         TestSupport.expectEqual(controller.activeMode, nil)
         TestSupport.expectEqual(controller.toggleStopArmed, false)
+    }
+
+    private static func doubleTapHandle(
+        _ controller: DictationShortcutSessionController,
+        _ event: ShortcutEvent,
+        at now: TimeInterval
+    ) -> DictationShortcutAction? {
+        controller.handle(event: event, isTranscribing: false, doubleTapToToggleEnabled: true, now: now)
+    }
+
+    private static func testDoubleTapIsOffByDefault() {
+        let controller = DictationShortcutSessionController()
+        TestSupport.expectEqual(controller.handle(event: .holdActivated, isTranscribing: false, now: 0), .start(.hold))
+        TestSupport.expectEqual(controller.handle(event: .holdDeactivated, isTranscribing: false, now: 0.1), .stop)
+        TestSupport.expectEqual(controller.handle(event: .holdActivated, isTranscribing: false, now: 0.2), .start(.hold))
+    }
+
+    private static func testDoubleTapLatchesAndHoldShortcutStops() {
+        let controller = DictationShortcutSessionController()
+        TestSupport.expectEqual(doubleTapHandle(controller, .holdActivated, at: 0), .start(.hold))
+        TestSupport.expectEqual(
+            doubleTapHandle(controller, .holdDeactivated, at: 0.1),
+            .awaitDoubleTap(DictationShortcutSessionController.doubleTapWindow)
+        )
+        TestSupport.expectEqual(controller.activeMode, .hold)
+        TestSupport.expectEqual(doubleTapHandle(controller, .holdActivated, at: 0.2), .switchedToToggle)
+        TestSupport.expectEqual(controller.activeMode, .toggle)
+        TestSupport.expectEqual(controller.handleDoubleTapTimeout(), nil)
+        TestSupport.expectEqual(doubleTapHandle(controller, .holdDeactivated, at: 0.3), nil)
+        TestSupport.expectEqual(controller.activeMode, .toggle)
+        TestSupport.expectEqual(doubleTapHandle(controller, .holdActivated, at: 5), .stop)
+        TestSupport.expectEqual(controller.activeMode, nil)
+        TestSupport.expectEqual(doubleTapHandle(controller, .holdDeactivated, at: 5.1), nil)
+    }
+
+    private static func testDoubleTapLatchedSessionStopsOnFirstToggleShortcutPress() {
+        let controller = DictationShortcutSessionController()
+        _ = doubleTapHandle(controller, .holdActivated, at: 0)
+        _ = doubleTapHandle(controller, .holdDeactivated, at: 0.1)
+        _ = doubleTapHandle(controller, .holdActivated, at: 0.2)
+        _ = doubleTapHandle(controller, .holdDeactivated, at: 0.3)
+        TestSupport.expectEqual(doubleTapHandle(controller, .toggleActivated, at: 5), .stop)
+    }
+
+    private static func testSingleTapStopsWhenDoubleTapWindowExpires() {
+        let controller = DictationShortcutSessionController()
+        _ = doubleTapHandle(controller, .holdActivated, at: 0)
+        _ = doubleTapHandle(controller, .holdDeactivated, at: 0.1)
+        TestSupport.expectEqual(controller.handleDoubleTapTimeout(), .stop)
+        TestSupport.expectEqual(controller.activeMode, nil)
+        TestSupport.expectEqual(controller.handleDoubleTapTimeout(), nil)
+    }
+
+    private static func testLongHoldStopsImmediatelyWithDoubleTapEnabled() {
+        let controller = DictationShortcutSessionController()
+        _ = doubleTapHandle(controller, .holdActivated, at: 0)
+        TestSupport.expectEqual(doubleTapHandle(controller, .holdDeactivated, at: 1), .stop)
+    }
+
+    private static func testToggleStartedSessionIgnoresHoldShortcut() {
+        let controller = DictationShortcutSessionController()
+        _ = doubleTapHandle(controller, .toggleActivated, at: 0)
+        TestSupport.expectEqual(doubleTapHandle(controller, .holdActivated, at: 1), nil)
+        TestSupport.expectEqual(doubleTapHandle(controller, .holdDeactivated, at: 1.1), nil)
+        TestSupport.expectEqual(doubleTapHandle(controller, .holdActivated, at: 2), nil)
+        TestSupport.expectEqual(controller.activeMode, .toggle)
+    }
+
+    /// Option stays down while only the grave key is tapped twice.
+    private static func testDoubleTapModifierChordThroughMatcher() {
+        let optionKeyCode: UInt16 = 58
+        let graveKeyCode: UInt16 = 50
+        let configuration = ShortcutConfiguration(
+            hold: ShortcutBinding(keyCode: graveKeyCode, keyDisplay: "`", modifiers: [.option], kind: .key, preset: nil),
+            toggle: .disabled
+        )
+        let controller = DictationShortcutSessionController()
+        var state = ShortcutInputState()
+        var actions: [DictationShortcutAction] = []
+        var now: TimeInterval = 0
+
+        let inputs: [ShortcutInputEvent] = [
+            .modifierChanged(keyCode: optionKeyCode, isDown: true),
+            .keyChanged(keyCode: graveKeyCode, isDown: true, isRepeat: false),
+            .keyChanged(keyCode: graveKeyCode, isDown: false, isRepeat: false),
+            .keyChanged(keyCode: graveKeyCode, isDown: true, isRepeat: false),
+            .keyChanged(keyCode: graveKeyCode, isDown: false, isRepeat: false),
+            .modifierChanged(keyCode: optionKeyCode, isDown: false),
+        ]
+        for input in inputs {
+            let result = ShortcutMatcher.reduce(state: state, event: input, configuration: configuration)
+            state = result.state
+            for event in result.emittedEvents {
+                if let action = doubleTapHandle(controller, event, at: now) {
+                    actions.append(action)
+                }
+            }
+            now += 0.1
+        }
+
+        TestSupport.expectEqual(actions, [
+            .start(.hold),
+            .awaitDoubleTap(DictationShortcutSessionController.doubleTapWindow),
+            .switchedToToggle,
+        ])
+        TestSupport.expectEqual(controller.activeMode, .toggle)
     }
 }
