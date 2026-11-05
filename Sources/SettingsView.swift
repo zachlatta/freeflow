@@ -41,8 +41,10 @@ private let iso8601DayFormatter: DateFormatter = {
 struct ProviderSettingsFields: View {
     @EnvironmentObject var appState: AppState
     @Binding var apiBaseURLInput: String
+    @Binding var apiKeyInput: String
     @Binding var transcriptionAPIURLInput: String
     @Binding var transcriptionAPIKeyInput: String
+    @State private var atlasPresetBlockedMessage: String?
     @FocusState private var isEditingAPIBaseURL: Bool
     @FocusState private var isEditingTranscriptionModel: Bool
     @FocusState private var isEditingRealtimeStreamingModel: Bool
@@ -65,7 +67,12 @@ struct ProviderSettingsFields: View {
 
     private func commitAPIBaseURL() {
         let trimmed = apiBaseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        apiBaseURLInput = trimmed.isEmpty ? AppState.defaultAPIBaseURL : trimmed
+        setDraftAPIBaseURL(trimmed.isEmpty ? AppState.defaultAPIBaseURL : trimmed)
+    }
+
+    private func setDraftAPIBaseURL(_ next: String) {
+        appState.keyValidationGate.invalidateIfEndpointChanged(from: apiBaseURLInput, to: next)
+        apiBaseURLInput = next
     }
 
     private func commitTranscriptionModel() {
@@ -142,6 +149,44 @@ struct ProviderSettingsFields: View {
         transcriptionAPIKeyInput = transcriptionAPIKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Prepares an Atlas configuration for Save/Continue without changing the
+    /// active API settings. The transcription draft keeps its effective pair.
+    private func applyAtlasCloudPreset() {
+        let current = ProviderSettingsSnapshot(
+            apiBaseURL: apiBaseURLInput,
+            apiKey: apiKeyInput,
+            transcriptionAPIURL: transcriptionAPIURLInput,
+            transcriptionAPIKey: transcriptionAPIKeyInput
+        ).normalizedDraft
+        if let blocker = ProviderPreset.blocker(for: current) {
+            atlasPresetBlockedMessage = blocker.message
+            return
+        }
+        atlasPresetBlockedMessage = nil
+        let application = ProviderPreset.applyingAtlasCloud(to: current, apiKeyDraft: apiKeyInput)
+        let next = application.settings
+        // Clear an unsaved previous-provider key even when the saved key was
+        // already empty and its onChange observer would not fire.
+        apiKeyInput = application.apiKeyDraft
+
+        // A key validation that is still running was started for the previous
+        // provider; its result must not be saved under the new endpoint.
+        appState.keyValidationGate.invalidate()
+
+        // Pin transcription before the LLM endpoint and key change.
+        transcriptionAPIURLInput = next.transcriptionAPIURL
+        transcriptionAPIKeyInput = next.transcriptionAPIKey
+
+        apiBaseURLInput = next.apiBaseURL
+
+        postProcessingModelDraft = ProviderPreset.atlasCloudModel
+        appState.postProcessingModel = ProviderPreset.atlasCloudModel
+        postProcessingFallbackModelDraft = ProviderPreset.atlasCloudModel
+        appState.postProcessingFallbackModel = ProviderPreset.atlasCloudModel
+        contextModelDraft = ProviderPreset.atlasCloudModel
+        appState.contextModel = ProviderPreset.atlasCloudModel
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("API Base URL")
@@ -166,9 +211,26 @@ struct ProviderSettingsFields: View {
                     }
 
                 Button("Reset to Default") {
-                    apiBaseURLInput = AppState.defaultAPIBaseURL
+                    setDraftAPIBaseURL(AppState.defaultAPIBaseURL)
                 }
                 .font(.caption)
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Button("Use Atlas Cloud") {
+                    applyAtlasCloudPreset()
+                }
+                .font(.caption)
+
+                Text("Sends cleanup and screenshot-context requests to api.atlascloud.ai with \(ProviderPreset.atlasCloudModel). Your key draft is cleared; enter an Atlas Cloud key above and save to apply the API settings. Transcription keeps using your previous provider, since Atlas Cloud has no transcription endpoint.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let message = atlasPresetBlockedMessage {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
             }
 
             if showsModelDescription {
@@ -976,7 +1038,7 @@ struct GeneralSettingsView: View {
                 .foregroundStyle(.secondary)
 
             HStack(spacing: 8) {
-                SecureField("Enter your Groq API key", text: $apiDraft.apiKey)
+                SecureField("Enter your API key", text: $apiDraft.apiKey)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(.body, design: .monospaced))
                     .disabled(isValidatingKey)
@@ -1002,6 +1064,7 @@ struct GeneralSettingsView: View {
                     Divider()
                     ProviderSettingsFields(
                         apiBaseURLInput: $apiDraft.baseURL,
+                        apiKeyInput: $apiDraft.apiKey,
                         transcriptionAPIURLInput: $apiDraft.transcriptionAPIURL,
                         transcriptionAPIKeyInput: $apiDraft.transcriptionAPIKey,
                         showsModelDescription: false
@@ -1028,6 +1091,7 @@ struct GeneralSettingsView: View {
         keyValidationError = nil
         successfulAPIConfiguration = nil
 
+        let token = appState.keyValidationGate.begin()
         Task { @MainActor in
             var accepted: ValidatedAPIConfiguration?
             let valid = await APIConfigurationSaveFlow.validateAndApply(
@@ -1036,15 +1100,19 @@ struct GeneralSettingsView: View {
                 transcriptionAPIURL: submission.configuration.transcriptionAPIURL,
                 transcriptionAPIKey: submission.configuration.transcriptionAPIKey
             ) { configuration in
-                if apiDraft.accept(configuration, for: submission) {
-                    accepted = configuration
+                // Never commit credentials validated for a different draft endpoint.
+                guard apiDraft.configuration.baseURL == submission.configuration.baseURL else { return }
+                appState.keyValidationGate.applyIfCurrent(token) {
+                    if apiDraft.accept(configuration, for: submission) {
+                        accepted = configuration
+                    }
+                    appState.updateAPIConfiguration(
+                        apiKey: configuration.apiKey,
+                        baseURL: configuration.baseURL,
+                        transcriptionAPIURL: configuration.transcriptionAPIURL,
+                        transcriptionAPIKey: configuration.transcriptionAPIKey
+                    )
                 }
-                appState.updateAPIConfiguration(
-                    apiKey: configuration.apiKey,
-                    baseURL: configuration.baseURL,
-                    transcriptionAPIURL: configuration.transcriptionAPIURL,
-                    transcriptionAPIKey: configuration.transcriptionAPIKey
-                )
             }
             guard apiDraft.isCurrent(submission) else { return }
             isValidatingKey = false

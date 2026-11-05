@@ -50,6 +50,60 @@ enum APIConfigurationDraftTests {
         testSuccessfulNormalizationAndStatus()
         testOldPresentationCannotCompleteNewPresentation()
         await testFailureDoesNotCommitOrReplaceNewEdits()
+        await testPresetRejectsPendingTransaction()
+    }
+
+    @MainActor
+    private static func testPresetRejectsPendingTransaction() async {
+        let original = configuration("previous")
+        var committed = original
+        var draft = APIConfigurationDraft()
+        draft.present(original)
+        let submission = draft.submission
+        let validationGate = KeyValidationGate()
+        let token = validationGate.begin()
+        let response = DraftValidationGate()
+        var didCommit = false
+        let validation = Task { @MainActor in
+            await APIConfigurationSaveFlow.validateAndApply(
+                apiKey: submission.configuration.apiKey,
+                baseURL: submission.configuration.baseURL,
+                transcriptionAPIURL: submission.configuration.transcriptionAPIURL,
+                transcriptionAPIKey: submission.configuration.transcriptionAPIKey,
+                validator: { _, _ in await response.validate() }
+            ) { saved in
+                validationGate.applyIfCurrent(token) {
+                    didCommit = true
+                    _ = draft.accept(saved, for: submission)
+                    committed = saved
+                }
+            }
+        }
+        await response.waitUntilStarted()
+        let application = ProviderPreset.applyingAtlasCloud(
+            to: ProviderSettingsSnapshot(
+                apiBaseURL: draft.baseURL,
+                apiKey: draft.apiKey,
+                transcriptionAPIURL: draft.transcriptionAPIURL,
+                transcriptionAPIKey: draft.transcriptionAPIKey
+            ),
+            apiKeyDraft: draft.apiKey
+        )
+        validationGate.invalidate()
+        draft.baseURL = application.settings.apiBaseURL
+        draft.apiKey = application.apiKeyDraft
+        draft.transcriptionAPIURL = application.settings.transcriptionAPIURL
+        draft.transcriptionAPIKey = application.settings.transcriptionAPIKey
+        TestSupport.expectEqual(committed, original)
+        TestSupport.expectEqual(draft.apiKey, "")
+        await response.finish(true)
+        let valid = await validation.value
+        TestSupport.expect(valid, "The old provider's synthetic validation succeeds")
+        TestSupport.expect(!didCommit, "Preset discards the complete old-provider transaction despite successful validation")
+        TestSupport.expectEqual(committed, original)
+        TestSupport.expectEqual(draft.baseURL, ProviderPreset.atlasCloudAPIBaseURL)
+        TestSupport.expectEqual(draft.apiKey, "")
+        TestSupport.expect(!draft.matches(submission), "The stale submission cannot advance Setup")
     }
 
     @MainActor
