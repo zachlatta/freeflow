@@ -612,6 +612,12 @@ Model: \(model)
         }
 
         let sanitizedTranscript = TranscriptOutputSanitizer.postProcessedTranscript(content)
+        if sanitizedTranscript.isEmpty,
+           TranscriptOutputSanitizer.shouldDistrustEmptyCleanup(rawTranscript: transcript) {
+            // Treat it like empty output: the fallback model gets one try, and if that also
+            // fails the caller inserts the raw transcript instead of nothing.
+            throw PostProcessingError.emptyOutput
+        }
         if instructionExecutionGuardEnabled && TranscriptOutputSanitizer.appearsToHaveExecutedInstruction(
             rawTranscript: transcript,
             cleanedTranscript: sanitizedTranscript,

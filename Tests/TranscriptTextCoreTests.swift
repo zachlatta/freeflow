@@ -9,6 +9,7 @@ enum TranscriptTextCoreTests {
         testPossibleRealSpeechIsPreserved()
         testPostProcessedTranscriptSanitization()
         testModeSpecificSanitization()
+        testEmptyCleanupIsDistrustedForSubstantiveSpeech()
         testInstructionExecutionGuard()
     }
 
@@ -87,6 +88,23 @@ enum TranscriptTextCoreTests {
         TestSupport.expectEqual(TranscriptOutputSanitizer.postProcessedTranscript("\"EMPTY\""), "")
         TestSupport.expectEqual(TranscriptOutputSanitizer.postProcessedTranscript("empty"), "empty")
         TestSupport.expectEqual(TranscriptOutputSanitizer.postProcessedTranscript("  \n "), "")
+    }
+
+    private static func testEmptyCleanupIsDistrustedForSubstantiveSpeech() {
+        for shortTranscript in ["", "Um, uh.", "Thanks for watching. Please subscribe.", "えーと，あのー"] {
+            TestSupport.expect(
+                !TranscriptOutputSanitizer.shouldDistrustEmptyCleanup(rawTranscript: shortTranscript),
+                "EMPTY should stay trusted for short filler or hallucinations: \(shortTranscript)"
+            )
+        }
+        let longEnglish = String(repeating: "Synthetic dictation sentence about a plan. ", count: 3)
+        let longJapanese = String(repeating: "これは合成した長い口述のテキストです", count: 4)
+        for longTranscript in [longEnglish, longJapanese] {
+            TestSupport.expect(
+                TranscriptOutputSanitizer.shouldDistrustEmptyCleanup(rawTranscript: longTranscript),
+                "EMPTY must not erase substantive speech"
+            )
+        }
     }
 
     private static func testModeSpecificSanitization() {
