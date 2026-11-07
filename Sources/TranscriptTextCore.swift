@@ -121,6 +121,15 @@ enum TranscriptOutputSanitizer {
         return result
     }
 
+    // EMPTY is meant for silence, filler, or a lone ASR hallucination. Models can
+    // still return it for long, real dictations, which would silently discard the
+    // whole transcript, so an EMPTY reply to this much speech is not trusted.
+    static let minimumCharactersToDistrustEmptyCleanup = 60
+
+    static func shouldDistrustEmptyCleanup(rawTranscript: String) -> Bool {
+        rawTranscript.filter { $0.isLetter || $0.isNumber }.count >= minimumCharactersToDistrustEmptyCleanup
+    }
+
     static func commandModeTranscript(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
     }

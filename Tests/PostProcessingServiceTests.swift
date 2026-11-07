@@ -10,6 +10,9 @@ enum PostProcessingServiceTests {
         testEnglishRequestIsUnchanged()
         testEmptyLatestContextStillProcessesCleanupAndCommand()
         testFallbackRefreshesContextForCleanupAndCommand()
+        testEmptySentinelForSubstantiveSpeechFallsBack()
+        testEmptySentinelFromBothModelsKeepsRawTranscript()
+        testEmptySentinelForShortSpeechIsTrusted()
     }
 
     private static let directive = "The dictation is primarily in Russian"
@@ -142,6 +145,31 @@ enum PostProcessingServiceTests {
         )
     }
 
+    private static let substantiveTranscript = String(
+        repeating: "Synthetic long dictation about planning the next research step. ", count: 2
+    )
+
+    private static func testEmptySentinelForSubstantiveSpeechFallsBack() {
+        let run = runCleanup(transcript: substantiveTranscript) { model in
+            model == "synthetic-primary" ? "EMPTY" : "Synthetic cleaned text."
+        }
+        TestSupport.expectEqual(run.result?.transcript, "Synthetic cleaned text.")
+        TestSupport.expectEqual(run.requests.map(\.model), ["synthetic-primary", "synthetic-fallback"])
+    }
+
+    private static func testEmptySentinelFromBothModelsKeepsRawTranscript() {
+        // A thrown error makes the caller insert the raw transcript.
+        let run = runCleanup(transcript: substantiveTranscript) { _ in "EMPTY" }
+        TestSupport.expect(run.result == nil, "Cleanup must fail instead of returning an empty transcript")
+        TestSupport.expectEqual(run.requests.map(\.model), ["synthetic-primary", "synthetic-fallback"])
+    }
+
+    private static func testEmptySentinelForShortSpeechIsTrusted() {
+        let run = runCleanup(transcript: "Um, uh.") { _ in "EMPTY" }
+        TestSupport.expectEqual(run.result?.transcript, "")
+        TestSupport.expectEqual(run.requests.map(\.model), ["synthetic-primary"])
+    }
+
     // MARK: - Request capture
 
     private struct CapturedRequest {
@@ -240,6 +268,22 @@ enum PostProcessingServiceTests {
                 context: makeContext(summary: "Stale snapshot"),
                 customVocabulary: "",
                 contextSummaryProvider: contextSummaryProvider
+            )
+        }
+        return ProcessingRun(result: result, requests: recorder.captured)
+    }
+
+    private static func runCleanup(
+        transcript: String,
+        reply: @escaping @Sendable (String) -> String
+    ) -> ProcessingRun {
+        let recorder = RequestRecorder()
+        let service = makeService(recorder: recorder, reply: reply)
+        let result = runService {
+            try await service.postProcess(
+                transcript: transcript,
+                context: makeContext(),
+                customVocabulary: ""
             )
         }
         return ProcessingRun(result: result, requests: recorder.captured)
