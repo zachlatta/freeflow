@@ -87,10 +87,14 @@ public struct ModelConfiguration {
                 shouldStripThinkTags: false
             )
         } else if cleanModel == "openai/gpt-oss-120b" {
+            // Without an explicit budget, Groq's default completion limit can be spent
+            // entirely on reasoning for long transcripts, leaving empty content. Groq also
+            // counts this budget toward tokens per minute, so a larger value would push a
+            // long dictation past the free tier's 8,000 TPM in a single request.
             return ModelConfig(
-                maxCompletionTokens: nil,
-                reasoningEffort: nil,
-                includeReasoning: nil,
+                maxCompletionTokens: 4096,
+                reasoningEffort: "low",
+                includeReasoning: false,
                 shouldStripThinkTags: false
             )
         } else if cleanModel == "openai/gpt-oss-safeguard-20b" {
@@ -109,8 +113,10 @@ public struct ModelConfiguration {
                 shouldStripThinkTags: true
             )
         } else if cleanModel == "qwen/qwen3.8-27b" || cleanModel == "qwen/qwen3.6-27b" {
+            // Room for long dictations, while prompt plus budget stays under the free
+            // tier's 8,000 tokens per minute (Groq counts the budget toward that limit).
             return ModelConfig(
-                maxCompletionTokens: nil,
+                maxCompletionTokens: 4096,
                 reasoningEffort: "none",
                 includeReasoning: false,
                 shouldStripThinkTags: true

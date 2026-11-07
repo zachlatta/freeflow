@@ -4,6 +4,7 @@ enum ModelConfigurationTests {
     static func run() {
         testProviderlessAliasesMatchCanonicalModels()
         testKnownModelSettingsRemainStable()
+        testCleanupRequestsSendExplicitCompletionBudgets()
         testModelListsAreConsistent()
         testThinkTagStripping()
         testGroqSelectionMigration()
@@ -24,7 +25,14 @@ enum ModelConfigurationTests {
         TestSupport.expectEqual(gptOSS.includeReasoning, false)
         TestSupport.expectEqual(gptOSS.shouldStripThinkTags, false)
 
+        let gptOSS120B = ModelConfiguration.config(for: "openai/gpt-oss-120b")
+        TestSupport.expectEqual(gptOSS120B.maxCompletionTokens, 4096)
+        TestSupport.expectEqual(gptOSS120B.reasoningEffort, "low")
+        TestSupport.expectEqual(gptOSS120B.includeReasoning, false)
+        TestSupport.expectEqual(gptOSS120B.shouldStripThinkTags, false)
+
         let qwen = ModelConfiguration.config(for: "qwen/qwen3.8-27b")
+        TestSupport.expectEqual(qwen.maxCompletionTokens, 4096)
         TestSupport.expectEqual(qwen.reasoningEffort, "none")
         TestSupport.expectEqual(qwen.includeReasoning, false)
         TestSupport.expectEqual(qwen.shouldStripThinkTags, true)
@@ -34,6 +42,25 @@ enum ModelConfigurationTests {
         TestSupport.expectEqual(unknown.reasoningEffort, nil)
         TestSupport.expectEqual(unknown.includeReasoning, nil)
         TestSupport.expectEqual(unknown.shouldStripThinkTags, false)
+    }
+
+    private static func testCleanupRequestsSendExplicitCompletionBudgets() {
+        let gptOSS120B = ModelConfiguration.nonContentRequestOptions(
+            model: "openai/gpt-oss-120b",
+            temperature: 0,
+            defaultModel: "openai/gpt-oss-20b"
+        )
+        TestSupport.expectEqual(gptOSS120B["max_completion_tokens"] as? Int, 4096)
+        TestSupport.expectEqual(gptOSS120B["reasoning_effort"] as? String, "low")
+        TestSupport.expectEqual(gptOSS120B["include_reasoning"] as? Bool, false)
+
+        let qwen = ModelConfiguration.nonContentRequestOptions(
+            model: "qwen/qwen3.8-27b",
+            temperature: 0,
+            defaultModel: "openai/gpt-oss-20b"
+        )
+        TestSupport.expectEqual(qwen["max_completion_tokens"] as? Int, 4096)
+        TestSupport.expectEqual(qwen["reasoning_effort"] as? String, "none")
     }
 
     private static func testModelListsAreConsistent() {
