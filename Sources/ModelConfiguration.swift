@@ -39,9 +39,7 @@ public struct ModelConfiguration {
         "openai/gpt-oss-20b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-safeguard-20b",
-        "qwen/qwen3.8-27b",
-        "MiniMax-M3.1-Flash",
-        "MiniMax-M3"
+        "qwen/qwen3.8-27b"
     ]
 
     // MARK: - Vision-capable models

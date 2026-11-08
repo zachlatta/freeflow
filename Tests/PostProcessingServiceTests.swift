@@ -8,7 +8,9 @@ enum PostProcessingServiceTests {
         testCustomPromptKeepsDirective()
         testFallbackModelReceivesSameDirective()
         testEnglishRequestIsUnchanged()
-        testMiniMaxRequestsPreserveSelectedModels()
+        testMiniMaxManualModelResponses()
+        testEmptyLatestContextStillProcessesCleanupAndCommand()
+        testFallbackRefreshesContextForCleanupAndCommand()
     }
 
     private static let directive = "The dictation is primarily in Russian"
@@ -83,10 +85,8 @@ enum PostProcessingServiceTests {
         TestSupport.expectEqual(requests.map(\.systemPrompt), [PostProcessingService.defaultSystemPrompt])
     }
 
-    private static func testMiniMaxRequestsPreserveSelectedModels() {
-        let firstMiniMax = ModelConfiguration.llmModels.first { $0.hasPrefix("MiniMax-") }
-        TestSupport.expectEqual(firstMiniMax, "MiniMax-M3.1-Flash")
-        for model in [firstMiniMax!, "MiniMax-M3", "MiniMax-M2.7", "synthetic/custom"] {
+    private static func testMiniMaxManualModelResponses() {
+        for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7"] {
             let requests = cleanupRequests(dictationLanguage: "English", preferredModel: model) { _ in
                 "Synthetic cleaned text."
             }
@@ -96,11 +96,79 @@ enum PostProcessingServiceTests {
                 TestSupport.expect(payload[key] == nil, "Unexpected request option for \(model): \(key)")
             }
             TestSupport.expectEqual((payload["messages"] as? [[String: Any]])?.count, 2)
+
+            let reasoningOnly = runCleanup(preferredModel: model) { _ in
+                "<think>Hidden reasoning only.</think>"
+            }
+            TestSupport.expect(reasoningOnly.result == nil, "Reasoning-only cleanup output must be rejected: \(model)")
+
+            let reasoningPlusAnswer = runCleanup(preferredModel: model) {
+                _ in "<think>Hidden reasoning.</think> Synthetic cleaned text."
+            }
+            TestSupport.expectEqual(reasoningPlusAnswer.result?.transcript, "Synthetic cleaned text.")
         }
         let defaultRequests = cleanupRequests(dictationLanguage: "English", preferredModel: "") { _ in
             "Synthetic cleaned text."
         }
         TestSupport.expectEqual(defaultRequests.map(\.model), ["openai/gpt-oss-20b"])
+    }
+
+    private static func testEmptyLatestContextStillProcessesCleanupAndCommand() {
+        let cleanup = runCleanup(
+            contextSummaryProvider: { "" },
+            reply: { _ in "Synthetic cleaned text." }
+        )
+        TestSupport.expectEqual(cleanup.result?.transcript, "Synthetic cleaned text.")
+        TestSupport.expectEqual(cleanup.requests.count, 1)
+        TestSupport.expect(
+            cleanup.requests.first?.userPrompt.contains("Stale snapshot") == false,
+            "Cleanup must omit invalidated context"
+        )
+
+        let command = runCommand(
+            contextSummaryProvider: { "" },
+            reply: { _ in "Synthetic transformed text." }
+        )
+        TestSupport.expectEqual(command.result?.transcript, "Synthetic transformed text.")
+        TestSupport.expectEqual(command.requests.count, 1)
+        TestSupport.expect(
+            command.requests.first?.userPrompt.contains("Stale snapshot") == false,
+            "Edit Mode must omit invalidated context"
+        )
+    }
+
+    private static func testFallbackRefreshesContextForCleanupAndCommand() {
+        let cleanupSummaries = SummarySequence(["Stale summary", ""])
+        let cleanup = runCleanup(
+            contextSummaryProvider: { await cleanupSummaries.next() },
+            reply: { model in model == "synthetic-primary" ? "" : "Synthetic cleaned text." }
+        )
+        TestSupport.expectEqual(cleanup.result?.transcript, "Synthetic cleaned text.")
+        TestSupport.expectEqual(cleanup.requests.map(\.model), ["synthetic-primary", "synthetic-fallback"])
+        TestSupport.expect(
+            cleanup.requests.first?.userPrompt.contains("Stale summary") == true,
+            "Primary cleanup request should use its current summary"
+        )
+        TestSupport.expect(
+            cleanup.requests.last?.userPrompt.contains("Stale summary") == false,
+            "Fallback cleanup request must omit invalidated context"
+        )
+
+        let commandSummaries = SummarySequence(["Stale summary", ""])
+        let command = runCommand(
+            contextSummaryProvider: { await commandSummaries.next() },
+            reply: { model in model == "synthetic-primary" ? "" : "Synthetic transformed text." }
+        )
+        TestSupport.expectEqual(command.result?.transcript, "Synthetic transformed text.")
+        TestSupport.expectEqual(command.requests.map(\.model), ["synthetic-primary", "synthetic-fallback"])
+        TestSupport.expect(
+            command.requests.first?.userPrompt.contains("Stale summary") == true,
+            "Primary Edit Mode request should use its current summary"
+        )
+        TestSupport.expect(
+            command.requests.last?.userPrompt.contains("Stale summary") == false,
+            "Fallback Edit Mode request must omit invalidated context"
+        )
     }
 
     // MARK: - Request capture
@@ -109,6 +177,24 @@ enum PostProcessingServiceTests {
         let model: String
         let systemPrompt: String
         let payload: [String: Any]
+        let userPrompt: String
+    }
+
+    private struct ProcessingRun {
+        let result: PostProcessingResult?
+        let requests: [CapturedRequest]
+    }
+
+    private actor SummarySequence {
+        private var summaries: [String]
+
+        init(_ summaries: [String]) {
+            self.summaries = summaries
+        }
+
+        func next() -> String {
+            summaries.isEmpty ? "" : summaries.removeFirst()
+        }
     }
 
     private final class RequestRecorder: @unchecked Sendable {
@@ -128,12 +214,31 @@ enum PostProcessingServiceTests {
                 let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] ?? [:]
                 let messages = json["messages"] as? [[String: Any]] ?? []
                 let system = messages.first { $0["role"] as? String == "system" }
+                let user = messages.first { $0["role"] as? String == "user" }
                 return CapturedRequest(
                     model: json["model"] as? String ?? "",
                     systemPrompt: system?["content"] as? String ?? "",
-                    payload: json
+                    payload: json,
+                    userPrompt: user?["content"] as? String ?? ""
                 )
             }
+        }
+    }
+
+    private final class ResultRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storedResult: PostProcessingResult?
+
+        func record(_ result: PostProcessingResult?) {
+            lock.lock()
+            defer { lock.unlock() }
+            storedResult = result
+        }
+
+        var result: PostProcessingResult? {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedResult
         }
     }
 
@@ -143,7 +248,60 @@ enum PostProcessingServiceTests {
         reply: @escaping @Sendable (String) -> String
     ) -> [CapturedRequest] {
         let recorder = RequestRecorder()
-        let service = PostProcessingService(
+        let service = makeService(recorder: recorder, preferredModel: preferredModel, reply: reply)
+        _ = runService {
+            try await service.postProcess(
+                transcript: "synthetic transcript",
+                context: makeContext(),
+                customVocabulary: "",
+                dictationLanguage: dictationLanguage
+            )
+        }
+        return recorder.captured
+    }
+
+    private static func runCleanup(
+        preferredModel: String = "synthetic-primary",
+        contextSummaryProvider: @escaping @Sendable () async -> String = { "" },
+        reply: @escaping @Sendable (String) -> String
+    ) -> ProcessingRun {
+        let recorder = RequestRecorder()
+        let service = makeService(recorder: recorder, preferredModel: preferredModel, reply: reply)
+        let result = runService {
+            try await service.postProcess(
+                transcript: "synthetic transcript",
+                context: makeContext(summary: "Stale snapshot"),
+                customVocabulary: "",
+                contextSummaryProvider: contextSummaryProvider
+            )
+        }
+        return ProcessingRun(result: result, requests: recorder.captured)
+    }
+
+    private static func runCommand(
+        contextSummaryProvider: @escaping @Sendable () async -> String,
+        reply: @escaping @Sendable (String) -> String
+    ) -> ProcessingRun {
+        let recorder = RequestRecorder()
+        let service = makeService(recorder: recorder, reply: reply)
+        let result = runService {
+            try await service.commandTransform(
+                selectedText: "Synthetic selected text.",
+                voiceCommand: "Shorten this.",
+                context: makeContext(summary: "Stale snapshot"),
+                customVocabulary: "",
+                contextSummaryProvider: contextSummaryProvider
+            )
+        }
+        return ProcessingRun(result: result, requests: recorder.captured)
+    }
+
+    private static func makeService(
+        recorder: RequestRecorder,
+        preferredModel: String = "synthetic-primary",
+        reply: @escaping @Sendable (String) -> String
+    ) -> PostProcessingService {
+        PostProcessingService(
             apiKey: "synthetic-key",
             baseURL: "https://example.invalid/v1",
             preferredModel: preferredModel,
@@ -159,30 +317,33 @@ enum PostProcessingServiceTests {
                 return (body, response)
             }
         )
-        let context = AppContext(
+    }
+
+    private static func runService(
+        _ operation: @escaping @Sendable () async throws -> PostProcessingResult
+    ) -> PostProcessingResult? {
+        let result = ResultRecorder()
+        let done = DispatchSemaphore(value: 0)
+        Task {
+            result.record(try? await operation())
+            done.signal()
+        }
+        done.wait()
+        return result.result
+    }
+
+    private static func makeContext(summary: String = "") -> AppContext {
+        AppContext(
             appName: nil,
             bundleIdentifier: nil,
             windowTitle: nil,
             selectedText: nil,
-            currentActivity: "",
+            currentActivity: summary,
             contextSystemPrompt: nil,
             contextPrompt: nil,
             screenshotDataURL: nil,
             screenshotMimeType: nil,
             screenshotError: nil
         )
-
-        let done = DispatchSemaphore(value: 0)
-        Task {
-            _ = try? await service.postProcess(
-                transcript: "synthetic transcript",
-                context: context,
-                customVocabulary: "",
-                dictationLanguage: dictationLanguage
-            )
-            done.signal()
-        }
-        done.wait()
-        return recorder.captured
     }
 }

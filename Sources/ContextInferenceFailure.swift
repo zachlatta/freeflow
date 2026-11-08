@@ -38,6 +38,7 @@ enum ContextInferenceFailure: Error {
             || value.hasPrefix("Could not reliably infer a two-sentence summary")
             || value.hasPrefix("Could not refresh app context at stop time;")
             || value == "You are dictating in an unrecognized context."
+            || value == "Active window context disabled."
     }
 
     static func promptSection(for summary: String) -> String {

@@ -7,6 +7,8 @@ struct AppSelectionSnapshot {
     let bundleIdentifier: String?
     let windowTitle: String?
     let selectedText: String?
+    let textInsertionTarget: AppTextInsertionTarget?
+    let usesOriginalFieldInsertion: Bool
 }
 
 struct AppContext {
@@ -93,29 +95,37 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         return trimmedPrompt.isEmpty ? Self.defaultContextPrompt : trimmedPrompt
     }
 
-    func collectSelectionSnapshot() -> AppSelectionSnapshot {
+    /// Captures the mode and optional target together; off skips insertion-target reads.
+    func collectSelectionSnapshot(captureInsertionTarget: Bool = false) -> AppSelectionSnapshot {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             return AppSelectionSnapshot(
                 appName: nil,
                 bundleIdentifier: nil,
                 windowTitle: nil,
-                selectedText: nil
+                selectedText: nil,
+                textInsertionTarget: nil,
+                usesOriginalFieldInsertion: captureInsertionTarget
             )
         }
 
         let appElement = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        let textInsertionTarget = captureInsertionTarget ? AppTextInsertionTarget.capture(
+            from: appElement, processIdentifier: frontmostApp.processIdentifier
+        ) : nil
         return AppSelectionSnapshot(
             appName: frontmostApp.localizedName,
             bundleIdentifier: frontmostApp.bundleIdentifier,
             windowTitle: focusedWindowTitle(from: appElement) ?? frontmostApp.localizedName,
-            selectedText: rawSelectedText(from: appElement)
+            selectedText: !captureInsertionTarget || textInsertionTarget != nil ? rawSelectedText(from: appElement) : nil,
+            textInsertionTarget: textInsertionTarget,
+            usesOriginalFieldInsertion: captureInsertionTarget
         )
     }
 
     func collectContext() async -> AppContext {
         let contextSystemPrompt = resolveContextPrompt()
 
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+        guard !Task.isCancelled, let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             return AppContext(
                 appName: nil,
                 bundleIdentifier: nil,
@@ -136,14 +146,16 @@ Return only two sentences, no labels, no markdown, no extra commentary.
 
         let windowTitle = focusedWindowTitle(from: appElement) ?? appName
         let selectedText = selectedText(from: appElement)
-        let screenshot = captureActiveWindowScreenshot(
-            processIdentifier: frontmostApp.processIdentifier,
-            appElement: appElement,
-            focusedWindowTitle: windowTitle
-        )
+        let screenshot = captureScreenshotIfNotCancelled {
+            captureActiveWindowScreenshot(
+                processIdentifier: frontmostApp.processIdentifier,
+                appElement: appElement,
+                focusedWindowTitle: windowTitle
+            )
+        }
         let currentActivity: String
         let contextPrompt: String?
-        if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !Task.isCancelled, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             switch await inferActivityWithLLM(
                 appName: appName,
                 bundleIdentifier: bundleIdentifier,
@@ -178,6 +190,15 @@ Return only two sentences, no labels, no markdown, no extra commentary.
         )
     }
 
+    func captureScreenshotIfNotCancelled(
+        using capture: () -> (dataURL: String?, mimeType: String?, error: String?)
+    ) -> (dataURL: String?, mimeType: String?, error: String?) {
+        guard !Task.isCancelled else {
+            return (nil, nil, "Context capture cancelled")
+        }
+        return capture()
+    }
+
     private func inferActivityWithLLM(
         appName: String?,
         bundleIdentifier: String?,
@@ -200,6 +221,7 @@ Return only two sentences, no labels, no markdown, no extra commentary.
 
         var lastFailure = ContextInferenceFailure.emptySummary
         for attempt in attempts {
+            guard !Task.isCancelled else { return .failure(.network) }
             switch await inferActivityWithLLM(
                 appName: appName,
                 bundleIdentifier: bundleIdentifier,

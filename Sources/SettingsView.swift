@@ -722,6 +722,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Cleanup", icon: "sparkles") {
                     cleanupSection
                 }
+                SettingsCard("Text insertion", icon: "text.cursor") {
+                    textInsertionSection
+                }
                 SettingsCard("Clipboard", icon: "doc.on.clipboard") {
                     clipboardSection
                 }
@@ -1119,6 +1122,17 @@ struct GeneralSettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle("Double-tap Hold to Talk to lock recording", isOn: $appState.doubleTapToToggleEnabled)
+                    .disabled(!appState.hasEnabledHoldShortcut)
+
+                Text("Keeps recording after you release, as if you had used Tap to Toggle. Press the shortcut again to stop. A single quick tap takes 0.3 seconds longer to stop.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -1270,13 +1284,67 @@ struct GeneralSettingsView: View {
 
     private var cleanupSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            Toggle("Use active window context", isOn: $appState.contextCaptureEnabled)
+
+            Text("Uses window context to help with names and terminology in new dictations. Turn off to skip their screenshots and context requests; accuracy may decrease. Edit Mode still uses selected text. The manual Context Prompt test asks before overriding this setting, and retrying history can reuse its saved context.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+
             Toggle("Preserve exact wording", isOn: $appState.preserveExactWording)
 
-            Text("When on, \(AppName.displayName) skips the LLM cleanup step and pastes the transcript verbatim — filler words, informal phrasing, and explicit language are all preserved. Voice macros and Edit Mode still run.")
+            Text("The default for dictation; each shortcut can override it below. When on, \(AppName.displayName) skips the LLM cleanup step and pastes the transcript verbatim — filler words, informal phrasing, and explicit language are all preserved. Voice macros and Edit Mode still run.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             Text("If Output Language is set, the transcript is still translated into that language, but the translation is literal: no rewording, no filler removal, no reformatting.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Shortcut overrides")
+                    .font(.caption.weight(.semibold))
+
+                Picker("Hold to Talk", selection: $appState.holdShortcutCleanupPreference) {
+                    Text("Use global setting").tag(ShortcutCleanupPreference.inherit)
+                    Text("Preserve exact wording").tag(ShortcutCleanupPreference.preserveExactWording)
+                    Text("Cleanup").tag(ShortcutCleanupPreference.cleanup)
+                }
+                .pickerStyle(.menu)
+
+                Picker("Tap to Toggle", selection: $appState.toggleShortcutCleanupPreference) {
+                    Text("Use global setting").tag(ShortcutCleanupPreference.inherit)
+                    Text("Preserve exact wording").tag(ShortcutCleanupPreference.preserveExactWording)
+                    Text("Cleanup").tag(ShortcutCleanupPreference.cleanup)
+                }
+                .pickerStyle(.menu)
+
+                Text("Use global setting follows Preserve exact wording above. Cleanup applies your rewording prompt. Each recording keeps its starting choice, even when switching from hold to toggle. Menu-bar recordings use the global setting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+        }
+    }
+
+    // MARK: Text insertion
+
+    private var textInsertionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Insert into the original field", isOn: $appState.originalFieldInsertionEnabled)
+
+            Text("Keep dictation in the field where recording began, even after switching apps. Off by default; applies to new dictations. Pasting or pressing Return may briefly bring the original app forward, then restore your previous focus when possible.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Divider()
+                .padding(.vertical, 2)
+
+            Toggle("Say \"press enter\" to submit after paste", isOn: $appState.isPressEnterVoiceCommandEnabled)
+
+            Text("When the transcription ends with \"press enter\", \(AppName.displayName) removes those words before cleanup, pastes the remaining transcript, then presses Return.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1298,15 +1366,6 @@ struct GeneralSettingsView: View {
             Toggle("Keep dictations in clipboard history", isOn: $appState.keepDictationInClipboardHistory)
 
             Text("When on, your clipboard manager (Paste, Raycast, Maccy, etc.) records each dictation so you can find it in your recent history. When off, \(AppName.displayName) marks dictations transient and your clipboard manager skips them.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            Divider()
-                .padding(.vertical, 2)
-
-            Toggle("Say \"press enter\" to submit after paste", isOn: $appState.isPressEnterVoiceCommandEnabled)
-
-            Text("When the transcription ends with \"press enter\", \(AppName.displayName) removes those words before cleanup, pastes the remaining transcript, then presses Return.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -1537,6 +1596,7 @@ struct PromptsSettingsView: View {
     @State private var systemTestPrompt: String? = nil
 
     // Context prompt test state
+    @State private var showContextTestConfirmation = false
     @State private var contextTestRunning = false
     @State private var contextTestOutput: String? = nil
     @State private var contextTestError: String? = nil
@@ -1974,12 +2034,12 @@ struct PromptsSettingsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Test Context Prompt")
                     .font(.caption.weight(.semibold))
-                Text("Captures a screenshot and metadata from the frontmost app, then runs the context prompt to infer activity.")
+                Text("This manual test captures a screenshot and metadata from the frontmost app and sends them to your configured context provider. If active-window capture fails and full-desktop fallback is enabled, the screenshot may include the full desktop, including other apps. The test runs independently of the dictation setting. If active window context is off, you will be asked to confirm this one test.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
                 Button {
-                    runContextPromptTest()
+                    requestContextPromptTest()
                 } label: {
                     HStack(spacing: 6) {
                         if contextTestRunning {
@@ -1993,6 +2053,14 @@ struct PromptsSettingsView: View {
                     }
                 }
                 .disabled(contextTestRunning || appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .alert("Run context test while context is off?", isPresented: $showContextTestConfirmation) {
+                    Button("Cancel", role: .cancel) { }
+                    Button("Run One Test") {
+                        runContextPromptTest()
+                    }
+                } message: {
+                    Text("This one test will capture a screenshot and app metadata and send them to your configured context provider. If active-window capture fails and full-desktop fallback is enabled, the screenshot may include the full desktop, including other apps. Your dictation setting will stay off.")
+                }
 
                 if appState.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Label("API key required to test", systemImage: "exclamationmark.triangle")
@@ -2031,6 +2099,14 @@ struct PromptsSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    private func requestContextPromptTest() {
+        if appState.contextCaptureEnabled {
+            runContextPromptTest()
+        } else {
+            showContextTestConfirmation = true
         }
     }
 

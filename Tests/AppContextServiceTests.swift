@@ -1,15 +1,16 @@
 import Foundation
 
 enum AppContextServiceTests {
-    static func run() {
+    static func run() async {
         testDesktopFallbackPreferencePersistence()
         testDesktopFallbackCaptureBoundary()
+        await testCancellationSkipsScreenshotAfterMetadata()
         testQwenRawOutputIsSummarized()
         testQwenReasoningOutputIsStripped()
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
-        testMiniMaxModelsArePredefinedAndStripThinkTags()
+        testMiniMaxManualModelsStripThinkTags()
         testInferenceFailureDiagnostics()
         testContextRequestBudget()
         testFailedSummariesStayOutOfPostProcessing()
@@ -58,6 +59,34 @@ enum AppContextServiceTests {
         }
         TestSupport.expect(failed.dataURL == nil && failed.mimeType == nil, "Failed fallback must remain image-free")
         TestSupport.expectEqual(failed.error, "Synthetic capture failure")
+    }
+
+    private static func testCancellationSkipsScreenshotAfterMetadata() async {
+        let service = AppContextService(apiKey: "")
+        let enabled = service.captureScreenshotIfNotCancelled {
+            ("synthetic-image", "image/jpeg", nil)
+        }
+        TestSupport.expectEqual(enabled.dataURL, "synthetic-image")
+
+        let task = Task {
+            var captureCalls = 0
+            // Model cancellation arriving during a synchronous metadata read.
+            let collectMetadata = {
+                withUnsafeCurrentTask { $0?.cancel() }
+                return "Synthetic window"
+            }
+            let windowTitle = collectMetadata()
+            let screenshot = service.captureScreenshotIfNotCancelled {
+                captureCalls += 1
+                return (windowTitle, "image/jpeg", nil)
+            }
+            return (captureCalls, screenshot)
+        }
+        let (captureCalls, screenshot) = await task.value
+        TestSupport.expectEqual(captureCalls, 0)
+        TestSupport.expect(screenshot.dataURL == nil && screenshot.mimeType == nil,
+                           "Cancellation after metadata must skip capture and return no screenshot")
+        TestSupport.expectEqual(screenshot.error, "Context capture cancelled")
     }
 
     private static func testQwenRawOutputIsSummarized() {
@@ -135,19 +164,10 @@ enum AppContextServiceTests {
         TestSupport.expect(custom["reasoning_effort"] == nil, "Unknown providers should not receive reasoning options")
     }
 
-    private static func testMiniMaxModelsArePredefinedAndStripThinkTags() {
-        guard let flashIndex = ModelConfiguration.llmModels.firstIndex(of: "MiniMax-M3.1-Flash"),
-              let m3Index = ModelConfiguration.llmModels.firstIndex(of: "MiniMax-M3") else {
-            TestSupport.expect(false, "MiniMax models are missing from the picker")
-            return
-        }
-        TestSupport.expect(m3Index == flashIndex + 1, "MiniMax-M3 should follow MiniMax-M3.1-Flash")
-        TestSupport.expect(ModelConfiguration.llmModels.contains("MiniMax-M3.1-Flash"), "MiniMax-M3.1-Flash is missing from the picker")
-        TestSupport.expect(ModelConfiguration.llmModels.contains("MiniMax-M3"), "MiniMax-M3 is missing from the picker")
-        TestSupport.expect(!ModelConfiguration.llmModels.contains("MiniMax-M2.7"), "Retired MiniMax-M2.7 remains in the picker")
+    private static func testMiniMaxManualModelsStripThinkTags() {
+        let miniMaxModels = ModelConfiguration.llmModels.filter { $0.lowercased().contains("minimax") }
+        TestSupport.expect(miniMaxModels.isEmpty, "MiniMax IDs must not be suggested for the default endpoint")
 
-        let miniMaxModels = ModelConfiguration.llmModels.filter { $0.hasPrefix("MiniMax-") }
-        TestSupport.expect(miniMaxModels == ["MiniMax-M3.1-Flash", "MiniMax-M3"], "Unexpected ordinary MiniMax choices")
         for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7", "  minimax-m3.1-flash  "] {
             let config = ModelConfiguration.config(for: model)
             TestSupport.expect(config.shouldStripThinkTags, "MiniMax model should strip think tags: \(model)")
@@ -157,17 +177,36 @@ enum AppContextServiceTests {
         }
         TestSupport.expect(!ModelConfiguration.config(for: "custom-model").shouldStripThinkTags, "Custom model behavior changed")
 
-        let reasoningOutput = """
-        <think>
-        Hidden reasoning should never reach the transcript.
-        </think>
-        Cleaned transcript text.
-        """
         for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7"] {
-            let summary = AppContextService.activitySummary(from: reasoningOutput, model: model)
-            TestSupport.expect(summary?.contains("Hidden reasoning") == false, "MiniMax reasoning leaked into summary: \(model)")
-            TestSupport.expect(summary?.contains("Cleaned transcript text.") == true, "MiniMax summary dropped the transcript text: \(model)")
+            let reasoningOnly = AppContextService.inferenceResult(
+                data: inferenceResponse("<think>Hidden reasoning only.</think>"),
+                status: 200,
+                model: model,
+                prompt: "synthetic-prompt"
+            )
+            guard case .failure(let error) = reasoningOnly else {
+                fatalError("Reasoning-only MiniMax context output was accepted: \(model)")
+            }
+            TestSupport.expectEqual(error.summary, ContextInferenceFailure.emptySummary.summary)
+
+            let reasoningPlusAnswer = AppContextService.inferenceResult(
+                data: inferenceResponse("<think>Hidden reasoning.</think> Cleaned context text."),
+                status: 200,
+                model: model,
+                prompt: "synthetic-prompt"
+            )
+            guard case .success(let result) = reasoningPlusAnswer else {
+                fatalError("MiniMax context answer was rejected: \(model)")
+            }
+            TestSupport.expectEqual(result.activity, "Cleaned context text.")
+            TestSupport.expectEqual(result.prompt, "synthetic-prompt")
         }
+    }
+
+    private static func inferenceResponse(_ content: String) -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "choices": [["message": ["content": content]]]
+        ])
     }
 
     private static func testInferenceFailureDiagnostics() {
@@ -206,7 +245,8 @@ enum AppContextServiceTests {
             ContextInferenceFailure.missingAPIKey.summary,
             "Could not reliably infer a two-sentence summary for SyntheticApp from the screenshot and metadata.",
             "Could not refresh app context at stop time; using text-only post-processing.",
-            "You are dictating in an unrecognized context."
+            "You are dictating in an unrecognized context.",
+            "Active window context disabled."
         ]
         for summary in failures {
             let context = AppContext(
