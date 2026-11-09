@@ -8,6 +8,7 @@ enum PostProcessingServiceTests {
         testCustomPromptKeepsDirective()
         testFallbackModelReceivesSameDirective()
         testEnglishRequestIsUnchanged()
+        testMiniMaxManualModelResponses()
         testEmptyLatestContextStillProcessesCleanupAndCommand()
         testFallbackRefreshesContextForCleanupAndCommand()
     }
@@ -84,6 +85,38 @@ enum PostProcessingServiceTests {
         TestSupport.expectEqual(requests.map(\.systemPrompt), [PostProcessingService.defaultSystemPrompt])
     }
 
+    private static func testMiniMaxManualModelResponses() {
+        for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7"] {
+            let requests = cleanupRequests(dictationLanguage: "English", preferredModel: model) { _ in
+                "Synthetic cleaned text."
+            }
+            TestSupport.expectEqual(requests.map(\.model), [model])
+            let payload = requests[0].payload
+            for key in ["reasoning_effort", "include_reasoning", "thinking", "service_tier", "max_completion_tokens"] {
+                TestSupport.expect(payload[key] == nil, "Unexpected request option for \(model): \(key)")
+            }
+            TestSupport.expectEqual((payload["messages"] as? [[String: Any]])?.count, 2)
+
+            let reasoningOnly = runCleanup(preferredModel: model) { requestedModel in
+                // The generic fallback does not strip MiniMax reasoning tags.
+                // Make it empty so this test verifies rejection of the primary
+                // response without treating the fallback as another MiniMax model.
+                requestedModel == model ? "<think>Hidden reasoning only.</think>" : ""
+            }
+            TestSupport.expect(reasoningOnly.result == nil, "Reasoning-only cleanup output must be rejected: \(model)")
+            TestSupport.expectEqual(reasoningOnly.requests.map(\.model), [model, "synthetic-fallback"])
+
+            let reasoningPlusAnswer = runCleanup(preferredModel: model) {
+                _ in "<think>Hidden reasoning.</think> Synthetic cleaned text."
+            }
+            TestSupport.expectEqual(reasoningPlusAnswer.result?.transcript, "Synthetic cleaned text.")
+        }
+        let defaultRequests = cleanupRequests(dictationLanguage: "English", preferredModel: "") { _ in
+            "Synthetic cleaned text."
+        }
+        TestSupport.expectEqual(defaultRequests.map(\.model), ["openai/gpt-oss-20b"])
+    }
+
     private static func testEmptyLatestContextStillProcessesCleanupAndCommand() {
         let cleanup = runCleanup(
             contextSummaryProvider: { "" },
@@ -147,6 +180,7 @@ enum PostProcessingServiceTests {
     private struct CapturedRequest {
         let model: String
         let systemPrompt: String
+        let payload: [String: Any]
         let userPrompt: String
     }
 
@@ -188,6 +222,7 @@ enum PostProcessingServiceTests {
                 return CapturedRequest(
                     model: json["model"] as? String ?? "",
                     systemPrompt: system?["content"] as? String ?? "",
+                    payload: json,
                     userPrompt: user?["content"] as? String ?? ""
                 )
             }
@@ -213,10 +248,11 @@ enum PostProcessingServiceTests {
 
     private static func cleanupRequests(
         dictationLanguage: String,
+        preferredModel: String = "synthetic-primary",
         reply: @escaping @Sendable (String) -> String
     ) -> [CapturedRequest] {
         let recorder = RequestRecorder()
-        let service = makeService(recorder: recorder, reply: reply)
+        let service = makeService(recorder: recorder, preferredModel: preferredModel, reply: reply)
         _ = runService {
             try await service.postProcess(
                 transcript: "synthetic transcript",
@@ -229,11 +265,12 @@ enum PostProcessingServiceTests {
     }
 
     private static func runCleanup(
-        contextSummaryProvider: @escaping @Sendable () async -> String,
+        preferredModel: String = "synthetic-primary",
+        contextSummaryProvider: @escaping @Sendable () async -> String = { "" },
         reply: @escaping @Sendable (String) -> String
     ) -> ProcessingRun {
         let recorder = RequestRecorder()
-        let service = makeService(recorder: recorder, reply: reply)
+        let service = makeService(recorder: recorder, preferredModel: preferredModel, reply: reply)
         let result = runService {
             try await service.postProcess(
                 transcript: "synthetic transcript",
@@ -265,12 +302,13 @@ enum PostProcessingServiceTests {
 
     private static func makeService(
         recorder: RequestRecorder,
+        preferredModel: String = "synthetic-primary",
         reply: @escaping @Sendable (String) -> String
     ) -> PostProcessingService {
         PostProcessingService(
             apiKey: "synthetic-key",
             baseURL: "https://example.invalid/v1",
-            preferredModel: "synthetic-primary",
+            preferredModel: preferredModel,
             preferredFallbackModel: "synthetic-fallback",
             transport: { request in
                 recorder.record(request.httpBody)

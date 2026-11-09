@@ -10,6 +10,7 @@ enum AppContextServiceTests {
         testNonStrippingModelPreservesExistingBehavior()
         testDeprecatedGroqModelsAreNotPredefined()
         testQwenCleanupDisablesReasoning()
+        testMiniMaxManualModelsStripThinkTags()
         testInferenceFailureDiagnostics()
         testContextRequestBudget()
         testFailedSummariesStayOutOfPostProcessing()
@@ -161,6 +162,51 @@ enum AppContextServiceTests {
         let custom = AppContextService.inferenceRequestOptions(for: "synthetic/custom")
         TestSupport.expectEqual(custom["max_completion_tokens"] as? Int, 512)
         TestSupport.expect(custom["reasoning_effort"] == nil, "Unknown providers should not receive reasoning options")
+    }
+
+    private static func testMiniMaxManualModelsStripThinkTags() {
+        let miniMaxModels = ModelConfiguration.llmModels.filter { $0.lowercased().contains("minimax") }
+        TestSupport.expect(miniMaxModels.isEmpty, "MiniMax IDs must not be suggested for the default endpoint")
+
+        for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7", "  minimax-m3.1-flash  "] {
+            let config = ModelConfiguration.config(for: model)
+            TestSupport.expect(config.shouldStripThinkTags, "MiniMax model should strip think tags: \(model)")
+            TestSupport.expect(config.reasoningEffort == nil, "MiniMax should retain provider reasoning defaults")
+            TestSupport.expect(config.includeReasoning == nil, "MiniMax should not disable adaptive thinking")
+            TestSupport.expect(config.maxCompletionTokens == nil, "MiniMax should retain provider token defaults")
+        }
+        TestSupport.expect(!ModelConfiguration.config(for: "custom-model").shouldStripThinkTags, "Custom model behavior changed")
+
+        for model in ["MiniMax-M3.1-Flash", "MiniMax-M3", "MiniMax-M2.7"] {
+            let reasoningOnly = AppContextService.inferenceResult(
+                data: inferenceResponse("<think>Hidden reasoning only.</think>"),
+                status: 200,
+                model: model,
+                prompt: "synthetic-prompt"
+            )
+            guard case .failure(let error) = reasoningOnly else {
+                fatalError("Reasoning-only MiniMax context output was accepted: \(model)")
+            }
+            TestSupport.expectEqual(error.summary, ContextInferenceFailure.emptySummary.summary)
+
+            let reasoningPlusAnswer = AppContextService.inferenceResult(
+                data: inferenceResponse("<think>Hidden reasoning.</think> Cleaned context text."),
+                status: 200,
+                model: model,
+                prompt: "synthetic-prompt"
+            )
+            guard case .success(let result) = reasoningPlusAnswer else {
+                fatalError("MiniMax context answer was rejected: \(model)")
+            }
+            TestSupport.expectEqual(result.activity, "Cleaned context text.")
+            TestSupport.expectEqual(result.prompt, "synthetic-prompt")
+        }
+    }
+
+    private static func inferenceResponse(_ content: String) -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "choices": [["message": ["content": content]]]
+        ])
     }
 
     private static func testInferenceFailureDiagnostics() {

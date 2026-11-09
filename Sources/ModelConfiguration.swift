@@ -185,6 +185,30 @@ public struct ModelConfiguration {
                 includeReasoning: nil,
                 shouldStripThinkTags: false
             )
+        } else if cleanModel == "minimax-m3.1-flash" {
+            // MiniMax-M3.1-Flash uses adaptive thinking; remove reasoning tags from transcripts.
+            return ModelConfig(
+                maxCompletionTokens: nil,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
+            )
+        } else if cleanModel == "minimax-m3" {
+            // MiniMax-M3 may emit adaptive thinking; remove reasoning tags from transcripts.
+            return ModelConfig(
+                maxCompletionTokens: nil,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
+            )
+        } else if cleanModel == "minimax-m2.7" {
+            // Preserve reasoning cleanup for saved or manually entered legacy models.
+            return ModelConfig(
+                maxCompletionTokens: nil,
+                reasoningEffort: nil,
+                includeReasoning: nil,
+                shouldStripThinkTags: true
+            )
         } else if cleanModel == "whisper-large-v3" {
             return ModelConfig(
                 maxCompletionTokens: nil,
