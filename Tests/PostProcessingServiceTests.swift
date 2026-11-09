@@ -97,10 +97,14 @@ enum PostProcessingServiceTests {
             }
             TestSupport.expectEqual((payload["messages"] as? [[String: Any]])?.count, 2)
 
-            let reasoningOnly = runCleanup(preferredModel: model) { _ in
-                "<think>Hidden reasoning only.</think>"
+            let reasoningOnly = runCleanup(preferredModel: model) { requestedModel in
+                // The generic fallback does not strip MiniMax reasoning tags.
+                // Make it empty so this test verifies rejection of the primary
+                // response without treating the fallback as another MiniMax model.
+                requestedModel == model ? "<think>Hidden reasoning only.</think>" : ""
             }
             TestSupport.expect(reasoningOnly.result == nil, "Reasoning-only cleanup output must be rejected: \(model)")
+            TestSupport.expectEqual(reasoningOnly.requests.map(\.model), [model, "synthetic-fallback"])
 
             let reasoningPlusAnswer = runCleanup(preferredModel: model) {
                 _ in "<think>Hidden reasoning.</think> Synthetic cleaned text."
