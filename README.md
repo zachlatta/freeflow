@@ -9,7 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="https://ayushpatnaikgit.github.io/tellwell/">Website</a>
+  <a href="https://ayushpatnaikgit.github.io/tellwell/">Website</a> ·
+  <a href="https://github.com/ayushpatnaikgit/tellwell-android">TellWell for Android</a>
 </p>
 
 Install TellWell and its on-device engine (Apple Silicon, macOS 14+) with one command:

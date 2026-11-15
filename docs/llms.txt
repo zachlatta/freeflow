@@ -19,10 +19,22 @@ subscription or API key. Current version: 0.2.2 (updated 2026-11-13).
 - Install: `curl -fsSL https://ayushpatnaikgit.github.io/tellwell/install.sh | sh` (downloads about 2 GB of models once).
 - Made by Ayush Patnaik; a fork of FreeFlow by Zach Latta.
 
+## TellWell for Android
+
+- A free, open-source voice typing keyboard for Android 10+ (64-bit), version 0.1.0. It works alongside Gboard: tap
+  the globe key, talk, tap, and it types clean text and switches back.
+- Speech to text (NVIDIA Parakeet TDT 0.6B v3) and cleanup (S1-mini FreeFlow Cleanup, Q4_0) run on the phone; cleanup
+  uses the Snapdragon NPU, else the Snapdragon GPU, else the CPU. About one second from tap to text on a Motorola
+  Edge 70.
+- Internet is used only to download the models once (about 1 GB), verified by SHA-256. No account, no analytics.
+- Page: https://ayushpatnaikgit.github.io/tellwell/android/
+- Download: https://github.com/ayushpatnaikgit/tellwell-android/releases/latest/download/TellWell.apk
+
 ## Links
 
 - [Website](https://ayushpatnaikgit.github.io/tellwell/): features, examples, comparison with cloud dictation, FAQ
 - [Source code and releases](https://github.com/ayushpatnaikgit/tellwell): the TellWell app (Swift, MIT)
+- [TellWell for Android](https://github.com/ayushpatnaikgit/tellwell-android): the Android voice keyboard (Kotlin, MIT)
 - [freeflow-local](https://github.com/ayushpatnaikgit/freeflow-local): the on-device engine TellWell uses
 - [FreeFlow](https://github.com/zachlatta/freeflow): the app TellWell is based on
 

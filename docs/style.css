@@ -231,3 +231,8 @@ dialog#film .close { position: absolute; right: -6px; top: -46px; width: 36px; h
 .hero-actions .watch { margin: 0; text-decoration: none; }
 .watch.star span[aria-hidden] { background: transparent; color: #e3a008; font-size: 18px; width: 22px; padding: 0; }
 .star-ask { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+
+/* Android page: a large download button and a portrait demo video */
+.btn.big { min-height: 60px; padding: 16px 34px; font-size: 19px; border-radius: 16px; }
+.hero-actions + .hero-actions { margin-top: 14px; }
+dialog#film.portrait { width: min(400px, 88vw, 46vh); }
