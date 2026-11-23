@@ -1421,32 +1421,53 @@ struct GeneralSettingsView: View {
             .disabled(!appState.alertSoundsEnabled)
             .opacity(appState.alertSoundsEnabled ? 1 : 0.5)
 
-            HStack(spacing: 8) {
-                Button("Preview") {
-                    let muted = SystemAudioStatus.isDefaultOutputMuted()
-                    let volume = SystemAudioStatus.defaultOutputVolume()
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        showMutedHint = muted || (volume ?? 1) < 0.10
-                    }
-                    appState.playAlertSound(named: "Tink")
+            VStack(alignment: .leading, spacing: 6) {
+                feedbackSoundRow(.recordingStart, selection: $appState.recordingStartSound)
+                feedbackSoundRow(.recordingStop, selection: $appState.recordingStopSound)
+                feedbackSoundRow(.error, selection: $appState.errorSound)
+            }
+            .disabled(!appState.alertSoundsEnabled)
+            .opacity(appState.alertSoundsEnabled ? 1 : 0.5)
+
+            if showMutedHint {
+                HStack(spacing: 4) {
+                    Image(systemName: "speaker.slash.fill")
+                        .foregroundStyle(.orange)
+                    Text("System volume is muted or very low. Unmute to hear the preview.")
+                        .foregroundStyle(.secondary)
                 }
                 .font(.caption)
-                .disabled(!appState.alertSoundsEnabled)
-
-                if showMutedHint {
-                    HStack(spacing: 4) {
-                        Image(systemName: "speaker.slash.fill")
-                            .foregroundStyle(.orange)
-                        Text("System volume is muted or very low. Unmute to hear the preview.")
-                            .foregroundStyle(.secondary)
-                    }
-                    .font(.caption)
-                    .transition(.opacity)
-                }
+                .transition(.opacity)
             }
         }
         .onChange(of: appState.alertSoundsEnabled) { enabled in
             if !enabled { showMutedHint = false }
+        }
+    }
+
+    private func feedbackSoundRow(_ event: FeedbackSoundEvent, selection: Binding<String>) -> some View {
+        HStack(spacing: 8) {
+            Text(event.displayName)
+                .font(.caption)
+            Spacer()
+            Picker(event.displayName, selection: selection) {
+                ForEach(FeedbackSoundPreference.selectableValues, id: \.self) { value in
+                    Text(FeedbackSoundPreference.displayName(for: value)).tag(value)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 130)
+            Button("Preview") {
+                let muted = SystemAudioStatus.isDefaultOutputMuted()
+                let volume = SystemAudioStatus.defaultOutputVolume()
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showMutedHint = muted || (volume ?? 1) < 0.10
+                }
+                appState.playFeedbackSound(selection.wrappedValue, for: event)
+            }
+            .font(.caption)
+            .disabled(selection.wrappedValue == FeedbackSoundPreference.noneValue)
+            .accessibilityLabel("Preview \(event.displayName.lowercased()) sound")
         }
     }
 
