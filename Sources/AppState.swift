@@ -1794,6 +1794,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         hotkeyManager.onEscapeKeyPressed = { [weak self] in
             self?.handleEscapeKeyPress() ?? false
         }
+        hotkeyManager.shouldClaimFnHoldPress = { [weak self] in
+            self?.shortcutSessionController.claimsHoldShortcutPresses ?? false
+        }
         restartHotkeyMonitoring()
     }
 
@@ -1823,6 +1826,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         hotkeyMonitoringErrorMessage = nil
         hotkeyManager.onShortcutEvent = nil
         hotkeyManager.onEscapeKeyPressed = nil
+        hotkeyManager.shouldClaimFnHoldPress = nil
         hotkeyManager.stop()
     }
 
@@ -2036,6 +2040,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
         }
     }
 
+    private func effectiveShortcutStartDelay(for mode: RecordingTriggerMode) -> TimeInterval {
+        ShortcutStartDelayPolicy.effectiveDelay(
+            for: mode,
+            holdBinding: activeShortcutConfiguration.hold,
+            configuredDelay: shortcutStartDelay
+        )
+    }
+
     /// Invalidates prior insertion actions before taking the new start-time snapshot, including during delays.
     private func scheduleShortcutStart(mode: RecordingTriggerMode) {
         textInsertionTargetID = nil
@@ -2045,7 +2057,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             commandModeManualModifier.shortcutModifier
         )
         pendingShortcutStartMode = mode
-        let delay = shortcutStartDelay
+        let delay = effectiveShortcutStartDelay(for: mode)
 
         guard delay > 0 else {
             pendingShortcutStartMode = nil

@@ -93,6 +93,20 @@ struct ShortcutConfiguration: Equatable {
     }
 
     static let disabled = ShortcutConfiguration(hold: .disabled, toggle: .disabled, copyAgain: .disabled)
+
+    /// A copy of this configuration with the hold binding disabled. Used when
+    /// deciding whether Fn/Globe events may be consumed: hold-to-talk must not
+    /// consume Fn, otherwise macOS never sees the key and the system Globe
+    /// action (e.g. "Press globe to: Change Input Source") can never fire.
+    /// See `ShortcutMatcher.reduce` for the call site.
+    var withHoldBindingDisabled: ShortcutConfiguration {
+        ShortcutConfiguration(
+            hold: .disabled,
+            toggle: toggle,
+            copyAgain: copyAgain,
+            permittedAdditionalExactMatchModifiers: permittedAdditionalExactMatchModifiers
+        )
+    }
 }
 
 enum ShortcutPreset: String, CaseIterable, Identifiable, Codable {
@@ -193,9 +207,11 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         modifierDisplayNames.count
     }
 
+    static let fnKeyCode: UInt16 = 63
+
     var usesFnKey: Bool {
         guard !isDisabled else { return false }
-        return keyCode == 63 || modifiers.contains(.function)
+        return keyCode == Self.fnKeyCode || modifiers.contains(.function)
     }
 
     var requiresExactModifierMatch: Bool {

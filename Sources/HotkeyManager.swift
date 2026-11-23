@@ -10,6 +10,9 @@ final class HotkeyManager {
 
     var onShortcutEvent: ((ShortcutEvent) -> Void)?
     var onEscapeKeyPressed: (() -> Bool)?
+    /// Asked on each new Fn press whether the hold binding should consume it
+    /// instead of passing it through to macOS (see `ShortcutMatcher.reduce`).
+    var shouldClaimFnHoldPress: (() -> Bool)?
 
     var currentPressedModifiers: ShortcutModifiers {
         inputState.currentModifiers
@@ -53,7 +56,8 @@ final class HotkeyManager {
         let result = ShortcutMatcher.reduce(
             state: inputState,
             event: event,
-            configuration: configuration
+            configuration: configuration,
+            claimFnHoldPress: shouldClaimFnHoldPress?() ?? false
         )
         inputState = result.state
         for event in result.emittedEvents {
