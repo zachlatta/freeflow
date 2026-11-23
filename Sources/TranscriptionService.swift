@@ -56,10 +56,31 @@ class TranscriptionService {
         "whisper-large-v3-turbo"
     ]
 
+    /// Models whose `/audio/transcriptions` endpoint documents a free-text
+    /// `prompt` field. Anything else, including unknown models on custom
+    /// endpoints, never receives a prompt so a strict server cannot reject
+    /// the upload because of it.
+    private static let modelsSupportingPrompt: Set<String> = [
+        // OpenAI documents `prompt` for whisper-1 and the gpt-4o transcribe family.
+        "whisper-1",
+        "gpt-4o-transcribe",
+        "gpt-4o-mini-transcribe",
+        // Groq documents `prompt` (up to 224 tokens) for its hosted Whisper models.
+        "whisper-large-v3",
+        "whisper-large-v3-turbo"
+    ]
+
+    /// Whisper only reads the final 224 tokens of a prompt. Whisper and the
+    /// gpt-4o transcribe models use byte-level BPE tokenizers, which never
+    /// produce more tokens than the text has UTF-8 bytes, so a 224-byte cap is
+    /// a guaranteed bound for every script, not a character-count heuristic.
+    static let maxPromptUTF8Bytes = 224
+
     private let apiKey: String
     private let baseURL: URL
     private let transcriptionModel: String
     private let language: String?
+    private let prompt: String?
     private var transcriptionResponseFormat: String {
         Self.responseFormat(forModel: transcriptionModel)
     }
@@ -72,7 +93,8 @@ class TranscriptionService {
         apiKey: String,
         baseURL: String = "https://api.groq.com/openai/v1",
         transcriptionModel: String = "whisper-large-v3",
-        language: String? = nil
+        language: String? = nil,
+        customVocabulary: String? = nil
     ) throws {
         self.apiKey = apiKey
         self.baseURL = try Self.normalizedBaseURL(from: baseURL)
@@ -80,6 +102,42 @@ class TranscriptionService {
         self.transcriptionModel = trimmedModel.isEmpty ? "whisper-large-v3" : trimmedModel
         let trimmedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.language = (trimmedLanguage?.isEmpty == false) ? trimmedLanguage : nil
+        self.prompt = Self.transcriptionPrompt(forModel: self.transcriptionModel, customVocabulary: customVocabulary)
+    }
+
+    static func supportsPrompt(forModel model: String) -> Bool {
+        let normalizedModel = model.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return modelsSupportingPrompt.contains(normalizedModel)
+    }
+
+    /// Returns the vocabulary spelling hint to send as the transcription
+    /// `prompt`, or nil when the model does not document `prompt` support or
+    /// the vocabulary is empty.
+    static func transcriptionPrompt(forModel model: String, customVocabulary: String?) -> String? {
+        guard supportsPrompt(forModel: model) else { return nil }
+        return vocabularyPrompt(fromVocabulary: customVocabulary)
+    }
+
+    /// Builds a comma-separated list of unique vocabulary terms in the order
+    /// the user wrote them. Terms are added until the next one would push the
+    /// prompt past `maxUTF8Bytes`; that term and every later one are dropped,
+    /// so the result is deterministic and earlier terms take priority.
+    static func vocabularyPrompt(fromVocabulary raw: String?, maxUTF8Bytes: Int = maxPromptUTF8Bytes) -> String? {
+        guard let raw else { return nil }
+        var seen = Set<String>()
+        let terms = raw
+            .split(whereSeparator: { $0 == "\n" || $0 == "," || $0 == ";" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+
+        var prompt = ""
+        for term in terms {
+            let candidate = prompt.isEmpty ? term : prompt + ", " + term
+            // Reserve one byte for the trailing period.
+            guard candidate.utf8.count + 1 <= maxUTF8Bytes else { break }
+            prompt = candidate
+        }
+        return prompt.isEmpty ? nil : prompt + "."
     }
 
     static func responseFormat(forModel model: String) -> String {
@@ -174,12 +232,13 @@ class TranscriptionService {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let audioData = try Data(contentsOf: fileURL)
-        let body = makeMultipartBody(
+        let body = Self.makeMultipartBody(
             audioData: audioData,
             fileName: fileURL.lastPathComponent,
             model: transcriptionModel,
             responseFormat: transcriptionResponseFormat,
             language: language,
+            prompt: prompt,
             boundary: boundary
         )
 
@@ -226,7 +285,7 @@ class TranscriptionService {
 
         return try parseTranscript(from: data)
     }
-    private func audioContentType(for fileName: String) -> String {
+    private static func audioContentType(for fileName: String) -> String {
         if fileName.lowercased().hasSuffix(".wav") {
             return "audio/wav"
         }
@@ -244,12 +303,13 @@ class TranscriptionService {
         return (attributes?[.size] as? NSNumber)?.int64Value ?? -1
     }
 
-    private func makeMultipartBody(
+    static func makeMultipartBody(
         audioData: Data,
         fileName: String,
         model: String,
         responseFormat: String,
         language: String?,
+        prompt: String?,
         boundary: String
     ) -> Data {
         var body = Data()
@@ -270,6 +330,12 @@ class TranscriptionService {
             append("--\(boundary)\r\n")
             append("Content-Disposition: form-data; name=\"language\"\r\n\r\n")
             append("\(language)\r\n")
+        }
+
+        if let prompt, !prompt.isEmpty {
+            append("--\(boundary)\r\n")
+            append("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n")
+            append("\(prompt)\r\n")
         }
 
         append("--\(boundary)\r\n")

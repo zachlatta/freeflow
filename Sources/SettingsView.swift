@@ -1461,7 +1461,7 @@ struct GeneralSettingsView: View {
 
     private var vocabularySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Words and phrases to preserve during post-processing.")
+            Text("Words and phrases to spell correctly. Post-processing uses the full list. For uploaded-audio transcription with Whisper or GPT-4o Transcribe models, the first terms (up to 224 bytes) are also sent as a spelling hint. Realtime streaming does not receive this hint.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
