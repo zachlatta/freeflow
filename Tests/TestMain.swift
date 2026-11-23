@@ -13,6 +13,7 @@ struct FreeFlowTests {
         ShortcutCleanupPreferenceTests.run()
         OriginalFieldInsertionPreferenceTests.run()
         ShortcutCoreTests.run()
+        MouseButtonShortcutTests.run()
         SemanticVersionTests.run()
         LLMCooldownManagerTests.run()
         PostProcessingServiceTests.run()

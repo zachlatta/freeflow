@@ -3,10 +3,13 @@ import AppKit
 final class LocalShortcutCaptureBackend {
     private var localFlagsMonitor: Any?
     private var localKeyDownMonitor: Any?
+    private var localOtherMouseMonitor: Any?
     private var pressedModifierKeyCodes: Set<UInt16> = []
 
     var onInputEvent: ((ShortcutInputEvent) -> Void)?
     var onKeyDownEvent: ((NSEvent) -> Void)?
+    /// Called with the zero-based button number of a middle or side button press.
+    var onMouseButtonDownEvent: ((Int) -> Void)?
 
     func start() {
         stop()
@@ -24,9 +27,24 @@ final class LocalShortcutCaptureBackend {
             self?.handleKeyDown(event)
             return nil
         }
+
+        // Only middle/side buttons are monitored; left and right clicks keep
+        // working normally (e.g. on Done and Cancel) while recording.
+        localOtherMouseMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.otherMouseDown, .otherMouseUp]
+        ) { [weak self] event in
+            if event.type == .otherMouseDown {
+                self?.onMouseButtonDownEvent?(event.buttonNumber)
+            }
+            return nil
+        }
     }
 
     func stop() {
+        if let monitor = localOtherMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        localOtherMouseMonitor = nil
         if let monitor = localKeyDownMonitor {
             NSEvent.removeMonitor(monitor)
         }

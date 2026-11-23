@@ -1019,7 +1019,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
         guard let data = UserDefaults.standard.data(forKey: key) else {
             return StoredShortcutLoadResult(binding: nil, hadStoredValue: false, didNormalize: false)
         }
-        guard let decoded = try? JSONDecoder().decode(ShortcutBinding.self, from: data) else {
+        guard let decoded = try? JSONDecoder().decode(ShortcutBinding.self, from: data),
+              decoded.isSupported else {
             return StoredShortcutLoadResult(binding: nil, hadStoredValue: true, didNormalize: false)
         }
         let normalized = decoded.normalizedForStorageMigration()
@@ -1683,6 +1684,10 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @discardableResult
     func setShortcut(_ binding: ShortcutBinding, for role: ShortcutRole) -> String? {
         let binding = binding.normalizedForStorageMigration()
+
+        guard binding.isSupported else {
+            return "Left and right clicks can't be shortcuts. Use a middle or side mouse button."
+        }
 
         if role == .hold || role == .toggle {
             let otherDictationBinding = role == .hold ? toggleShortcut : holdShortcut

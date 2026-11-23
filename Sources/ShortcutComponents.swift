@@ -228,7 +228,7 @@ private struct ShortcutCaptureRow: View {
             if isCapturing {
                 Label(
                     currentBinding == nil
-                        ? "Press and hold the shortcut you want."
+                        ? "Press the shortcut you want, or a middle or side mouse button over this window."
                         : "Press Esc or Enter to save.",
                     systemImage: "keyboard"
                 )
@@ -291,6 +291,15 @@ private struct ShortcutCaptureRow: View {
 
             currentBinding = binding
         }
+        backend.onMouseButtonDownEvent = { buttonNumber in
+            guard let binding = ShortcutBinding.fromMouseButton(
+                buttonNumber,
+                pressedModifierKeyCodes: captureInputState.pressedModifierKeyCodes
+            ) else {
+                return
+            }
+            currentBinding = binding
+        }
         backend.start()
         captureBackend = backend
     }
@@ -332,7 +341,7 @@ private struct ShortcutCaptureRow: View {
         if isCapturing {
             return currentBinding == nil ? "Recording shortcut…" : "Recorded shortcut"
         }
-        return savedBinding == nil ? "Record any key combo." : "Saved custom shortcut"
+        return savedBinding == nil ? "Record a key combo or mouse button." : "Saved custom shortcut"
     }
 
     private var displayedBindingUsesMonospace: Bool {
