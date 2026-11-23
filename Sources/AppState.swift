@@ -2810,22 +2810,9 @@ final class AppState: ObservableObject, @unchecked Sendable {
         fileService: TranscriptionService,
         fileURL: URL
     ) async throws -> String {
-        if let realtimeService {
-            do {
-                try Task.checkCancellation()
-                return try await withTaskCancellationHandler {
-                    try await realtimeService.commitAndAwaitFinal()
-                } onCancel: {
-                    realtimeService.cancel()
-                }
-            } catch is CancellationError {
-                throw CancellationError()
-            } catch {
-                try Task.checkCancellation()
-                return try await fileService.transcribe(fileURL: fileURL)
-            }
+        try await RealtimeTranscriptFallback.resolve(realtime: realtimeService) {
+            try await fileService.transcribe(fileURL: fileURL)
         }
-        return try await fileService.transcribe(fileURL: fileURL)
     }
 
     private func stopAndTranscribe() {

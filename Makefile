@@ -26,6 +26,9 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/ModelConfiguration.swift \
 	Sources/OriginalFieldInsertionPreference.swift \
 	Sources/PostProcessingService.swift \
+	Sources/RealtimeFinalizationAwaiter.swift \
+	Sources/RealtimeTranscriptFallback.swift \
+	Sources/RealtimeTranscriptionService.swift \
 	Sources/RecordingCaptureTiming.swift \
 	Sources/RecordingTimerPreference.swift \
 	Sources/ShortcutCleanupPreference.swift \
