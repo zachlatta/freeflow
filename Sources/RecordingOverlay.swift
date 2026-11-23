@@ -644,18 +644,12 @@ struct WaveformView: View {
     }
 
     private func barAmplitude(for index: Int, pulseTime: TimeInterval?) -> CGFloat {
-        let level = CGFloat(max(audioLevel, 0))
-        let baseAmplitude = min(level * Self.multipliers[index], 1.0)
-
-        guard let pulseTime else { return baseAmplitude }
-
-        let travelingWave = CGFloat(0.5 + 0.5 * sin((pulseTime * 6.2) - Double(index) * 0.78))
-        let shimmer = CGFloat(0.5 + 0.5 * sin((pulseTime * 3.1) + Double(index) * 0.5))
-        let pulse = travelingWave * 0.22 + shimmer * 0.06
-
-        let saturationRelief = baseAmplitude * (0.74 + pulse)
-        let quietPulse = (1.0 - baseAmplitude) * (0.04 + pulse * 0.28)
-        return min(saturationRelief + quietPulse, 1.0)
+        WaveformAmplitude.barAmplitude(
+            level: audioLevel,
+            multiplier: Self.multipliers[index],
+            index: index,
+            pulseTime: pulseTime
+        )
     }
 
     private func barResponse(for index: Int) -> Double {
@@ -705,15 +699,12 @@ struct CompactWaveformView: View {
     }
 
     private func amplitude(for index: Int, pulseTime: TimeInterval?) -> CGFloat {
-        let level = CGFloat(max(audioLevel, 0))
-        let base = min(level * Self.multipliers[index], 1.0)
-        guard let pulseTime else { return base }
-        let traveling = CGFloat(0.5 + 0.5 * sin((pulseTime * 6.2) - Double(index) * 0.78))
-        let shimmer = CGFloat(0.5 + 0.5 * sin((pulseTime * 3.1) + Double(index) * 0.5))
-        let pulse = traveling * 0.22 + shimmer * 0.06
-        let saturationRelief = base * (0.74 + pulse)
-        let quietPulse = (1.0 - base) * (0.04 + pulse * 0.28)
-        return min(saturationRelief + quietPulse, 1.0)
+        WaveformAmplitude.barAmplitude(
+            level: audioLevel,
+            multiplier: Self.multipliers[index],
+            index: index,
+            pulseTime: pulseTime
+        )
     }
 }
 
