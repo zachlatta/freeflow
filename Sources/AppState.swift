@@ -213,6 +213,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private let savedToggleCustomShortcutStorageKey = "saved_toggle_custom_shortcut"
     private let savedCopyAgainCustomShortcutStorageKey = "saved_copy_again_custom_shortcut"
     private let customVocabularyStorageKey = "custom_vocabulary"
+    private let transcriptCorrectionsStorageKey = "transcript_corrections"
     private let transcriptionLanguageStorageKey = "transcription_language"
     private let selectedMicrophoneStorageKey = "selected_microphone_id"
     private let customSystemPromptStorageKey = "custom_system_prompt"
@@ -413,6 +414,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
     @Published var customVocabulary: String {
         didSet {
             UserDefaults.standard.set(customVocabulary, forKey: customVocabularyStorageKey)
+        }
+    }
+
+    /// User-defined "heard -> replacement" rules, one per line. Stored only
+    /// in local UserDefaults. See TranscriptCorrectionCore.swift.
+    @Published var transcriptCorrections: String {
+        didSet {
+            UserDefaults.standard.set(transcriptCorrections, forKey: transcriptCorrectionsStorageKey)
         }
     }
 
@@ -723,6 +732,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             fallback: shortcuts.copyAgain.isCustom ? shortcuts.copyAgain : nil
         )
         let customVocabulary = UserDefaults.standard.string(forKey: customVocabularyStorageKey) ?? ""
+        let transcriptCorrections = UserDefaults.standard.string(forKey: transcriptCorrectionsStorageKey) ?? ""
         let transcriptionLanguage = Self.normalizeTranscriptionLanguage(
             UserDefaults.standard.string(forKey: transcriptionLanguageStorageKey) ?? ""
         )
@@ -837,6 +847,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         self.commandModeStyle = commandModeStyle
         self.commandModeManualModifier = commandModeManualModifier
         self.customVocabulary = customVocabulary
+        self.transcriptCorrections = transcriptCorrections
         self.transcriptionLanguage = transcriptionLanguage
         self.customSystemPrompt = customSystemPrompt
         self.customContextPrompt = customContextPrompt
@@ -1326,6 +1337,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             instructionExecutionGuardEnabled: instructionExecutionGuardEnabled
         )
         let capturedCustomVocabulary = customVocabulary
+        let capturedTranscriptCorrections = transcriptCorrections
         let capturedCustomSystemPrompt = customSystemPrompt
 
         Task {
@@ -1350,6 +1362,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                     context: restoredContext,
                     postProcessingService: postProcessingService,
                     customVocabulary: capturedCustomVocabulary,
+                    transcriptCorrections: capturedTranscriptCorrections,
                     customSystemPrompt: capturedCustomSystemPrompt,
                     outputLanguage: self.outputLanguage,
                     dictationLanguage: Self.dictationLanguageName(for: self.transcriptionLanguage),
@@ -2710,6 +2723,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         context: AppContext,
         postProcessingService: PostProcessingService,
         customVocabulary: String,
+        transcriptCorrections: String,
         customSystemPrompt: String,
         outputLanguage: String = "",
         dictationLanguage: String = "",
@@ -2754,6 +2768,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return (macro.payload, .voiceMacro(command: macro.command), "")
         }
 
+        // Dictionary corrections are user-defined and deterministic, so they
+        // apply to every dictation output below: cleanup, cleanup failure
+        // fallback, preserve-exact-wording (verbatim and translated), and
+        // history retries. They run on the raw transcript before any model
+        // sees it, so translation receives the corrected words. Edit Mode
+        // and voice macros return earlier and are intentionally untouched;
+        // the history keeps the uncorrected raw transcript.
+        let correctedTranscript = TranscriptCorrector(rulesText: transcriptCorrections)
+            .apply(trimmedRawTranscript)
+
         // Preserve-exact-wording mode. Two sub-cases so translation
         // stays honored:
         //
@@ -2768,11 +2792,11 @@ final class AppState: ObservableObject, @unchecked Sendable {
         if preserveExactWording {
             let targetLanguage = outputLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
             if targetLanguage.isEmpty {
-                return (trimmedRawTranscript, .preservedExactWording, "")
+                return (correctedTranscript, .preservedExactWording, "")
             }
             do {
                 let result = try await postProcessingService.translateVerbatim(
-                    transcript: trimmedRawTranscript,
+                    transcript: correctedTranscript,
                     targetLanguage: targetLanguage
                 )
                 return (result.transcript, .preservedExactWordingTranslated, result.prompt)
@@ -2780,15 +2804,18 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 os_log(.error, log: recordingLog,
                        "Verbatim translation failed: %{public}@",
                        error.localizedDescription)
-                return (trimmedRawTranscript, .preservedExactWordingTranslationFailedFallback, "")
+                return (correctedTranscript, .preservedExactWordingTranslationFailedFallback, "")
             }
         }
 
         do {
             let result = try await postProcessingService.postProcess(
-                transcript: trimmedRawTranscript,
+                transcript: correctedTranscript,
                 context: context,
-                customVocabulary: customVocabulary,
+                customVocabulary: TranscriptCorrector.vocabulary(
+                    customVocabulary,
+                    addingHintsFrom: transcriptCorrections
+                ),
                 customSystemPrompt: customSystemPrompt,
                 outputLanguage: outputLanguage,
                 dictationLanguage: dictationLanguage,
@@ -2797,7 +2824,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
             return (result.transcript, .postProcessingSucceeded, result.prompt)
         } catch {
             os_log(.error, log: recordingLog, "Post-processing failed: %{public}@", error.localizedDescription)
-            return (trimmedRawTranscript, .postProcessingFailedFallback, "")
+            return (correctedTranscript, .postProcessingFailedFallback, "")
         }
     }
 
@@ -2833,6 +2860,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         cancelRecordingInitializationTimer()
         shortcutSessionController.reset()
         let preserveExactWordingForSession = shortcutCleanupSession.preserveExactWording ?? preserveExactWording
+        let transcriptCorrectionsForSession = transcriptCorrections
         shortcutCleanupSession.reset()
         let textInsertionTarget = activeTextInsertionTarget
         let useOriginalFieldInsertion = activeOriginalFieldInsertionEnabled
@@ -2952,6 +2980,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
                         context: appContext,
                         postProcessingService: postProcessingService,
                         customVocabulary: self.customVocabulary,
+                        transcriptCorrections: transcriptCorrectionsForSession,
                         customSystemPrompt: self.customSystemPrompt,
                         outputLanguage: self.outputLanguage,
                         dictationLanguage: Self.dictationLanguageName(for: self.transcriptionLanguage),
