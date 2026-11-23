@@ -143,8 +143,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         })
         .environmentObject(appState)
 
+        // Fit the wizard on short or scaled displays so its navigation
+        // buttons stay on screen (#342).
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let contentHeight = SetupWindowLayout.contentHeight(
+            forVisibleScreenHeight: screen?.visibleFrame.height
+        )
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: SetupWindowLayout.contentWidth, height: contentHeight),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -152,8 +158,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.title = AppName.displayName
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
-        window.contentView = NSHostingView(rootView: setupView)
-        window.minSize = NSSize(width: 520, height: 680)
+        let hostingView = NSHostingView(rootView: setupView)
+        // Let the window, not SwiftUI's ideal size, decide the height.
+        hostingView.sizingOptions = [.minSize]
+        window.contentView = hostingView
+        window.minSize = NSSize(width: SetupWindowLayout.contentWidth, height: SetupWindowLayout.minimumContentHeight)
         window.center()
         window.makeKeyAndOrderFront(nil)
         window.isReleasedWhenClosed = false

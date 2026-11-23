@@ -9,6 +9,7 @@ private struct SetupProviderSettingsSheet: View {
     @Binding var apiBaseURLInput: String
     @Binding var transcriptionAPIURLInput: String
     @Binding var transcriptionAPIKeyInput: String
+    var height: CGFloat
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,7 +47,10 @@ private struct SetupProviderSettingsSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 560, height: 520)
+        .frame(width: SetupWindowLayout.providerSheetWidth, height: height)
+        .onExitCommand {
+            dismiss()
+        }
     }
 }
 
@@ -79,6 +83,7 @@ struct SetupView: View {
     @State private var isValidatingKey = false
     @State private var keyValidationError: String?
     @State private var showingProviderSettingsSheet = false
+    @State private var setupContentHeight = SetupWindowLayout.preferredContentHeight
     @State private var accessibilityTimer: Timer?
     @State private var screenRecordingTimer: Timer?
     @State private var customVocabularyInput: String = ""
@@ -111,10 +116,17 @@ struct SetupView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            currentStepView
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.horizontal, 40)
-                .padding(.vertical, 32)
+            // Scroll the step when it is taller than the window so the
+            // navigation footer below always stays visible (#342).
+            GeometryReader { proxy in
+                ScrollView(.vertical) {
+                    currentStepView
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 32)
+                        .frame(minHeight: proxy.size.height)
+                }
+            }
 
             Divider()
 
@@ -190,7 +202,19 @@ struct SetupView: View {
             .padding(20)
             .background(Color(nsColor: .windowBackgroundColor))
         }
-        .frame(width: 520, height: 680)
+        .frame(width: SetupWindowLayout.contentWidth)
+        .frame(
+            minHeight: SetupWindowLayout.minimumContentHeight,
+            idealHeight: SetupWindowLayout.preferredContentHeight,
+            maxHeight: .infinity
+        )
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { setupContentHeight = proxy.size.height }
+                    .onChange(of: proxy.size.height) { setupContentHeight = $0 }
+            }
+        )
         .onAppear {
             apiDraft.present(appState.committedAPIConfiguration)
             isValidatingKey = false
@@ -212,7 +236,8 @@ struct SetupView: View {
             SetupProviderSettingsSheet(
                 apiBaseURLInput: $apiDraft.baseURL,
                 transcriptionAPIURLInput: $apiDraft.transcriptionAPIURL,
-                transcriptionAPIKeyInput: $apiDraft.transcriptionAPIKey
+                transcriptionAPIKeyInput: $apiDraft.transcriptionAPIKey,
+                height: SetupWindowLayout.providerSheetHeight(forParentContentHeight: setupContentHeight)
             )
                 .environmentObject(appState)
         }
@@ -741,7 +766,7 @@ struct SetupView: View {
 
                 TextEditor(text: $customVocabularyInput)
                     .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 130)
+                    .frame(minHeight: 130, idealHeight: 240)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
