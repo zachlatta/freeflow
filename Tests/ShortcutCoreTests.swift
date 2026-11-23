@@ -14,6 +14,7 @@ enum ShortcutCoreTests {
         testConflictDetection()
         testHoldSessionControllerLifecycle()
         testToggleSessionControllerLifecycle()
+        testManualToggleStartStopsOnFirstShortcutPress()
         testHoldToToggleSessionControllerLifecycle()
         testDoubleTapIsOffByDefault()
         testDoubleTapLatchesAndHoldShortcutStops()
@@ -334,6 +335,27 @@ enum ShortcutCoreTests {
         TestSupport.expectEqual(controller.toggleStopArmed, true)
         TestSupport.expectEqual(controller.handle(event: .toggleActivated, isTranscribing: false), .stop)
         TestSupport.expectEqual(controller.activeMode, nil)
+    }
+
+    private static func testManualToggleStartStopsOnFirstShortcutPress() {
+        // Regression for #314: a menu-bar start never saw a toggle press and
+        // release, so the first toggle shortcut press must stop recording.
+        let controller = DictationShortcutSessionController()
+        controller.beginManual(mode: .toggle)
+        TestSupport.expectEqual(controller.activeMode, .toggle)
+        TestSupport.expectEqual(controller.handle(event: .toggleActivated, isTranscribing: false), .stop)
+        TestSupport.expectEqual(controller.activeMode, nil)
+
+        // A hold-shortcut press must still not stop a manually started toggle session.
+        controller.beginManual(mode: .toggle)
+        TestSupport.expectEqual(controller.handle(event: .holdActivated, isTranscribing: false), nil)
+        TestSupport.expectEqual(controller.handle(event: .holdDeactivated, isTranscribing: false), nil)
+        TestSupport.expectEqual(controller.activeMode, .toggle)
+
+        // Manual hold sessions keep toggle stop disarmed.
+        controller.beginManual(mode: .hold)
+        TestSupport.expectEqual(controller.toggleStopArmed, false)
+        controller.reset()
     }
 
     private static func testHoldToToggleSessionControllerLifecycle() {
