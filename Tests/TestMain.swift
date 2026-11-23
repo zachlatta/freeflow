@@ -10,6 +10,7 @@ struct FreeFlowTests {
         ModelConfigurationTests.run()
         RecordingCaptureTimingTests.run()
         RecordingTimerPreferenceTests.run()
+        PipelineHistoryRetryPolicyTests.run()
         ShortcutCleanupPreferenceTests.run()
         OriginalFieldInsertionPreferenceTests.run()
         ShortcutCoreTests.run()

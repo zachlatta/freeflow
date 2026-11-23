@@ -2203,7 +2203,7 @@ struct RunLogEntryView: View {
     @State private var copiedCleanedTranscriptResetWorkItem: DispatchWorkItem?
 
     private var isError: Bool {
-        item.postProcessingStatus.hasPrefix("Error:")
+        PipelineHistoryRetryPolicy.isFailure(status: item.postProcessingStatus)
     }
 
     private var copyableTranscript: String {
@@ -2278,7 +2278,7 @@ struct RunLogEntryView: View {
                 .buttonStyle(.plain)
 
                 HStack(spacing: 4) {
-                    if isError && item.audioFileName != nil {
+                    if PipelineHistoryRetryPolicy.canRetry(item) {
                         Button {
                             appState.retryTranscription(item: item)
                         } label: {

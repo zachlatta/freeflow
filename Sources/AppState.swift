@@ -2007,6 +2007,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
     private func cancelTranscription() {
         guard isTranscribing else { return }
 
+        let cancelledSessionIntent = currentSessionIntent
+        let cancelledAudioFileName = transcribingAudioFileName
         textInsertionTargetID = nil
         transcriptionTask?.cancel()
         transcriptionTask = nil
@@ -2025,9 +2027,32 @@ final class AppState: ObservableObject, @unchecked Sendable {
         statusText = "Cancelled"
         overlayManager.dismiss()
         audioRecorder.cleanup()
-        if let transcribingAudioFileName {
-            Self.deleteAudioFile(transcribingAudioFileName)
-            self.transcribingAudioFileName = nil
+        transcribingAudioFileName = nil
+        if let cancelledAudioFileName {
+            // Keep the saved recording and record a failed run so it can be
+            // retried from Run Log. It is removed with the entry by the normal
+            // history delete, clear, and trim paths.
+            recordPipelineHistoryEntry(
+                rawTranscript: "",
+                postProcessedTranscript: "",
+                postProcessingPrompt: "",
+                systemPrompt: Self.resolvedSystemPrompt(customSystemPrompt),
+                context: AppContext(
+                    appName: nil,
+                    bundleIdentifier: nil,
+                    windowTitle: nil,
+                    selectedText: nil,
+                    currentActivity: "",
+                    contextSystemPrompt: nil,
+                    contextPrompt: nil,
+                    screenshotDataURL: nil,
+                    screenshotMimeType: nil,
+                    screenshotError: PipelineHistoryRetryPolicy.cancelledScreenshotStatus
+                ),
+                processingStatus: PipelineHistoryRetryPolicy.cancelledTranscriptionStatus,
+                intent: cancelledSessionIntent,
+                audioFileName: cancelledAudioFileName
+            )
         }
         endCriticalDictationActivity()
         refreshAvailableMicrophonesIfNeeded()
