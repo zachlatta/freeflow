@@ -532,6 +532,8 @@ struct GeneralSettingsView: View {
     @State private var successfulAPIConfiguration: ValidatedAPIConfiguration?
     @State private var customVocabularyInput: String = ""
     @FocusState private var customVocabularyFocused: Bool
+    @State private var transcriptCorrectionsInput: String = ""
+    @FocusState private var transcriptCorrectionsFocused: Bool
     @State private var micPermissionGranted = false
     @State private var showMutedHint = false
     @State private var copiedBuildInfo = false
@@ -737,6 +739,9 @@ struct GeneralSettingsView: View {
                 SettingsCard("Custom Vocabulary", icon: "text.book.closed.fill") {
                     vocabularySection
                 }
+                SettingsCard("Corrections", icon: "arrow.left.arrow.right") {
+                    transcriptCorrectionsSection
+                }
                 SettingsCard("Permissions", icon: "lock.shield.fill") {
                     permissionsSection
                 }
@@ -752,12 +757,14 @@ struct GeneralSettingsView: View {
             keyValidationError = nil
             successfulAPIConfiguration = nil
             customVocabularyInput = appState.customVocabulary
+            transcriptCorrectionsInput = appState.transcriptCorrections
             checkMicPermission()
             appState.refreshLaunchAtLoginStatus()
             Task { await githubCache.fetchIfNeeded() }
         }
         .onDisappear {
             apiDraft.dismiss()
+            commitTranscriptCorrections()
             commitCustomVocabulary()
         }
         .onChange(of: appState.committedAPIConfiguration) { saved in
@@ -1480,6 +1487,46 @@ struct GeneralSettingsView: View {
             Text("Separate entries with commas, new lines, or semicolons.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: Corrections
+
+    private func commitTranscriptCorrections() {
+        let trimmed = transcriptCorrectionsInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        if appState.transcriptCorrections != trimmed {
+            appState.transcriptCorrections = trimmed
+        }
+    }
+
+    private var transcriptCorrectionsSection: some View {
+        let parsed = TranscriptCorrectionParser.parse(transcriptCorrectionsInput)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Always replace words the transcription gets wrong. Applied on this Mac to every dictation, including when cleanup fails or Preserve exact wording is on. Not applied in Edit Mode or to voice macros.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextEditor(text: $transcriptCorrectionsInput)
+                .font(.system(.body, design: .monospaced))
+                .frame(minHeight: 80, maxHeight: 140)
+                .focused($transcriptCorrectionsFocused)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                )
+                .onChange(of: transcriptCorrectionsFocused) { focused in
+                    if !focused { commitTranscriptCorrections() }
+                }
+
+            Text("One rule per line: \"cloud code -> Claude Code\". Separate multiple heard forms with \"|\": \"cloud code | clod code -> Claude Code\". Matches whole words in any casing.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if parsed.invalidLineCount > 0 {
+                Text("\(parsed.invalidLineCount) line\(parsed.invalidLineCount == 1 ? "" : "s") ignored: each rule needs heard text, \"->\", and a replacement.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 

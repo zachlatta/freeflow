@@ -29,6 +29,7 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/RecordingCaptureTiming.swift \
 	Sources/RecordingTimerPreference.swift \
 	Sources/ShortcutCleanupPreference.swift \
+	Sources/TranscriptCorrectionCore.swift \
 	Sources/TranscriptionErrorPresentationCore.swift \
 	Sources/TranscriptTextCore.swift \
 	Sources/TemperatureCapabilityCache.swift \
