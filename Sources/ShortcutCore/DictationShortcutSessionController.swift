@@ -111,6 +111,9 @@ final class DictationShortcutSessionController {
     func beginManual(mode: RecordingTriggerMode) {
         reset()
         activeMode = mode
+        // No toggle shortcut press started this session (e.g. the menu bar
+        // button), so there is no release to wait for: the first press stops.
+        toggleStopArmed = (mode == .toggle)
     }
 
     func forceToggleMode() {
