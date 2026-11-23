@@ -18,6 +18,10 @@ struct ShortcutInputState: Equatable {
     var holdIsActive = false
     var toggleIsActive = false
     var copyAgainIsActive = false
+    /// Whether the Fn press currently down was claimed for the hold binding.
+    /// Decided on Fn down and kept until Fn up, so both edges of one press
+    /// get the same consume decision.
+    var fnPressIsClaimedByHold = false
 
     var currentModifiers: ShortcutModifiers {
         ShortcutBinding.modifiers(for: pressedModifierKeyCodes)
@@ -70,10 +74,16 @@ struct ShortcutMatchResult: Equatable {
 }
 
 enum ShortcutMatcher {
+    /// - Parameter claimFnHoldPress: Read only when a new Fn press starts.
+    ///   When true, the hold binding consumes that press like any other
+    ///   modifier instead of letting it reach macOS. Callers set it while a
+    ///   press is expected to belong to FreeFlow, such as the second press of
+    ///   a double tap.
     static func reduce(
         state: ShortcutInputState,
         event: ShortcutInputEvent,
-        configuration: ShortcutConfiguration
+        configuration: ShortcutConfiguration,
+        claimFnHoldPress: Bool = false
     ) -> ShortcutMatchResult {
         switch event {
         case .backendReset:
@@ -112,9 +122,16 @@ enum ShortcutMatcher {
             // observe Fn passively: quick taps reach the system Globe action,
             // sustained holds still drive hold-to-talk. Toggle bindings keep
             // consuming because a Fn tap is meaningful on both sides and the
-            // user chose Fn for it.
+            // user chose Fn for it. A press the caller claims (for example
+            // the second press of a double tap) is consumed for its whole
+            // down/up pair.
+            let isFnEvent = keyCode == ShortcutBinding.fnKeyCode
+            var nextState = state
+            if isFnEvent, isDown, !state.pressedModifierKeyCodes.contains(keyCode) {
+                nextState.fnPressIsClaimedByHold = claimFnHoldPress
+            }
             let consumeConfiguration =
-                keyCode == ShortcutBinding.fnKeyCode
+                isFnEvent && !nextState.fnPressIsClaimedByHold
                 ? configuration.withHoldBindingDisabled
                 : configuration
 
@@ -124,7 +141,6 @@ enum ShortcutMatcher {
                 configuration: consumeConfiguration
             )
 
-            var nextState = state
             if isDown {
                 nextState.pressedModifierKeyCodes.insert(keyCode)
             } else {
@@ -136,6 +152,9 @@ enum ShortcutMatcher {
                 state: nextState,
                 configuration: consumeConfiguration
             )
+            if isFnEvent, !isDown {
+                nextState.fnPressIsClaimedByHold = false
+            }
             let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
             return ShortcutMatchResult(
                 state: nextState,
@@ -186,6 +205,7 @@ enum ShortcutMatcher {
         var nextState = state
         nextState.pressedKeyCodes.removeAll()
         nextState.pressedModifierKeyCodes.removeAll()
+        nextState.fnPressIsClaimedByHold = false
         let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
         return ShortcutMatchResult(
             state: nextState,

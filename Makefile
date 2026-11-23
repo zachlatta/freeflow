@@ -36,7 +36,8 @@ TEST_PRODUCTION_SOURCES = \
 	Sources/UpdateManager.swift \
 	Sources/ShortcutCore/DictationShortcutSessionController.swift \
 	Sources/ShortcutCore/ShortcutMatcher.swift \
-	Sources/ShortcutCore/ShortcutModels.swift
+	Sources/ShortcutCore/ShortcutModels.swift \
+	Sources/ShortcutCore/ShortcutStartDelayPolicy.swift
 TEST_SOURCES = $(shell find Tests -name '*.swift' -type f | LC_ALL=C sort)
 SHELL_SCRIPTS = $(shell find .github/scripts .agents/skills -name '*.sh' -type f | LC_ALL=C sort)
 YAML_FILES = $(shell find .github -type f \( -name '*.yml' -o -name '*.yaml' \) | LC_ALL=C sort)

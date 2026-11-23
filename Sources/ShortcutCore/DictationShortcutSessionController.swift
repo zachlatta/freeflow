@@ -20,6 +20,14 @@ final class DictationShortcutSessionController {
     private var latchedByDoubleTap = false
     private var holdStopArmed = false
 
+    /// True while the next hold-shortcut press belongs to a double-tap session:
+    /// the second press that latches recording, or the press that stops a
+    /// latched recording. Those presses should not also reach macOS (for
+    /// example as an Fn/Globe action), unlike an ordinary first press.
+    var claimsHoldShortcutPresses: Bool {
+        awaitingDoubleTap || latchedByDoubleTap
+    }
+
     func handle(
         event: ShortcutEvent,
         isTranscribing: Bool,
