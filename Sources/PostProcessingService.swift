@@ -146,8 +146,7 @@ Behavior:
     private let defaultModelReasoningEffort = "low"
     private let postProcessingMaxCompletionTokens = 4096
     private var postProcessingTimeoutSeconds: TimeInterval {
-        let override = UserDefaults.standard.double(forKey: "post_processing_timeout_seconds")
-        return override > 0 ? override : 20
+        ConfiguredTimeout.seconds(forKey: "post_processing_timeout_seconds", defaultSeconds: 20)
     }
 
     init(
@@ -195,7 +194,7 @@ Behavior:
             }
 
             group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                try await Task.sleep(nanoseconds: ConfiguredTimeout.nanoseconds(for: timeoutSeconds))
                 throw PostProcessingError.requestTimedOut(timeoutSeconds)
             }
 
@@ -248,7 +247,7 @@ Behavior:
             }
 
             group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                try await Task.sleep(nanoseconds: ConfiguredTimeout.nanoseconds(for: timeoutSeconds))
                 throw PostProcessingError.requestTimedOut(timeoutSeconds)
             }
 
@@ -300,7 +299,7 @@ Behavior:
             }
 
             group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                try await Task.sleep(nanoseconds: ConfiguredTimeout.nanoseconds(for: timeoutSeconds))
                 throw PostProcessingError.requestTimedOut(timeoutSeconds)
             }
 

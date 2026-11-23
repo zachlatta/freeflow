@@ -64,8 +64,7 @@ class TranscriptionService {
         Self.responseFormat(forModel: transcriptionModel)
     }
     private var transcriptionTimeoutSeconds: TimeInterval {
-        let override = UserDefaults.standard.double(forKey: "transcription_timeout_seconds")
-        return override > 0 ? override : 20
+        ConfiguredTimeout.seconds(forKey: "transcription_timeout_seconds", defaultSeconds: 20)
     }
 
     init(
@@ -142,7 +141,7 @@ class TranscriptionService {
 
                 let timeoutTask = Task {
                     do {
-                        try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                        try await Task.sleep(nanoseconds: ConfiguredTimeout.nanoseconds(for: timeoutSeconds))
                         raceState.finish(.failure(TranscriptionError.transcriptionTimedOut(timeoutSeconds)))
                     } catch is CancellationError {
                     } catch {
