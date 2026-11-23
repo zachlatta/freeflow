@@ -1164,7 +1164,8 @@ final class AppState: ObservableObject, @unchecked Sendable {
             apiKey: resolvedTranscriptionAPIKey,
             baseURL: resolvedTranscriptionBaseURL,
             transcriptionModel: transcriptionModel,
-            language: resolvedTranscriptionLanguage
+            language: resolvedTranscriptionLanguage,
+            customVocabulary: customVocabulary
         )
     }
 
