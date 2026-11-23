@@ -4,6 +4,8 @@ enum ShortcutInputEvent: Equatable {
     case modifierChanged(keyCode: UInt16, isDown: Bool)
     case modifierSnapshot(Set<UInt16>)
     case keyChanged(keyCode: UInt16, isDown: Bool, isRepeat: Bool)
+    /// A non-primary mouse button press or release. `button` is zero-based.
+    case mouseButtonChanged(button: Int, isDown: Bool)
     case backendReset
 }
 
@@ -15,6 +17,10 @@ enum ShortcutConsumeDecision: Equatable {
 struct ShortcutInputState: Equatable {
     var pressedKeyCodes: Set<UInt16> = []
     var pressedModifierKeyCodes: Set<UInt16> = []
+    var pressedMouseButtons: Set<Int> = []
+    /// Buttons whose press was consumed; their release is consumed too so apps
+    /// never see an unpaired mouse-up, and nothing else is ever swallowed.
+    var consumedMouseButtons: Set<Int> = []
     var holdIsActive = false
     var toggleIsActive = false
     var copyAgainIsActive = false
@@ -32,6 +38,13 @@ struct ShortcutInputState: Equatable {
             return isHoldKey || isToggleKey || isCopyAgainKey
         }
         if keyReferenceHeld {
+            return true
+        }
+
+        let mouseReferenceHeld = [configuration.hold, configuration.toggle, configuration.copyAgain].contains {
+            $0.kind == .mouseButton && pressedMouseButtons.contains(Int($0.keyCode))
+        }
+        if mouseReferenceHeld {
             return true
         }
 
@@ -149,7 +162,49 @@ enum ShortcutMatcher {
                 emittedEvents: emittedEvents,
                 consumeDecision: (shouldConsumeBefore || shouldConsumeAfter) ? .consume : .passthrough
             )
+
+        case .mouseButtonChanged(let button, let isDown):
+            return reduceMouseButton(button, isDown: isDown, state: state, configuration: configuration)
         }
+    }
+
+    /// Mouse events are consumed only when they press a bound button whose
+    /// binding (including its exact modifiers) becomes active, and on the
+    /// matching release. Every other mouse event passes through untouched.
+    private static func reduceMouseButton(
+        _ button: Int,
+        isDown: Bool,
+        state: ShortcutInputState,
+        configuration: ShortcutConfiguration
+    ) -> ShortcutMatchResult {
+        var nextState = state
+        let consume: Bool
+        if isDown {
+            nextState.pressedMouseButtons.insert(button)
+            let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
+            consume = relevantMouseBindings(for: button, configuration: configuration).contains {
+                bindingIsActive($0, state: nextState, configuration: configuration)
+            }
+            if consume {
+                nextState.consumedMouseButtons.insert(button)
+            } else {
+                nextState.consumedMouseButtons.remove(button)
+            }
+            return ShortcutMatchResult(
+                state: nextState,
+                emittedEvents: emittedEvents,
+                consumeDecision: consume ? .consume : .passthrough
+            )
+        }
+
+        nextState.pressedMouseButtons.remove(button)
+        consume = nextState.consumedMouseButtons.remove(button) != nil
+        let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
+        return ShortcutMatchResult(
+            state: nextState,
+            emittedEvents: emittedEvents,
+            consumeDecision: consume ? .consume : .passthrough
+        )
     }
 
     private static func reduceBackendReset(
@@ -159,6 +214,8 @@ enum ShortcutMatcher {
         var nextState = state
         nextState.pressedKeyCodes.removeAll()
         nextState.pressedModifierKeyCodes.removeAll()
+        nextState.pressedMouseButtons.removeAll()
+        nextState.consumedMouseButtons.removeAll()
         let emittedEvents = updateActiveBindings(in: &nextState, configuration: configuration)
         return ShortcutMatchResult(
             state: nextState,
@@ -229,7 +286,7 @@ enum ShortcutMatcher {
         state: ShortcutInputState,
         configuration: ShortcutConfiguration
     ) -> Bool {
-        guard !binding.isDisabled else { return false }
+        guard !binding.isDisabled, binding.isSupported else { return false }
         let activeModifiers = state.currentModifiers
         guard binding.modifiersAreActive(
             pressedModifierKeyCodes: state.pressedModifierKeyCodes,
@@ -246,6 +303,8 @@ enum ShortcutMatcher {
             return state.pressedKeyCodes.contains(binding.keyCode)
         case .modifierKey:
             return state.pressedModifierKeyCodes.contains(binding.keyCode)
+        case .mouseButton:
+            return state.pressedMouseButtons.contains(Int(binding.keyCode))
         }
     }
 
@@ -278,6 +337,15 @@ enum ShortcutMatcher {
         }
     }
 
+    private static func relevantMouseBindings(
+        for button: Int,
+        configuration: ShortcutConfiguration
+    ) -> [ShortcutBinding] {
+        [configuration.hold, configuration.toggle, configuration.copyAgain].filter { binding in
+            binding.kind == .mouseButton && Int(binding.keyCode) == button
+        }
+    }
+
     private static func relevantModifierBindings(
         for keyCode: UInt16,
         configuration: ShortcutConfiguration
@@ -286,7 +354,8 @@ enum ShortcutMatcher {
             switch binding.kind {
             case .key, .modifierKey:
                 return modifierEvent(for: keyCode, affects: binding)
-            case .disabled:
+            case .disabled, .mouseButton:
+                // Modifier presses are never swallowed for mouse bindings.
                 return false
             }
         }
@@ -316,7 +385,7 @@ private extension ShortcutBinding {
             return false
         }
 
-        guard let exactModifierKeyCodes = exactModifierKeyCodes else {
+        guard let exactModifierKeyCodes = effectiveExactModifierKeyCodes else {
             return true
         }
 

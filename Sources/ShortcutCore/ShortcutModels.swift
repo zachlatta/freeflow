@@ -38,6 +38,8 @@ enum ShortcutBindingKind: String, Codable {
     case disabled
     case key
     case modifierKey
+    /// `keyCode` holds the zero-based mouse button number (`2` = middle).
+    case mouseButton
 }
 
 enum RecordingTriggerMode: String, Codable {
@@ -195,11 +197,26 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
 
     var usesFnKey: Bool {
         guard !isDisabled else { return false }
-        return keyCode == 63 || modifiers.contains(.function)
+        return (kind != .mouseButton && keyCode == 63) || modifiers.contains(.function)
     }
 
     var requiresExactModifierMatch: Bool {
-        kind == .modifierKey || exactModifierKeyCodes != nil
+        kind == .modifierKey || kind == .mouseButton || exactModifierKeyCodes != nil
+    }
+
+    /// False for bindings that must never be honored, such as a stored or
+    /// crafted mouse binding for the left or right button.
+    var isSupported: Bool {
+        guard kind == .mouseButton else { return true }
+        return Self.isSupportedMouseButton(Int(keyCode))
+    }
+
+    /// Modifier key codes that must match exactly, or nil for a superset match.
+    /// Mouse bindings always match exactly so that, for example, Cmd + middle
+    /// click is never captured by a bare middle-click binding.
+    var effectiveExactModifierKeyCodes: Set<UInt16>? {
+        if let exactModifierKeyCodes { return exactModifierKeyCodes }
+        return kind == .mouseButton ? Self.exactModifierKeyCodes(for: modifiers) : nil
     }
 
     func withAddedModifiers(_ extraModifiers: ShortcutModifiers) -> ShortcutBinding {
@@ -303,9 +320,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
         switch kind {
         case .disabled:
             return false
-        case .key:
-            return keyCode == other.keyCode
-        case .modifierKey:
+        case .key, .modifierKey, .mouseButton:
             return keyCode == other.keyCode
         }
     }
@@ -316,7 +331,7 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             return false
         }
 
-        if let exactModifierKeyCodes = exactModifierKeyCodes,
+        if let exactModifierKeyCodes = effectiveExactModifierKeyCodes,
            !Self.exactModifierKeyCodesMatch(
             pressedModifierKeyCodes,
             exactModifierKeyCodes: exactModifierKeyCodes
@@ -331,6 +346,8 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
             return true
         case .modifierKey:
             return pressedModifierKeyCodes.contains(keyCode)
+        case .mouseButton:
+            return isSupported
         }
     }
 
@@ -345,6 +362,37 @@ struct ShortcutBinding: Codable, Hashable, Identifiable, Equatable {
     static let defaultToggle = ShortcutPreset.fnKey.binding.withAddedModifiers(.command)
 
     static let modifierKeyCodes: Set<UInt16> = [54, 55, 56, 58, 59, 60, 61, 62, 63]
+
+    /// Zero-based button numbers: 0 is the primary (left) click and 1 is the
+    /// secondary (right) click. Both are reserved for normal clicking and can
+    /// never be bound; middle (2) and extra side buttons (3+) can.
+    static let minimumMouseButtonNumber = 2
+    static let maximumMouseButtonNumber = 31
+
+    static func isSupportedMouseButton(_ buttonNumber: Int) -> Bool {
+        (minimumMouseButtonNumber...maximumMouseButtonNumber).contains(buttonNumber)
+    }
+
+    static func mouseButtonDisplayLabel(for buttonNumber: Int) -> String {
+        buttonNumber == 2 ? "Middle Click" : "Mouse Button \(buttonNumber + 1)"
+    }
+
+    /// Builds a mouse-button binding from a captured press. Returns nil for the
+    /// left and right buttons and for out-of-range button numbers.
+    static func fromMouseButton(
+        _ buttonNumber: Int,
+        pressedModifierKeyCodes: Set<UInt16>
+    ) -> ShortcutBinding? {
+        guard isSupportedMouseButton(buttonNumber) else { return nil }
+        return ShortcutBinding(
+            keyCode: UInt16(buttonNumber),
+            keyDisplay: mouseButtonDisplayLabel(for: buttonNumber),
+            modifiers: modifiers(for: pressedModifierKeyCodes),
+            kind: .mouseButton,
+            preset: nil,
+            exactModifierKeyCodes: normalizedExactModifierKeyCodes(pressedModifierKeyCodes)
+        )
+    }
 
     static func logicalModifier(forKeyCode keyCode: UInt16) -> ShortcutModifiers? {
         switch keyCode {

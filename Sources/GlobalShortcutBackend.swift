@@ -44,7 +44,11 @@ final class GlobalShortcutBackend {
         let eventMask = [
             CGEventType.flagsChanged,
             CGEventType.keyDown,
-            CGEventType.keyUp
+            CGEventType.keyUp,
+            // Only "other" buttons (middle and side). Left and right clicks are
+            // never tapped, so they can never be delayed or swallowed.
+            CGEventType.otherMouseDown,
+            CGEventType.otherMouseUp
         ].reduce(CGEventMask(0)) { partialResult, eventType in
             partialResult | (CGEventMask(1) << eventType.rawValue)
         }
@@ -128,6 +132,10 @@ final class GlobalShortcutBackend {
 
             return shouldConsume ? nil : Unmanaged.passUnretained(event)
 
+        case .otherMouseDown, .otherMouseUp:
+            let shouldConsume = handleOtherMouse(event, isDown: type == .otherMouseDown)
+            return shouldConsume ? nil : Unmanaged.passUnretained(event)
+
         default:
             return Unmanaged.passUnretained(event)
         }
@@ -163,6 +171,14 @@ final class GlobalShortcutBackend {
             .keyChanged(keyCode: event.keyCode, isDown: true, isRepeat: event.isARepeat)
         ) ?? .passthrough
         return snapshotDecision == .consume || keyDecision == .consume
+    }
+
+    private func handleOtherMouse(_ event: CGEvent, isDown: Bool) -> Bool {
+        let button = Int(event.getIntegerValueField(.mouseEventButtonNumber))
+        guard ShortcutBinding.isSupportedMouseButton(button) else { return false }
+        // Modifier state comes from tracked flagsChanged events: mouse event
+        // flags are not relied on for left/right-side modifier bits.
+        return onInputEvent?(.mouseButtonChanged(button: button, isDown: isDown)) == .consume
     }
 
     private func handleKeyUp(_ event: NSEvent) -> Bool {
