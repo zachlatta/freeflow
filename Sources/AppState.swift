@@ -393,6 +393,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         didSet {
             UserDefaults.standard.set(isCommandModeEnabled, forKey: commandModeEnabledStorageKey)
             restartHotkeyMonitoring()
+            updateInsertionAccessibilityPreparation()
         }
     }
 
@@ -1799,12 +1800,16 @@ final class AppState: ObservableObject, @unchecked Sendable {
 
     private func updateInsertionAccessibilityPreparation() {
         insertionAccessibilityCancellable = nil
-        guard shouldMonitorHotkeys, originalFieldInsertionEnabled else { return }
+        guard shouldMonitorHotkeys, originalFieldInsertionEnabled || isCommandModeEnabled else { return }
         insertionAccessibilityCancellable = NSWorkspace.shared.notificationCenter
             .publisher(for: NSWorkspace.didActivateApplicationNotification)
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.prepareForegroundApplicationForInsertion() }
+            .sink { [weak self] _ in
+                self?.prepareForegroundApplicationForInsertion()
+                self?.prepareForegroundApplicationForEditMode()
+            }
         prepareForegroundApplicationForInsertion()
+        prepareForegroundApplicationForEditMode()
     }
 
     /// A role query lets Electron expose its editor before the start-time snapshot, without reading text.
@@ -1814,6 +1819,28 @@ final class AppState: ObservableObject, @unchecked Sendable {
         let processIdentifier = app.processIdentifier
         insertionAccessibilityQueue.async {
             AppTextInsertionTarget.prepareAccessibility(processIdentifier: processIdentifier)
+        }
+    }
+
+    /// Opts Chromium/Electron into their lazy trees on activation, so the shortcut's selection read
+    /// never has to wait for the tree to build.
+    private func prepareForegroundApplicationForEditMode() {
+        guard shouldMonitorHotkeys, isCommandModeEnabled, AXIsProcessTrusted(),
+              let app = NSWorkspace.shared.frontmostApplication else { return }
+        prepareLazyAccessibilityTree(for: app)
+    }
+
+    /// Off the shortcut path; affects later selection reads only, never the snapshot already taken.
+    private func prepareLazyAccessibilityTree(for app: NSRunningApplication) {
+        let processIdentifier = app.processIdentifier
+        let bundleIdentifier = app.bundleIdentifier
+        let bundleURL = app.bundleURL
+        insertionAccessibilityQueue.async {
+            LazyAccessibilityActivation.activate(
+                processIdentifier: processIdentifier,
+                bundleIdentifier: bundleIdentifier,
+                bundleURL: bundleURL
+            )
         }
     }
 
@@ -2041,6 +2068,7 @@ final class AppState: ObservableObject, @unchecked Sendable {
         textInsertionTargetID = nil
         cancelPendingShortcutStart(resetMode: false)
         pendingSelectionSnapshot = contextService.collectSelectionSnapshot(captureInsertionTarget: originalFieldInsertionEnabled)
+        rearmLazyAccessibilityTreeIfSelectionMissing(pendingSelectionSnapshot)
         pendingManualCommandInvocation = hotkeyManager.currentPressedModifiers.contains(
             commandModeManualModifier.shortcutModifier
         )
@@ -2067,6 +2095,14 @@ final class AppState: ObservableObject, @unchecked Sendable {
                 self.startRecording(triggerMode: pendingMode, cleanupOrigin: .shortcut(pendingMode))
             }
         }
+    }
+
+    /// An unreadable selection means the tree was not ready; re-opt in asynchronously for the next press.
+    private func rearmLazyAccessibilityTreeIfSelectionMissing(_ snapshot: AppSelectionSnapshot?) {
+        guard isCommandModeEnabled, snapshot?.selectedText == nil,
+              let app = NSWorkspace.shared.frontmostApplication,
+              app.bundleIdentifier == snapshot?.bundleIdentifier else { return }
+        prepareLazyAccessibilityTree(for: app)
     }
 
     private func cancelPendingShortcutStart(resetMode: Bool = true) {
