@@ -19,7 +19,22 @@ enum RealtimeTranscriptionError: LocalizedError {
     }
 }
 
-final class RealtimeTranscriptionService {
+/// The subset of `URLSessionWebSocketTask` the realtime service uses. A
+/// protocol seam lets deterministic tests drive the service with a local fake
+/// socket instead of a live provider.
+protocol RealtimeWebSocketTask: AnyObject {
+    func resume()
+    func send(
+        _ message: URLSessionWebSocketTask.Message,
+        completionHandler: @escaping @Sendable (Error?) -> Void
+    )
+    func receive() async throws -> URLSessionWebSocketTask.Message
+    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
+}
+
+extension URLSessionWebSocketTask: RealtimeWebSocketTask {}
+
+final class RealtimeTranscriptionService: RealtimeTranscriptFinalizing {
     struct Configuration {
         let baseURL: String
         let apiKey: String
@@ -28,9 +43,9 @@ final class RealtimeTranscriptionService {
     }
 
     private let config: Configuration
-    private let session: URLSession
+    private let makeWebSocketTask: (URLRequest) -> RealtimeWebSocketTask
     private let finalizationTimeoutNanoseconds: UInt64
-    private var task: URLSessionWebSocketTask?
+    private var task: RealtimeWebSocketTask?
     private var receiveTask: Task<Void, Never>?
 
     private let stateQueue = DispatchQueue(label: "com.zachlatta.freeflow.realtime.state")
@@ -50,15 +65,31 @@ final class RealtimeTranscriptionService {
     /// events — useful for a live overlay readout.
     var onPartialUpdate: ((String) -> Void)?
 
-    init(
+    convenience init(
         config: Configuration,
         session: URLSession = .shared,
         finalizationTimeoutNanoseconds: UInt64 = 10_000_000_000
     ) {
-        self.config = config
-        self.session = session
-        self.finalizationTimeoutNanoseconds = finalizationTimeoutNanoseconds
+        self.init(
+            config: config,
+            finalizationTimeoutNanoseconds: finalizationTimeoutNanoseconds,
+            makeWebSocketTask: { session.webSocketTask(with: $0) }
+        )
     }
+
+    init(
+        config: Configuration,
+        finalizationTimeoutNanoseconds: UInt64,
+        makeWebSocketTask: @escaping (URLRequest) -> RealtimeWebSocketTask
+    ) {
+        self.config = config
+        self.finalizationTimeoutNanoseconds = finalizationTimeoutNanoseconds
+        self.makeWebSocketTask = makeWebSocketTask
+    }
+
+    /// Test seam: called once the finalization wait is installed, after the
+    /// commit was sent and no terminal result was available yet.
+    var onFinalizationWaitRegistered: (() -> Void)?
 
     // MARK: Lifecycle
 
@@ -76,7 +107,7 @@ final class RealtimeTranscriptionService {
             request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
         }
 
-        let task = session.webSocketTask(with: request)
+        let task = makeWebSocketTask(request)
         stateQueue.sync {
             self.task = task
         }
@@ -92,7 +123,7 @@ final class RealtimeTranscriptionService {
     /// Cancel the socket and any in-flight receive. Safe to call multiple times.
     func cancel() {
         let (currentTask, pendingAwaiter): (
-            URLSessionWebSocketTask?,
+            RealtimeWebSocketTask?,
             RealtimeFinalizationAwaiter?
         ) = stateQueue.sync {
             let currentTask = task
@@ -114,7 +145,7 @@ final class RealtimeTranscriptionService {
     /// (the service declares 24 kHz mono in `session.update`, matching the
     /// OpenAI Realtime default).
     func appendPCM16(_ data: Data) {
-        let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+        let currentTask: RealtimeWebSocketTask? = stateQueue.sync {
             task
         }
         guard let currentTask, !data.isEmpty else { return }
@@ -128,7 +159,7 @@ final class RealtimeTranscriptionService {
 
     /// Signal end-of-input, wait for the final transcript, return it.
     func commitAndAwaitFinal() async throws -> String {
-        let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+        let currentTask: RealtimeWebSocketTask? = stateQueue.sync {
             task
         }
         guard let currentTask else {
@@ -146,7 +177,8 @@ final class RealtimeTranscriptionService {
         }
 
         let awaiter = RealtimeFinalizationAwaiter(
-            timeoutNanoseconds: finalizationTimeoutNanoseconds
+            timeoutNanoseconds: finalizationTimeoutNanoseconds,
+            onContinuationRegistered: onFinalizationWaitRegistered
         )
         var immediateResult: Result<String, Error>?
         stateQueue.sync {
@@ -197,7 +229,7 @@ final class RealtimeTranscriptionService {
 
     private func receiveLoop() async {
         while !Task.isCancelled {
-            let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+            let currentTask: RealtimeWebSocketTask? = stateQueue.sync {
                 task
             }
             guard let currentTask else { break }
@@ -332,7 +364,7 @@ final class RealtimeTranscriptionService {
 
     // MARK: Send helpers
 
-    private func send(_ payload: [String: Any], over task: URLSessionWebSocketTask) {
+    private func send(_ payload: [String: Any], over task: RealtimeWebSocketTask) {
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let text = String(data: data, encoding: .utf8) else {
             return
@@ -345,7 +377,7 @@ final class RealtimeTranscriptionService {
     }
 
     private func sendSessionUpdate() {
-        let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+        let currentTask: RealtimeWebSocketTask? = stateQueue.sync {
             task
         }
         guard let currentTask else { return }
@@ -422,7 +454,7 @@ final class RealtimeTranscriptionService {
             pendingResume = (finalAwaiter, finalText)
         }
         if let (awaiter, text) = pendingResume {
-            let currentTask: URLSessionWebSocketTask? = stateQueue.sync {
+            let currentTask: RealtimeWebSocketTask? = stateQueue.sync {
                 task
             }
             currentTask?.cancel(with: .normalClosure, reason: nil)

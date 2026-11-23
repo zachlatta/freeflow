@@ -17,21 +17,28 @@ final class RealtimeFinalizationAwaiter {
     private var continuation: CheckedContinuation<String, Error>?
     private var completedResult: Result<String, Error>?
     private var deadlineTask: Task<Void, Never>?
+    private let onContinuationRegistered: (() -> Void)?
 
-    init(timeoutNanoseconds: UInt64) {
+    /// - Parameter onContinuationRegistered: Test seam invoked (outside the
+    ///   lock) after a waiter's continuation and deadline are installed, so
+    ///   tests can cancel or resolve a registered wait without racing sleeps.
+    init(timeoutNanoseconds: UInt64, onContinuationRegistered: (() -> Void)? = nil) {
         self.timeoutNanoseconds = timeoutNanoseconds
+        self.onContinuationRegistered = onContinuationRegistered
     }
 
     func wait() async throws -> String {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 var immediateResult: Result<String, Error>?
+                var registered = false
 
                 lock.lock()
                 if let completedResult {
                     immediateResult = completedResult
                 } else {
                     self.continuation = continuation
+                    registered = true
                     deadlineTask = Task { [weak self] in
                         do {
                             try await Task.sleep(nanoseconds: self?.timeoutNanoseconds ?? 0)
@@ -45,6 +52,8 @@ final class RealtimeFinalizationAwaiter {
 
                 if let immediateResult {
                     continuation.resume(with: immediateResult)
+                } else if registered {
+                    onContinuationRegistered?()
                 }
             }
         } onCancel: {

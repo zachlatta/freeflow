@@ -12,6 +12,7 @@ enum RealtimeFinalizationAwaiterTests {
             await testSuccessResolvedBeforeWaitIgnoresLaterResults()
             await testErrorResolvedBeforeWaitIgnoresLaterResults()
             await testAlreadyCancelledWaitRemainsCancellation()
+            await testCancellationAfterContinuationRegistration()
             finished.signal()
         }
         finished.wait()
@@ -92,6 +93,42 @@ enum RealtimeFinalizationAwaiterTests {
         do {
             _ = try await waitTask.value
             TestSupport.expect(false, "Expected the cancelled wait to throw")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            TestSupport.expect(false, "Expected CancellationError, got \(error)")
+        }
+
+        awaiter.resolve(.success("synthetic late transcript"))
+        awaiter.resolve(.failure(RealtimeFinalizationError.timedOut))
+        do {
+            _ = try await awaiter.wait()
+            TestSupport.expect(false, "Late results must not replace cancellation")
+        } catch is CancellationError {
+            // The original cancellation remains terminal.
+        } catch {
+            TestSupport.expect(false, "Expected the original CancellationError, got \(error)")
+        }
+    }
+
+    private static func testCancellationAfterContinuationRegistration() async {
+        let registered = TestAsyncSignal()
+        // A 60 s deadline cannot win; the explicit registration signal is the
+        // only synchronization between the waiter and the cancellation.
+        let awaiter = RealtimeFinalizationAwaiter(
+            timeoutNanoseconds: 60_000_000_000,
+            onContinuationRegistered: { registered.signal() }
+        )
+        let waitTask = Task {
+            try await awaiter.wait()
+        }
+
+        await registered.wait()
+        waitTask.cancel()
+
+        do {
+            _ = try await waitTask.value
+            TestSupport.expect(false, "Expected the registered wait to be cancelled")
         } catch is CancellationError {
             // Expected.
         } catch {
